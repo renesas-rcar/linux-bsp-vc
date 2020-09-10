@@ -1,0 +1,11 @@
+# A. Kamal (VCFPGA)
+#
+# Renesas R-SWITCH. FPGA Debug device configuration
+#
+
+config RENESAS_VCFPGA_PLATFORM
+	tristate "Renesas VC FPGA PLATFORM. FPGA PCI support"
+	default n
+	---help---
+	  Renesas VC FPGA PLATFORM for PCI. Compile as a module
+# A. Kamal (VCFPGA)
