@@ -3,7 +3,7 @@
 
     Provide APIs to Network Interface Part of Ethernet Driver
 
-    @bugs: Frame Corruption issue
+    @bugs/issues: Autoneg not working 
 
     @notes
 
@@ -67,7 +67,7 @@
 #include <linux/renesas_rswitch2_platform.h>
 #include <linux/renesas_vc2_platform.h>
 
-#define DEBUG 1
+//#define DEBUG 1
 
 //#define PHY_CONFIG_SUPPORT
 #define BOARD_VC3
@@ -77,11 +77,13 @@
 #define RSWITCH2_ETH_CTRL_MINOR  (127)
 #define PHY_SEL_MUX  0x01004CC0
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
+#define RSWITCH2_PROC_ROOT_DIR "rswitch2"
 #define RSWITCH2_ETH_PROC_FILE_DRIVER  "ethdriver"
 #define RSWITCH2_ETH_PROC_FILE_ERRORS   "etherrors"
 #define RSWITCH2_ETH_PROC_FILE_COUNTERS "ethcounters"
 #define RSWITCH2_ETH_PROC_FILE_TX       "tx"
 #define RSWITCH2_ETH_PROC_FILE_RX       "rx"
+#define FUTURE_USE 
 #endif
 /***************************************Global Variables Start ****************************************************************/
 DEFINE_SPINLOCK(port_lock);
@@ -94,15 +96,14 @@ u32 desc_bat_size;
 u32 tx_ts_desc_bat_size;
 dma_addr_t desc_bat_dma;
 dma_addr_t tx_desc_dma[NUM_TX_QUEUE];
-dma_addr_t tx_desc_bat_dma[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE ];
-dma_addr_t gtx_desc_bat_dma[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE];
+
 static struct rswitch2_ext_ts_desc *desc_end[NUM_RX_QUEUE];
 dma_addr_t rx_desc_bat_dma[NUM_RX_QUEUE];
 dma_addr_t rx_desc_dma[NUM_RX_QUEUE];
 struct rswitch2_ext_ts_desc *rx_desc_bat[NUM_RX_QUEUE];
 struct sk_buff **rx_skb[NUM_RX_QUEUE];
 u32 rx_desc_bat_size;
-u32 num_rx_ring[NUM_RX_QUEUE];
+u32 num_rx_ring[NUM_RX_QUEUE + 1];
 u32 cur_rx[NUM_RX_QUEUE];   /* Consumer ring indices */
 u32 dirty_rx[NUM_RX_QUEUE]; /* Producer ring indices */
 struct rswitch2_ext_ts_desc *rx_ring[NUM_RX_QUEUE];
@@ -129,16 +130,16 @@ static const struct of_device_id rswitch2_of_tbl[] = {
     { }	/* terminate list */
 };
 
-
+struct proc_dir_entry *root_dir;
 struct work_struct workq;
 #ifdef FUTURE_USE
-static u32 board_type = RENESAS_VC2;
+//static u32 board_type = RENESAS_VC2;
 #endif
 static const char rswitch2_priv_flags[][ETH_GSTRING_LEN] = {
     "master-phy",
 };
 
-
+static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u32 master);
 /*
     Interrupts
 */
@@ -414,6 +415,8 @@ static void port_query_mac_address(struct net_device * ndev)
 static u32 port_get_priv_flags(struct net_device *ndev)
 {
     struct port_private * mdp = netdev_priv(ndev);
+    phy_write(ndev->phydev, 0x1F, 0x0);
+    mdp->priv_flags = phy_read(ndev->phydev, 0x9) == 0x800? 1:0;
     if(mdp->priv_flags) {
         printk("Master Mode Phy \n");
     } else {
@@ -439,12 +442,13 @@ static int port_set_priv_flags(struct net_device *ndev, u32 flags)
     mdp->priv_flags = flags;
 
     if(mdp->priv_flags) {
-
-        phy_write(ndev->phydev, 0x1F, 0x0);
-        phy_write(ndev->phydev, 0x9, 0x800);
+        phydev_disable_bcast_seterrata(ndev,100, 1);
+        //phy_write(ndev->phydev, 0x1F, 0x0);
+        //phy_write(ndev->phydev, 0x9, 0x800);
     } else {
-        phy_write(ndev->phydev, 0x1F, 0x0);
-        phy_write(ndev->phydev, 0x9, 0x00);
+        phydev_disable_bcast_seterrata(ndev,100, 0);
+        //phy_write(ndev->phydev, 0x1F, 0x0);
+        //phy_write(ndev->phydev, 0x9, 0x00);
     }
 
     return 0;
@@ -501,13 +505,65 @@ static int port_get_sset_count(struct net_device *dev, int sset)
     }
 }
 
+static int port_set_settings(struct net_device * ndev, const struct ethtool_link_ksettings * ecmd)
+{
+
+    struct port_private * mdp = netdev_priv(ndev);
+    int                     ret = 0;
+
+    if (NOT mdp->opened)
+    {
+        return -EAGAIN;
+    }
+
+    if (ndev->phydev != NULL)
+    {
+        //spin_lock_irqsave(&port_lock, flags);
+        
+        
+ 
+        mdelay(1);
+        if(ecmd->base.speed == 100) {
+            port_changestate(ndev, rswitch2_portstate_disable);
+            port_changestate(ndev, rswitch2_portstate_config);
+            portreg_write(ndev, (0x01130000 + 0x0b), MPIC);
+            port_changestate(ndev, rswitch2_portstate_operate);
+            phydev_disable_bcast_seterrata(ndev,100,mdp->priv_flags);
+        }
+        else if(ecmd->base.speed == 1000) {
+            
+            port_changestate(ndev, rswitch2_portstate_disable);
+            port_changestate(ndev, rswitch2_portstate_config);
+            portreg_write(ndev, (0x01130000 + 0x13), MPIC);
+            port_changestate(ndev, rswitch2_portstate_operate);
+            phydev_disable_bcast_seterrata(ndev,1000,mdp->priv_flags);
+        }
+        ret = phy_ethtool_set_link_ksettings(ndev, ecmd);
+        if (ret != 0)
+        {
+            mdelay(1);
+            //spin_unlock_irqrestore(&port_lock, flags);
+            return ret;
+        }
+        
+        //spin_unlock_irqrestore(&port_lock, flags);
+    }
+    else
+    {
+        printk("[RSWITCH2] ERROR: %s is not open \n", ndev->name);
+        return -EOPNOTSUPP;
+    }
+    return 0;
+}
+
 /**
     @brief  ethtool operations
 */
 static const struct ethtool_ops     port_ethtool_ops = {
 
     .get_link_ksettings	= phy_ethtool_get_link_ksettings,
-    .set_link_ksettings	= phy_ethtool_set_link_ksettings,
+    .set_link_ksettings	= port_set_settings,
+    //.set_settings       = port_set_settings,
     .get_strings        = port_get_strings,
     .get_sset_count     = port_get_sset_count,
     .get_priv_flags	= port_get_priv_flags,
@@ -528,11 +584,62 @@ static const struct ethtool_ops     port_ethtool_ops = {
 static int port_dev_init(struct net_device * ndev)
 {
     int                     ret = 0;
+    u32   priority = 0;
     /* Enable Promiscous mode */
     portreg_write(ndev, 0x00070007, MRAFC);
     /* Set MAC address */
     port_set_mac_address(ndev);
+    /* Set Maximum Queue Depth */
+    for(priority = 0; priority < RSWITCH2_MAX_CTAG_PCP; priority++) {
+        portreg_write(ndev, 0x7FF, (EATDQDC0 + (priority * 4)));
+    }
     return ret;
+}
+/**
+    @brief  Set Port Speed
+
+    @param  ndev    net_device for the individual switch port device 
+*/
+static void port_set_rate(struct net_device * ndev)
+{
+    struct port_private * mdp = netdev_priv(ndev);
+    
+    
+    
+    
+    
+    
+    switch (mdp->speed)
+    {
+        case 100:       /* 100BASE */
+            
+            
+            port_changestate(ndev, rswitch2_portstate_config);
+            portreg_write(ndev, (0x01130000 + 0x0b), MPIC);
+            port_changestate(ndev, rswitch2_portstate_operate);
+            if(mdp->portindex !=5 ){
+            /* Software reset Phy can be in PDWN mode*/
+            //phy_write(ndev->phydev,0, 0x8000);
+                phydev_disable_bcast_seterrata(ndev,100, port_get_priv_flags(ndev));
+            }  
+            break;
+        case 1000:      /* 1000BASE */
+            port_changestate(ndev, rswitch2_portstate_config);
+            portreg_write(ndev, (0x01130000 + 0x13), MPIC);
+            port_changestate(ndev, rswitch2_portstate_operate);
+            if(mdp->portindex !=5 ){
+            /* Software reset Phy can be in PDWN mode*/
+            //phy_write(ndev->phydev,0, 0x8000);
+                phydev_disable_bcast_seterrata(ndev,1000, port_get_priv_flags(ndev));
+            }  
+            
+            break;
+        default:
+            printk("[RSWITCH2] %s Cannot set speed %uMBit - not supported\n", ndev->name, mdp->speed);
+    }
+    
+    
+
 }
 
 
@@ -548,13 +655,13 @@ static void port_phy_eventhandler(struct net_device * ndev)
 {
     struct port_private   * mdp = netdev_priv(ndev);
     struct phy_device     * phydev = mdp->phydev;
-
     int    new_state = false;
-
+    //printk("In phy handler with Phy link = %d \n", phydev->link);
     if (phydev->link > PHY_DOWN) {
         if (phydev->speed != mdp->speed) {
             new_state = true;
             mdp->speed = phydev->speed;
+            port_set_rate(ndev);
 
         }
         if (mdp->link == PHY_DOWN) {
@@ -572,7 +679,7 @@ static void port_phy_eventhandler(struct net_device * ndev)
     }
 
     if ( (new_state) AND (netif_msg_link(mdp)) ) {
-        if(phydev->speed == 0xffffffff) {
+        if((phydev->speed == 0xffffffff) ||(phydev->duplex != DUPLEX_FULL)) {
             phydev->link = false;
             mdp->link = false;
 
@@ -609,7 +716,9 @@ static int rswitch2_phy_init(struct device_node *child, struct net_device *ndev)
     int     mdio_val = 0;
     int err;
 
-
+    priv->link = 0;
+    priv->speed = 0;
+    priv->duplex = -1;
 
     pn = of_parse_phandle(child, "phy-handle", 0);
     if (!pn) {
@@ -633,11 +742,13 @@ static int rswitch2_phy_init(struct device_node *child, struct net_device *ndev)
         goto err_deregister_fixed_link;
     }
     phydev->irq = PHY_POLL;
-
-
+   
+    phy_set_max_speed(phydev, SPEED_1000);
+    
+    phydev->supported = PHY_1000BT_FEATURES | PHY_100BT_FEATURES| SUPPORTED_Autoneg;
     /* 10BASE is not supported */
     phydev->supported &= ~PHY_10BT_FEATURES;
-
+    //phydev->supported &= ~SUPPORTED_100baseT_Half;
     phy_attached_info(phydev);
     priv->phydev = phydev;
     priv->phydev->autoneg =0;
@@ -681,6 +792,22 @@ static int port_open(struct net_device * ndev)
     struct port_private * mdp = netdev_priv(ndev);
     int     ret = 0;
     static int port_count = 0;
+#ifdef INTERNAL_GW
+    if(mdp->portnumber == board_config.eth_ports) {
+        napi_enable(&mdp->napi[0]);
+        printk("Napi Enabled for GW Port \n");
+        netif_start_queue(ndev);
+
+        mdp->opened = true;
+        if(port_count == 0) {
+            rswitch2_enable_interrupts();
+            port_count++;
+        }
+
+        return ret;
+    }
+#endif
+
     napi_enable(&mdp->napi[0]);
     napi_enable(&mdp->napi[1]);
     /* device init */
@@ -691,6 +818,7 @@ static int port_open(struct net_device * ndev)
     }
 
     // Change Port from CONFIG to OPERATE mode
+    printk("Board Variant=%d portindex=%d",board_variant, mdp->portindex);
     ret = port_changestate(ndev, rswitch2_portstate_operate);
     if(ret < 0) {
         printk("Port Change State to Operate Failed \n");
@@ -699,10 +827,23 @@ static int port_open(struct net_device * ndev)
     netif_start_queue(ndev);
     mdp->opened = true;
     //ndev->phydev->state = PHY_UP;
+    
     if(board_variant == 3){
+        
         if(mdp->portindex !=0 ){
-            phy_start(ndev->phydev);
+            /* Software reset Phy can be in PDWN mode*/
+            phy_write(ndev->phydev,0, 0x8000);
+            ret = phydev_disable_bcast_seterrata(ndev,100, 1);        
+            if(ret < 0) {
+                printk("Phy Disable Bcast and config failed \n");
+                return ret;
+            }
+            
+            phy_start(ndev->phydev);       
         }
+        
+        
+        
     }
     else if(board_variant == 2){
 #ifdef PHY_CONFIG_SUPPORT
@@ -711,12 +852,12 @@ static int port_open(struct net_device * ndev)
     }   
         
 
-#if 1
+
     if(port_count == 0) {
         rswitch2_enable_interrupts();
         port_count++;
     }
-#endif
+
     return ret;
 }
 
@@ -754,7 +895,7 @@ static struct net_device_stats  * port_get_statistics(struct net_device * ndev)
 
     @return < 0, or 0 on success
 */
-static int port_Close(struct net_device * ndev)
+static int port_close(struct net_device * ndev)
 {
     struct port_private    * mdp = netdev_priv(ndev);
 
@@ -765,28 +906,36 @@ static int port_Close(struct net_device * ndev)
         printk("[RSWITCH2] ERROR: Attempting to close netdev (%s) when already closed\n", ndev->name);
         return -ENODEV;
     }
-    napi_disable(&mdp->napi[0]);
-    napi_disable(&mdp->napi[1]);
-    netif_stop_queue(ndev);
+    if(mdp->portnumber == board_config.eth_ports) {
+        napi_disable(&mdp->napi[0]);
+        netif_stop_queue(ndev);
+
+    } else {
+        napi_disable(&mdp->napi[0]);
+        napi_disable(&mdp->napi[1]);
+        netif_stop_queue(ndev);
 
 
-    //free_irq(board_config.Eth_Port[mdp->portnumber].Virtual_IRQ, ndev);
+        //free_irq(board_config.Eth_Port[mdp->portnumber].Virtual_IRQ, ndev);
 
 
-    // Change Port to CONFIG
-    err = port_changestate(ndev, rswitch2_portstate_config);
-    if(err < 0) {
-        printk("Port Change to Config Failed \n");
-        return err;
+        // Change Port to CONFIG
+        err = port_changestate(ndev, rswitch2_portstate_config);
+        if(err < 0) {
+            printk("Port Change to Config Failed \n");
+            return err;
+        }
+
+        if (ndev->phydev) {
+            //phy_write(ndev->phydev,0, 0x8000);
+            phy_stop(ndev->phydev);
+            //phy_write(ndev->phydev,0, 0x8000);
+        }
     }
-    if (ndev->phydev) {
-        phy_stop(ndev->phydev);
-    }
-
     mdp->opened = false;
 
     return 0;
-}
+ }
 
 
 /**
@@ -865,7 +1014,7 @@ static int rswitch2_tx_free(struct net_device *ndev, int q, bool free_txed_only)
     @return int
 
 */
-static int port_Start_Xmit(struct sk_buff * skb, struct net_device * ndev)
+static int port_start_xmit(struct sk_buff * skb, struct net_device * ndev)
 {
 
     struct port_private *priv ;
@@ -936,12 +1085,17 @@ static int port_Start_Xmit(struct sk_buff * skb, struct net_device * ndev)
     desc_first = desc;
     desc->dptrl = cpu_to_le32(dma_addr);
     desc->info_ds = cpu_to_le16(len);
-
+    
+#ifdef INTERNAL_GW
+    if(priv->portnumber != board_config.eth_ports) 
+#endif
     {
         desc->info1l = 0x01 << 2; // Direct Descriptor
-    }
+    } 
 
-
+#ifdef INTERNAL_GW
+    if(priv->portnumber != board_config.eth_ports) 
+#endif
     {
         desc->info1h = (((u32)1) << priv->portnumber) << 16;
     }
@@ -998,7 +1152,7 @@ static int port_Start_Xmit(struct sk_buff * skb, struct net_device * ndev)
     desc--;
     desc->die_dt = DT_FSTART;
 
-    rswitch2_modify(ndev, GWTRC0, GWTRC_TSRQ0 << (q + (priv->portnumber*2)) , GWTRC_TSRQ0 << (q + (priv->portnumber*2)));
+    rswitch2_modify(ndev, GWTRC0, GWTRC_TSRQ0 << (q + NUM_RX_QUEUE + (priv->portnumber*2)) , GWTRC_TSRQ0 << (q + NUM_RX_QUEUE + (priv->portnumber*2)));
     priv->cur_tx[q] += NUM_TX_DESC;
     if (priv->cur_tx[q] - priv->dirty_tx[q] >
         (priv->num_tx_ring[q] - 1) * NUM_TX_DESC &&
@@ -1040,11 +1194,11 @@ static const struct net_device_ops  port_netdev_ops = {
 
     .ndo_open               = port_open,         // Called when the network interface is up'ed
 
-    .ndo_stop               = port_Close,        // Called when the network interface is down'ed
+    .ndo_stop               = port_close,        // Called when the network interface is down'ed
 #if 0
     .ndo_do_ioctl           = rswitch2_port_IOCTL,
 #endif
-    .ndo_start_xmit         = port_Start_Xmit,   // Start the transmission of a frame
+    .ndo_start_xmit         = port_start_xmit,   // Start the transmission of a frame
     .ndo_get_stats          = port_get_statistics,
     .ndo_validate_addr      = eth_validate_addr,
     .ndo_set_mac_address    = eth_mac_addr,             // Use default function to set dev_addr in ndev
@@ -1077,7 +1231,9 @@ static int port_mii_initialise(struct net_device * ndev)
 
 
 
-    mir = RSWITCH2_MIR_MII;
+    //mir = RSWITCH2_MIR_MII;
+    //mir = (0x01130000 + 0x13);
+    mir = (0x01130000 + 0xb);
     portreg_write(ndev, mir, MPIC);
 
 
@@ -1179,7 +1335,13 @@ static bool rswitch2_rx(struct net_device *ndev, int *quota, int q)
     while (desc->die_dt != DT_FEMPTY) {
 
         portnumber = ((u64)(desc->info1 >> 36)) & 0x7;
+#ifdef INTERNAL_GW
+        if((priv->portnumber == board_config.eth_ports)) {
 
+            portnumber = board_config.eth_ports;
+
+        }
+#endif
 
         ndev = ppndev[portnumber];
 
@@ -1323,9 +1485,20 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
     u32 frame_check = 0;
     u32 tis_q = 0;
     u32 rxq = q;
-    u32 tis_Port  = 0;
+    u32 tis_port  = 0;
     int entry = 0;
     //u32 dis = 0;
+    //printk("In rswitch poll \n");
+#ifdef INTERNAL_GW
+    /* Try registering separate poller for Internal GW */
+    if((priv->portnumber == board_config.eth_ports)) {
+        rxq = RSWITCH2_RX_GW_QUEUE_NUM;
+    } else {
+
+        rxq = q;
+    }
+#endif
+    //printk("In rswitch poll \n");
     for (;;) {
 
         if(desc_end[rxq] != NULL) {
@@ -1343,52 +1516,54 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
 
 
         ris = (ioread32(gwca_addr + GWDIS0) & board_config.ris_bitmask) >> board_config.rx_queue_offset;
-        tis = ioread32(gwca_addr + GWDIS0) & board_config.tis_bitmask;
+        tis = (ioread32(gwca_addr + GWDIS0) & board_config.tis_bitmask) >> (NUM_RX_QUEUE);
         //dis = ioread32(ioaddr + GWDIS0);
         //printk("Value of ris =%x\n", ris);
+        //printk("Value of tis =%x\n", tis);
         if ((!((ris & 0xFFFFFFFF) || ((tis  >> (q + (priv->portnumber * 2))))))  && (((frame_check>>28) & 0x0F)!= 0x8) ) {
             //printk("Break \n");
             break;
         }
 
-        /* Processing RX Descriptor Ring */
-
-        entry = cur_rx[rxq] % num_rx_ring[rxq];
-        desc = &rx_ring[rxq][entry];
-        portnumber = ((u64)(desc->info1 >> 36)) & 0x7;
+        
 
 
 
-        {
-            if ((ris & 0x7FFFFFFF) || (((frame_check>>28) & 0x0F)== 0x8)) {
-
-                if(portnumber !=  priv->portnumber) {
-#ifdef DEBUG_RX
-                    printk("Port Number Mismatch\n");
-#endif
-                }
-                /* Clear RX interrupt */
-                iowrite32((ris << board_config.rx_queue_offset), gwca_addr + GWDIS0);
-                if (rswitch2_rx(ppndev[portnumber], &quota, rxq)) {
-
-                    goto out;
-
-                }
-
+        
+        if ((ris & 0x7FFFFFFF) || (((frame_check>>28) & 0x0F)== 0x8)) {
+            /* Processing RX Descriptor Ring */
+            entry = cur_rx[rxq] % num_rx_ring[rxq];
+            desc = &rx_ring[rxq][entry];
+            portnumber = ((u64)(desc->info1 >> 36)) & 0x7;
+        
+            if((priv->portnumber == board_config.eth_ports)) {
+                portnumber = board_config.eth_ports;
 
             }
+
+            if(portnumber !=  priv->portnumber) {
+#ifdef DEBUG_RX
+                printk("Port Number Mismatch\n");
+#endif
+            }
+            /* Clear RX interrupt */
+            iowrite32((ris << board_config.rx_queue_offset), gwca_addr + GWDIS0);
+            if (rswitch2_rx(ppndev[portnumber], &quota, rxq)) {
+                goto out;
+            }
         }
+        
 
         /* Processing TX Descriptor Ring */
         tis_q = tis % 2;
-        tis_Port  = tis / 2;
+        tis_port  = tis / 2;
         if(tis != 0)
             if ((tis  >> (q + (priv->portnumber * 2)))) {
 
                 spin_lock_irqsave(&priv->lock, flags);
                 /* Clear TX interrupt */
 
-                iowrite32((tis ), gwca_addr + GWDIS0);
+                iowrite32((tis  << (NUM_RX_QUEUE)), gwca_addr + GWDIS0);
 
                 {
                     rswitch2_tx_free(ndev, q, true);
@@ -1472,12 +1647,12 @@ static irqreturn_t rswitch2_eth_interrupt(int IRQ, void * dev_id)
 {
 
     u32                 ris = 0;
-    //u32                 dis = 0;
     u32                 tis = 0;
     int q  = 0;
     struct rswitch2_ext_ts_desc *desc;
     u32 portnumber = 0;
     irqreturn_t ret = IRQ_HANDLED;
+    //u32 dis = 0;
 #ifdef DEBUG
     //printk("Interrupt Happened \n");
 #endif
@@ -1487,16 +1662,24 @@ static irqreturn_t rswitch2_eth_interrupt(int IRQ, void * dev_id)
     /* Check Descriptor Interrupt status*/
 
     ris = (ioread32(gwca_addr + GWDIS0) & board_config.ris_bitmask) >> board_config.rx_queue_offset;
-    tis = ioread32(gwca_addr + GWDIS0) & board_config.tis_bitmask;
-    //dis = ioread32(ioaddr + GWDIS0);
+    tis = (ioread32(gwca_addr + GWDIS0) & board_config.tis_bitmask) >> (NUM_RX_QUEUE);
+    //dis = ioread32(gwca_addr + GWDIS0);
+    //printk("Value of dis = %x \n",dis);
     //printk("Value of ris = %x \n",ris);
     //printk("Value of tis = %x \n",tis);
     if((ris != 0)) {
-        for(q = NUM_RX_QUEUE - 1; q >= 0; q--) {
+
+        for(q = NUM_RX_QUEUE -1; q >= 0; q--) {
             if(((ris >> q) & 0x01) == 0x01) {
                 int entry = cur_rx[q] % num_rx_ring[q];
                 desc = &rx_ring[q][entry];
                 portnumber = ((u64)(desc->info1 >> 36)) & 0x7;
+#ifdef INTERNAL_GW
+                if(q == RSWITCH2_RX_GW_QUEUE_NUM) {
+                    portnumber = board_config.eth_ports;
+
+                }
+#endif
                 //printk("portnumber = %d \n", portnumber);
                 if(rswitch2_queue_interrupt(ppndev[portnumber], q)) {
                     ret = IRQ_HANDLED;
@@ -1505,7 +1688,7 @@ static irqreturn_t rswitch2_eth_interrupt(int IRQ, void * dev_id)
         }
     }
     if((tis != 0)) {
-        for(q = (board_config.rx_queue_offset); q >= 0; q--) {
+        for(q = (board_config.dbat_entry_num); q >= 0; q--) {
             if((tis >> q) & 0x01) {
                 if(rswitch2_queue_interrupt(ppndev[q/2], q)) {
                     ret = IRQ_HANDLED;
@@ -1540,20 +1723,22 @@ static int drv_probe_createnetdev(struct platform_device * pdev, u32 portnumber,
     int     err = 0;
     u32 index = 0;
     u32 mir = 0;
-    mir = RSWITCH2_MIR_MII;
+    //mir = RSWITCH2_MIR_MII;
+    //mir = (0x01130000 + 0x13);
+    mir = (0x01130000 + 0xb);
     if(board_variant == 0x03){
         if(portnumber != 5) {
             if(portnumber ==  0) {
                 sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber);
             }
             if(portnumber ==  1) {
-                sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber+5);
+                sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber+6);
             } else if(portnumber ==  2) {
                 sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber+3);
             } else if(portnumber ==  3) {
                 sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber+1);
             } else if(portnumber ==  4) {
-                sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber+3);
+                sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber+2);
             }
          } else {
              strcpy(portname, "eth1");
@@ -1570,9 +1755,10 @@ static int drv_probe_createnetdev(struct platform_device * pdev, u32 portnumber,
         return -ENOMEM;
     }
     ndev = alloc_etherdev_mqs(sizeof(struct port_private),NUM_TX_QUEUE, NUM_RX_QUEUE);
+    index = portnumber;
     if(board_variant == 0x03){
         if((portnumber == 4) || (portnumber == 5)) {
-            index = portnumber;
+            
             portnumber = 0;
 
         }
@@ -1721,6 +1907,124 @@ static int drv_probe_ioremap_eth(u32 a)
 
 }
 
+
+
+#ifdef INTERNAL_GW
+/**
+    @brief  Platform Driver Create Network Devices for gw port
+
+    @param  ppndev
+
+    @param  PortNumber
+
+    @param  pdev The device to be instantiated
+
+    @return 0, or < 0 on error
+*/
+static int drv_probe_createvirtualnetdev(struct platform_device * pdev, uint32_t portnumber, struct net_device ** ppndev)
+{
+    struct  net_device       * ndev = NULL;
+    struct  port_private     * mdp = NULL;
+    
+    int     err = 0;
+
+
+
+
+
+    /*
+        Allocate the next tsn{n} device. Sets several net_device fields with appropriate
+        values for Ethernet devices. This is a wrapper for alloc_netdev
+    */
+
+
+    ndev = alloc_etherdev(sizeof(struct port_private));
+
+    if (ndev == NULL) {
+        dev_err(&pdev->dev, "[RSWITCH2] Failed to allocate %s device\n","tsngw");
+        return -ENOMEM;
+    }
+
+
+    ndev->dma = 1;                                                 // net_device: DMA Not used on this architecture
+
+    /* Software Internal GW port know as tsngw */
+    strncpy(ndev->name, "tsngw", sizeof(ndev->name)-1);
+
+
+    /*
+        Set the sysfs physical device reference for the network logical device
+        if set prior to registration will cause a symlink during initialization.
+    */
+    SET_NETDEV_DEV(ndev, &pdev->dev);
+
+    /*
+        Fill in the fields of the device structure with ethernet values.
+    */
+    ether_setup(ndev);
+
+    /*
+        Access private data within net_device and initialise it
+    */
+    mdp = netdev_priv(ndev);
+
+    /* Allocate the port number as the one more than total number of physical ports */
+    mdp->portnumber = board_config.eth_ports;
+
+
+    mdp->pdev = pdev;
+    mdp->num_tx_ring[RSWITCH2_BE] = TX_RING_SIZE0;
+    num_rx_ring[2] = RX_RING_SIZE1;
+
+
+
+    mdp->ether_link_active_low  = false;
+
+    mdp->edmac_endian           = EDMAC_LITTLE_ENDIAN;
+    
+    /*
+        set function (Open/Close/Xmit/IOCTL etc)
+    */
+    ndev->netdev_ops = &port_netdev_ops;
+    ndev->ethtool_ops = &port_ethtool_ops;
+
+    /* debug message level */
+    mdp->msg_enable = RSWITCH2_DEF_MSG_ENABLE;
+
+    /* Initialise HW timestamp list */
+    INIT_LIST_HEAD(&mdp->ts_skb_list);
+
+    /*
+        Read MAC address from Port. If invalid (not 00:00:00:00:00:00, is not a multicast address,
+        and is not FF:FF:FF:FF:FF:FF), generate one
+    */
+    /* Use Automatic generated MAC address */
+    port_generate_mac_address(portnumber, ndev);
+
+
+    /*
+        Network device register
+    */
+    err = register_netdev(ndev);
+
+    if (err != 0) {
+        dev_err(&pdev->dev, "[RSWITCH2] %s Failed to register net device. err(%d)\n", ndev->name, err);
+        free_netdev(ndev);
+        return err;
+    }
+
+
+
+    /* Save this network_device in the list of devices */
+    *ppndev = ndev;
+
+    netif_napi_add(ndev, &mdp->napi[0], rswitch2_poll, 64);
+    printk("Internal SW Gateway Port Registered \n");
+    return err;
+}
+
+#endif
+
 static int drv_probe_ioremap_common(struct platform_device *pdev)
 {
     board_config.gwca0.start = RSWITCH2_FPGA_ETH_BASE + (board_config.eth_ports * RSWITCH2_FPGA_ETH_PORT_SIZE);
@@ -1853,18 +2157,7 @@ static int rswitch2_gwca_change_mode(enum rswitch2_gwca_mode mode)
 }
 
 #ifdef FUTURE_USE
-static int rswitch2_reset(void)
-{
-#ifdef DEBUG
-    printk("Reg=%x value = %x \n", RRC, 0x01);
-#endif
-    iowrite32(0x1, ioaddr + RRC);
-#ifdef DEBUG
-    printk("Reg=%x value = %x \n", RRC, 0x0);
-#endif
-    iowrite32(0x0, ioaddr + RRC);
-    return
-}
+
 
 
 /**
@@ -1892,6 +2185,22 @@ static int rswitch2_gwca_reset(void)
         return err;
     }
 
+    return 0;
+
+}
+
+
+static int rswitch2_reset(void)
+{
+    rswitch2_gwca_reset();
+#ifdef DEBUG
+    printk("Reg=%x value = %x \n", RRC, 0x01);
+#endif
+    iowrite32(0x1, ioaddr + RRC);
+#ifdef DEBUG
+    printk("Reg=%x value = %x \n", RRC, 0x0);
+#endif
+    iowrite32(0x0, ioaddr + RRC);
     return 0;
 }
 
@@ -2043,7 +2352,7 @@ static int rswitch2_tx_ring_format(struct net_device *ndev, int q)
 
 
 
-    desc = &desc_bat[q + (priv->portnumber *  2)];
+    desc = &desc_bat[q + NUM_RX_QUEUE + (priv->portnumber *  2)];
 #ifdef DEBUG
     //printk("Value of Desc = %lx \n", desc_bat[q + (priv->portnumber *  2)]);
 #endif
@@ -2067,9 +2376,9 @@ static int rswitch2_tx_ring_format(struct net_device *ndev, int q)
     }
 #endif
 #ifdef DEBUG
-    printk("Reg=%x value = %x \n", (GWDCC0 + ((q + (priv->portnumber *  2))*4)), (balr | dcp | dqt | ede));
+    printk("Reg=%x value = %x \n", (GWDCC0 + ((q + NUM_RX_QUEUE + (priv->portnumber *  2))*4)), (balr | dcp | dqt | ede));
 #endif
-    iowrite32((balr | dcp | dqt | ede), gwca_addr + (GWDCC0 + ((q + (priv->portnumber *  2))*4)) );
+    iowrite32((balr | dcp | dqt | ede), gwca_addr + (GWDCC0 + ((q + NUM_RX_QUEUE + (priv->portnumber *  2))*4)) );
 
 
     return 0;
@@ -2093,20 +2402,23 @@ static int rswitch2_tx_ring_init(struct net_device *ndev, int q)
     struct port_private *priv = netdev_priv(ndev);
 
     int ring_size;
+#ifdef DEBUG
     printk("priv->num_tx_ring[q]=%d \n", priv->num_tx_ring[q]);
     printk("Tx ring init strt \n");
     printk("priv->num_tx_ring[q]=%d \n", priv->num_tx_ring[q]);
-
+#endif
     priv->tx_skb[q] = kcalloc(priv->num_tx_ring[q],
                               sizeof(*priv->tx_skb[q]), GFP_KERNEL);
+#ifdef DEBUG
     printk("Tpriv->num_tx_ring[q]=%d \n", priv->num_tx_ring[q]);
+#endif
     if (!priv->tx_skb[q]) {
         printk(" SKB Allocation error\n");
         goto error;
 
     }
 
-    printk("Tx ring init 0 \n");
+    
 
     /* Allocate rings for the aligned buffers */
     priv->tx_align[q] = kmalloc(DPTR_ALIGN * priv->num_tx_ring[q] +
@@ -2114,7 +2426,7 @@ static int rswitch2_tx_ring_init(struct net_device *ndev, int q)
     if (!priv->tx_align[q])
         goto error;
 
-    printk("Tx ring init 1\n");
+    
 
     /* Allocate all TX descriptors. */
     ring_size = sizeof(struct rswitch2_ext_desc) *
@@ -2124,7 +2436,7 @@ static int rswitch2_tx_ring_init(struct net_device *ndev, int q)
     priv->tx_ring[q]    = dma_alloc_coherent(&pcidev->dev, ring_size,
                           &priv->tx_desc_dma[q],
                           GFP_KERNEL);
-    printk("Tx ring init 2 \n");
+    
     if (!priv->tx_ring[q])
         goto error;
 
@@ -2172,6 +2484,37 @@ static int rswitch2_txdmac_init(struct net_device *ndev)
         printk("TX Ring Format Failed \n");
         return error;
     }
+    return 0;
+
+
+
+}
+
+
+/**
+    @brief  GW Tx DMAC Init
+
+    @param  ndev    net_device for the individual tsn port device
+
+    @return int
+
+*/
+static int rswitch2_gw_txdmac_init(struct net_device *ndev)
+{
+    int error;
+    error = rswitch2_tx_ring_init(ndev, RSWITCH2_BE);
+    if(error < 0) {
+        printk("TX Ring Init Failed \n");
+        return error;
+    }
+    
+    /* Descriptor format */
+    error = rswitch2_tx_ring_format(ndev, RSWITCH2_BE);
+    if(error < 0) {
+        printk("TX Ring Format Failed \n");
+        return error;
+    }
+    
     return 0;
 
 
@@ -2316,23 +2659,23 @@ static int rswitch2_rxdmac_init(void)
 {
     int error;
 
-    error = rswitch2_rx_ring_init(RSWITCH2_BE);
+    error = rswitch2_rx_ring_init(RSWITCH2_BE  + INTERNAL_GW);
     if(error < 0) {
         printk("RX Ring Init Failed \n");
         return error;
     }
-    error = rswitch2_rx_ring_init(RSWITCH2_NC);
+    error = rswitch2_rx_ring_init(RSWITCH2_NC + INTERNAL_GW);
     if(error < 0) {
         printk("RX Ring Init Failed \n");
         return error;
     }
     /* Descriptor format */
-    error = rswitch2_rx_ring_format(RSWITCH2_BE);
+    error = rswitch2_rx_ring_format(RSWITCH2_BE + INTERNAL_GW);
     if(error < 0) {
         printk("RX Ring Format Failed \n");
         return error;
     }
-    error = rswitch2_rx_ring_format(RSWITCH2_NC);
+    error = rswitch2_rx_ring_format(RSWITCH2_NC + INTERNAL_GW);
     if(error < 0) {
         printk("RX Ring Format Failed \n");
         return error;
@@ -2343,6 +2686,38 @@ static int rswitch2_rxdmac_init(void)
 
 
 }
+
+
+/**
+    @brief  GW Rx DMAC Init
+
+    @return int
+
+*/
+static int rswitch2_gw_rxdmac_init(void)
+{
+    int error;
+
+    error = rswitch2_rx_ring_init(RSWITCH2_RX_GW_QUEUE_NUM);
+    if(error < 0) {
+        printk("RX Ring Init Failed \n");
+        return error;
+    }
+    
+    /* Descriptor format */
+    error = rswitch2_rx_ring_format(RSWITCH2_RX_GW_QUEUE_NUM);
+    if(error < 0) {
+        printk("RX Ring Format Failed \n");
+        return error;
+    }
+    
+
+    return 0;
+
+
+
+}
+
 
 
 
@@ -2649,16 +3024,26 @@ static int drv_probe_create_chrdev(void)
 }
 
 
-static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 index)
+
+static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u32 master)
 {
     static u32 count = 0;
     u32 read_val = 0;
+    u32 index = 0;
+    struct port_private * mdp = netdev_priv(ndev);
+    printk("Running errata with speed = %d \n", speed);
+    index = mdp->portindex;
     if(board_variant == 0x03){
         if((index > 0) && (index < 5)){
             if(count == 0x0){     
-                count++;
-                mdiobus_write(ndev->phydev->mdio.bus,0, 0x18, 0x90);
+                count++; 
+                printk("Disabling Bcast \n");                       
+                mdiobus_write(ndev->phydev->mdio.bus,0, 0x18, 0x90);                                
             }
+            phy_write(ndev->phydev,0x1b, 0xDD00);
+            phy_write(ndev->phydev,0x1c, 0x0020);
+            msleep(20);
+            mdiobus_write(ndev->phydev->mdio.bus,0, 0x18, 0x90);  
             /* Read Register 0x02 0x03 to check phy ids and then for checking phy is operational */
             read_val = phy_read(ndev->phydev, 0x02);
             if(read_val != 0x001C){
@@ -2676,76 +3061,168 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 index)
                 printk("Phy is not active register 0x10 Page 0xA42 =  %x \n", read_val);
                 return -1;
             }
-            /* Write Init Patch */
-            phy_write(ndev->phydev,0x1b, 0xBC40);
-            phy_write(ndev->phydev,0x1c, 0x0FDA);
-            phy_write(ndev->phydev,0x1b, 0xBCC4);
-            phy_write(ndev->phydev,0x1c, 0x8309);
-            phy_write(ndev->phydev,0x1b, 0xBCC6);
-            phy_write(ndev->phydev,0x1c, 0x120B);
-            phy_write(ndev->phydev,0x1b, 0xBCC8);
-            phy_write(ndev->phydev,0x1c, 0x0005);
-            phy_write(ndev->phydev,0x1b, 0xBC40);
-            phy_write(ndev->phydev,0x1c, 0x0FDA);
-            phy_write(ndev->phydev,0x1b, 0xAC16);
-            phy_write(ndev->phydev,0x1c, 0x0000);
-            phy_write(ndev->phydev,0x1b, 0xAC1A);
-            phy_write(ndev->phydev,0x1c, 0x0284);
-            phy_write(ndev->phydev,0x1b, 0x823C);
-            phy_write(ndev->phydev,0x1c, 0x4022);
-            phy_write(ndev->phydev,0x1b, 0x823E);
-            phy_write(ndev->phydev,0x1c, 0x007C);
-            phy_write(ndev->phydev,0x1b, 0x8266);
-            phy_write(ndev->phydev,0x1c, 0x4022);
-            phy_write(ndev->phydev,0x1b, 0x8268);
-            phy_write(ndev->phydev,0x1c, 0x007C);
-            phy_write(ndev->phydev,0x1b, 0x8295);
-            phy_write(ndev->phydev,0x1c, 0x3406);
-            phy_write(ndev->phydev,0x1b, 0x82BF);
-            phy_write(ndev->phydev,0x1c, 0x3406);
-            phy_write(ndev->phydev,0x1b, 0x8205);
-            phy_write(ndev->phydev,0x1c, 0x0110);
-            phy_write(ndev->phydev,0x1b, 0x8207);
-            phy_write(ndev->phydev,0x1c, 0x0125);
-            phy_write(ndev->phydev,0x1b, 0x8209);
-            phy_write(ndev->phydev,0x1c, 0x0125);
-            phy_write(ndev->phydev,0x1b, 0x820B);
-            phy_write(ndev->phydev,0x1c, 0x0125);
-            phy_write(ndev->phydev,0x1b, 0x820D);
-            phy_write(ndev->phydev,0x1c, 0x0110);
-            phy_write(ndev->phydev,0x1b, 0x820F);
-            phy_write(ndev->phydev,0x1c, 0x0120);
-            phy_write(ndev->phydev,0x1b, 0x8211);
-            phy_write(ndev->phydev,0x1c, 0x0125);
-            phy_write(ndev->phydev,0x1b, 0x8213);
-            phy_write(ndev->phydev,0x1c, 0x0130);
-            phy_write(ndev->phydev,0x1b, 0x8290);
-            phy_write(ndev->phydev,0x1c, 0x02A5);
-            phy_write(ndev->phydev,0x1b, 0x82C0);
-            phy_write(ndev->phydev,0x1c, 0x0200);
-            phy_write(ndev->phydev,0x1b, 0xC018);
-            phy_write(ndev->phydev,0x1c, 0x0108);
-            phy_write(ndev->phydev,0x1b, 0xC014);
-            phy_write(ndev->phydev,0x1c, 0x0109);
-            phy_write(ndev->phydev,0x1b, 0xC026);
-            phy_write(ndev->phydev,0x1c, 0x075E);
-            phy_write(ndev->phydev,0x1b, 0xC028);
-            phy_write(ndev->phydev,0x1c, 0x0534);
-            /* Optional application specific configurations*/
-            /*RGMII 2.5V 5-25cm line*/
-            phy_write(ndev->phydev,0x1b, 0xd414);
-            phy_write(ndev->phydev,0x1c, 0x0201);
-            phy_write(ndev->phydev,0x1b, 0xd416);
-            phy_write(ndev->phydev,0x1c, 0x0101);
-            phy_write(ndev->phydev,0x1b, 0xd418);
-            phy_write(ndev->phydev,0x1c, 0x0200);
-            phy_write(ndev->phydev,0x1b, 0xd41a);
-            phy_write(ndev->phydev,0x1c, 0x0100);
-            phy_write(ndev->phydev,0x1b, 0xd42e);
-            phy_write(ndev->phydev,0x1c, 0xffff);
-            /*RGMII timing correction*/
-            phy_write(ndev->phydev,0x1b, 0xd42a);
+            if(speed == 100) {
+                /* Write Init Patch */
+                phy_write(ndev->phydev,0x1b, 0xBC40);
+                phy_write(ndev->phydev,0x1c, 0x0FDA);
+                phy_write(ndev->phydev,0x1b, 0xBCC4);
+                phy_write(ndev->phydev,0x1c, 0x8309);
+                phy_write(ndev->phydev,0x1b, 0xBCC6);
+                phy_write(ndev->phydev,0x1c, 0x120B);
+                phy_write(ndev->phydev,0x1b, 0xBCC8);
+                phy_write(ndev->phydev,0x1c, 0x0005);
+                phy_write(ndev->phydev,0x1b, 0xBC40);
+                phy_write(ndev->phydev,0x1c, 0x0FDA);
+                phy_write(ndev->phydev,0x1b, 0xAC16);
+                phy_write(ndev->phydev,0x1c, 0x0000);
+                phy_write(ndev->phydev,0x1b, 0xAC1A);
+                phy_write(ndev->phydev,0x1c, 0x0284);
+                phy_write(ndev->phydev,0x1b, 0x823C);
+                phy_write(ndev->phydev,0x1c, 0x4022);
+                phy_write(ndev->phydev,0x1b, 0x823E);
+                phy_write(ndev->phydev,0x1c, 0x007C);
+                phy_write(ndev->phydev,0x1b, 0x8266);
+                phy_write(ndev->phydev,0x1c, 0x4022);
+                phy_write(ndev->phydev,0x1b, 0x8268);
+                phy_write(ndev->phydev,0x1c, 0x007C);
+                phy_write(ndev->phydev,0x1b, 0x8295);
+                phy_write(ndev->phydev,0x1c, 0x3406);
+                phy_write(ndev->phydev,0x1b, 0x82BF);
+                phy_write(ndev->phydev,0x1c, 0x3406);
+                phy_write(ndev->phydev,0x1b, 0x8205);
+                phy_write(ndev->phydev,0x1c, 0x0110);
+                phy_write(ndev->phydev,0x1b, 0x8207);
+                phy_write(ndev->phydev,0x1c, 0x0125);
+                phy_write(ndev->phydev,0x1b, 0x8209);
+                phy_write(ndev->phydev,0x1c, 0x0125);
+                phy_write(ndev->phydev,0x1b, 0x820B);
+                phy_write(ndev->phydev,0x1c, 0x0125);
+                phy_write(ndev->phydev,0x1b, 0x820D);
+                phy_write(ndev->phydev,0x1c, 0x0110);
+                phy_write(ndev->phydev,0x1b, 0x820F);
+                phy_write(ndev->phydev,0x1c, 0x0120);
+                phy_write(ndev->phydev,0x1b, 0x8211);
+                phy_write(ndev->phydev,0x1c, 0x0125);
+                phy_write(ndev->phydev,0x1b, 0x8213);
+                phy_write(ndev->phydev,0x1c, 0x0130);
+                phy_write(ndev->phydev,0x1b, 0x8296);
+                phy_write(ndev->phydev,0x1c, 0x02A5);
+                phy_write(ndev->phydev,0x1b, 0x82C0);
+                phy_write(ndev->phydev,0x1c, 0x0200);
+                phy_write(ndev->phydev,0x1b, 0xC018);
+                phy_write(ndev->phydev,0x1c, 0x0108);
+                phy_write(ndev->phydev,0x1b, 0xC014);
+                phy_write(ndev->phydev,0x1c, 0x0109);
+                phy_write(ndev->phydev,0x1b, 0xC026);
+                phy_write(ndev->phydev,0x1c, 0x075E);
+                phy_write(ndev->phydev,0x1b, 0xC028);
+                phy_write(ndev->phydev,0x1c, 0x0534);
+                
+            } else if (speed == 1000) {
+                phy_write(ndev->phydev,0x1b, 0xBC40);
+                phy_write(ndev->phydev,0x1c, 0x0FDA);
+                phy_write(ndev->phydev,0x1b, 0xBCC4);
+                phy_write(ndev->phydev,0x1c, 0x8307);
+                phy_write(ndev->phydev,0x1b, 0xBCC6);
+                phy_write(ndev->phydev,0x1c, 0x120B);
+                phy_write(ndev->phydev,0x1b, 0xBCC8);
+                phy_write(ndev->phydev,0x1c, 0x0005);
+                phy_write(ndev->phydev,0x1b, 0xBC40);
+                phy_write(ndev->phydev,0x1c, 0x0FDA);
+                phy_write(ndev->phydev,0x1b, 0xAC16);
+                phy_write(ndev->phydev,0x1c, 0x0000);
+                phy_write(ndev->phydev,0x1b, 0xAC1A);
+                phy_write(ndev->phydev,0x1c, 0x0284);
+                phy_write(ndev->phydev,0x1b, 0x823C);
+                phy_write(ndev->phydev,0x1c, 0x4022);
+                phy_write(ndev->phydev,0x1b, 0x823E);
+                phy_write(ndev->phydev,0x1c, 0x007C);
+                phy_write(ndev->phydev,0x1b, 0x8266);
+                phy_write(ndev->phydev,0x1c, 0x4022);
+                phy_write(ndev->phydev,0x1b, 0x8268);
+                phy_write(ndev->phydev,0x1c, 0x007C);
+                phy_write(ndev->phydev,0x1b, 0x824B);
+                phy_write(ndev->phydev,0x1c, 0xDA1C);
+                phy_write(ndev->phydev,0x1b, 0x8253);
+                phy_write(ndev->phydev,0x1c, 0x1C00);
+                phy_write(ndev->phydev,0x1b, 0x81E9);
+                phy_write(ndev->phydev,0x1c, 0x00E0);
+                phy_write(ndev->phydev,0x1b, 0x81EB);
+                phy_write(ndev->phydev,0x1c, 0x00FF);
+                phy_write(ndev->phydev,0x1b, 0x81F1);
+                phy_write(ndev->phydev,0x1c, 0x00DA);
+                phy_write(ndev->phydev,0x1b, 0x81F5);
+                phy_write(ndev->phydev,0x1c, 0x0105);
+                phy_write(ndev->phydev,0x1b, 0x824D);
+                phy_write(ndev->phydev,0x1c, 0x2F19);
+                phy_write(ndev->phydev,0x1b, 0x8255);
+                phy_write(ndev->phydev,0x1c, 0x2000);
+                phy_write(ndev->phydev,0x1b, 0x8249);
+                phy_write(ndev->phydev,0x1c, 0xEE09);
+                phy_write(ndev->phydev,0x1b, 0x8251);
+                phy_write(ndev->phydev,0x1c, 0x2214);
+                phy_write(ndev->phydev,0x1b, 0x8245);
+                phy_write(ndev->phydev,0x1c, 0x000D);
+                phy_write(ndev->phydev,0x1b, 0x8247);
+                phy_write(ndev->phydev,0x1c, 0x1606);
+                phy_write(ndev->phydev,0x1b, 0x821B);
+                phy_write(ndev->phydev,0x1c, 0x000D);
+                phy_write(ndev->phydev,0x1b, 0x821D);
+                phy_write(ndev->phydev,0x1c, 0x1606);
+                phy_write(ndev->phydev,0x1b, 0x8242);
+                phy_write(ndev->phydev,0x1c, 0x0A00);
+                phy_write(ndev->phydev,0x1b, 0x826C);
+                phy_write(ndev->phydev,0x1c, 0x0AA5);
+                phy_write(ndev->phydev,0x1b, 0xAC1E);
+                phy_write(ndev->phydev,0x1c, 0x0003);
+                phy_write(ndev->phydev,0x1b, 0xC018);
+                phy_write(ndev->phydev,0x1c, 0x0108);
+                phy_write(ndev->phydev,0x1b, 0xC014);
+                phy_write(ndev->phydev,0x1c, 0x0109);
+                phy_write(ndev->phydev,0x1b, 0xC026);
+                phy_write(ndev->phydev,0x1c, 0x075E);
+                phy_write(ndev->phydev,0x1b, 0xC028);
+                phy_write(ndev->phydev,0x1c, 0x0534);
+            }
+            
+            
+            
+            /*Step3 Optional application specific configurations*/
+
+            /*RGMII timing correction for Rx*/
+            phy_write(ndev->phydev,0x1b, 0xd04a);
             phy_write(ndev->phydev,0x1c, 0x0007);
+
+            /*RGMII timing correction for Tx*/
+            phy_write(ndev->phydev,0x1b, 0xd084);
+            phy_write(ndev->phydev,0x1c, 0x0000);
+ 
+            phy_write(ndev->phydev,0x1b, 0xd084);
+            if(ndev->phydev->phy_id == 0x02) {  //Id of the muxed interface
+                phy_write(ndev->phydev,0x1c, 0xC000);
+            } else {
+                phy_write(ndev->phydev,0x1c, 0x4000);
+            }
+ 
+            phy_write(ndev->phydev,0x1b, 0xd084);
+            if(ndev->phydev->phy_id == 0x02) {
+                phy_write(ndev->phydev,0x1c, 0xC007);
+            } else {
+                phy_write(ndev->phydev,0x1c, 0x4007);
+            }
+
+            /*RGMII Typical 1.8V 5-25cm line*/
+            phy_write(ndev->phydev,0x1b, 0xd414);
+            phy_write(ndev->phydev,0x1c, 0x1211);
+            phy_write(ndev->phydev,0x1b, 0xd416);
+            phy_write(ndev->phydev,0x1c, 0x1111);
+            phy_write(ndev->phydev,0x1b, 0xd418);
+            phy_write(ndev->phydev,0x1c, 0x1200);
+            phy_write(ndev->phydev,0x1b, 0xd41a);
+            phy_write(ndev->phydev,0x1c, 0x1100);
+            phy_write(ndev->phydev,0x1b, 0xd42e);
+            phy_write(ndev->phydev,0x1c, 0x8082);
+
             /*SW reset*/
             phy_write(ndev->phydev,0, 0x8000);
             msleep(20);
@@ -2755,21 +3232,29 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 index)
                 return -1;
             }
             /*bring PHY to 100 Mbps mode*/
-            phy_write(ndev->phydev,0, 0x2100);
-        }
+            if(speed == 1000) {
+                //printk("Writing phy 1000mbps \n");
+                phy_write(ndev->phydev,0, 0x0140);
+            } else if(speed == 100) {
+            /*bring PHY to 100 Mbps mode with aneg*/
+                //printk("Writing phy 100mbps \n");
+                phy_write(ndev->phydev,0, 0x2100);
+            }
+            if(master) {
+                phy_write(ndev->phydev,9, 0x800);
+            } else {
+                phy_write(ndev->phydev,9, 0x000);
+            }
+            
+        } 
+    } else{
+        phy_write(ndev->phydev, 0x31, 0xa43);
+        phy_read(ndev->phydev, 0x18);
+        phy_write(ndev->phydev, 0x18, 0x98);
+        phy_read(ndev->phydev, 0x18);
+        phy_write(ndev->phydev, 0x31, 0xa42);
     }
-    else{
-        //if(index != 0) 
-{
-            phy_write(ndev->phydev, 0x31, 0xa43);
-            phy_read(ndev->phydev, 0x18);
-            phy_write(ndev->phydev, 0x18, 0x98);
-            phy_read(ndev->phydev, 0x18);
-            phy_write(ndev->phydev, 0x31, 0xa42);
-        } //else {
-            //phy_write(ndev->phydev, 0x16, 0x201);
-        //}
-    }
+    
     return 0;
 
 }
@@ -2816,6 +3301,7 @@ static void drv_unload_cleanup(void)
         ppndev = NULL;
     }
     rswitch2_clock_disable();
+    rswitch2_reset();
     drv_unload_unmap();
 }
 /**
@@ -2923,9 +3409,11 @@ static int drv_unload_remove_netdevs(void)
                     continue;
                 }
                 if(ndev->phydev) {
-                    if(ndev->phydev->state == PHY_UP) {
-                        phy_stop(ndev->phydev);
-                    }
+                    //rintk("Stopping Phy \n");
+                    //phy_stop(ndev->phydev);
+                    //phy_write(ndev->phydev,0, 0x8000);
+                    //printk("Phy Disconnected \n");
+                    phydev_disable_bcast_seterrata(ndev,100, 1);
                     phy_disconnect(ndev->phydev);
                 }
                 if(a != board_config.eth_ports) {
@@ -2941,10 +3429,12 @@ static int drv_unload_remove_netdevs(void)
                     netif_napi_del( &mdp->napi[1]);
                 }
                 netif_napi_del( &mdp->napi[0]);
-                err = port_changestate(ndev, rswitch2_portstate_disable);
-                if(err < 0) {
-                    printk("Port Change State to Disable Failed \n");
-                    return err;
+                if(a != board_config.eth_ports) {
+                    err = port_changestate(ndev, rswitch2_portstate_disable);
+                    if(err < 0) {
+                        printk("Port Change State to Disable Failed \n");
+                        return err;
+                    }
                 }
                 free_netdev(ndev);
                 ppndev[a] = NULL;
@@ -2985,7 +3475,7 @@ static int drv_unload_remove_netdevs(void)
     }
     rswitch2_rx_ring_free(0);
     rswitch2_rx_ring_free(1);
-#ifdef INTERNAL_GATEWAY_PORT
+#ifdef INTERNAL_GW
     /* Add RX Ring Format for GW Port */
     rswitch2_rx_ring_free(2);
 #endif
@@ -3451,9 +3941,9 @@ static void rswitch2_eth_create_proc_entry(void)
 
 
 
-    rswitch2_eth_procdir.rootdir = root_debug_dir;
+    rswitch2_eth_procdir.rootdir = proc_mkdir(RSWITCH2_PROC_ROOT_DIR, NULL);;
 
-
+    root_dir = rswitch2_eth_procdir.rootdir;
     proc_create(RSWITCH2_ETH_PROC_FILE_DRIVER, 0, rswitch2_eth_procdir.rootdir, &rswitch2_eth_driver_fops);
 
 
@@ -3500,6 +3990,7 @@ static void rswitch2_eth_remove_proc_entry(void)
     remove_proc_entry(RSWITCH2_ETH_PROC_FILE_TX, rswitch2_eth_procdir.rootdir);
 
     remove_proc_entry(RSWITCH2_ETH_PROC_FILE_RX, rswitch2_eth_procdir.rootdir);
+    remove_proc_entry(RSWITCH2_PROC_ROOT_DIR, NULL);
 }
 #endif
 
@@ -3647,13 +4138,16 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
                         iowrite32(0x2, ((ioaddr - 0x01040000) + PHY_SEL_MUX));
                     } else if(index == 5) {
                         iowrite32(0x6, ((ioaddr - 0x01040000) + PHY_SEL_MUX));
+                        printk("Read after write 5=%x \n",ioread32(((ioaddr - 0x01040000) + PHY_SEL_MUX)));
                     }
                     err = rswitch2_phy_init(child, ppndev[0]);
                     if(err < 0) {
                         printk("Phy Init Failed \n");
                         return err;
                     }
-                    err = phydev_disable_bcast_seterrata(ppndev[0], index);
+                    
+                    
+                    
                     if(err < 0) {
                         printk("Phy Disable Bcast and config failed \n");
                         return err;
@@ -3664,7 +4158,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
                         printk("Phy Init Failed \n");
                         return err;
                     }
-                    err = phydev_disable_bcast_seterrata(ppndev[index], index);
+                   
                     if(err < 0) {
                         printk("Phy Disable Bcast and config failed \n");
                         return err;
@@ -3691,8 +4185,15 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         /* Register Interrupts here Function in rswitch2_interrupt.c Need to share interrupt of forwarding engine and Ethernet, logical to put in separate file*/
         /* Proc Init in rswitch2_proc.c*/
     }
+#ifdef INTERNAL_GW
+
+    /* Create Software Internal Gw Port */
+    drv_probe_createvirtualnetdev(pdev, board_config.eth_ports, &ppndev[board_config.eth_ports]);
+
+#endif
     platform_set_drvdata(pdev, ppndev);
 
+    
     /*
             Add character device for IOCTL interface
     */
@@ -3736,6 +4237,9 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         }
 
     }
+#ifdef INTERNAL_GW
+    rswitch2_gw_txdmac_init(ppndev[board_config.eth_ports]);
+#endif
     err = rswitch2_rxdmac_init();
     if(err < 0) {
         printk("RX DMAC Init Failed \n");
@@ -3747,6 +4251,10 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         drv_unload_cleanup();
         return err;
     }
+#ifdef INTERNAL_GW
+    rswitch2_gw_rxdmac_init();
+#endif
+
 #ifdef DEBUG
     printk("Reg=%x Value = %x \n",GWIICBSC,  2048 );
 #endif
@@ -3868,11 +4376,11 @@ static void rswitch2_drv_remove_interrupts(void)
 */
 static int rswitch2_remove_one_platform(struct platform_device *pdev)
 {
+    rswitch2_fwd_exit();
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
     rswitch2_eth_remove_proc_entry();
 #endif 
     drv_unload_remove_chrdev();
-    rswitch2_fwd_exit();
     drv_unload_remove_netdevs();
     rswitch2_drv_remove_interrupts();
     drv_unload_cleanup();
@@ -3904,10 +4412,10 @@ int rswitch2_port_probe(void)
     printk("Port Present = %d Agent Present = %d \n", board_config.eth_ports, board_config.agents);
     board_config.port_bitmask = (unsigned int)(GENMASK_ULL(board_config.eth_ports, 0));
     board_config.portgwca_bitmask = (unsigned int)(GENMASK_ULL(board_config.eth_ports + 1, 0));
-    board_config.dbat_entry_num = (board_config.eth_ports * NUM_TX_QUEUE) + NUM_RX_QUEUE;
-    board_config.rx_queue_offset = (board_config.eth_ports * NUM_TX_QUEUE);
-    board_config.ris_bitmask = GENMASK(board_config.dbat_entry_num-1, board_config.rx_queue_offset);
-    board_config.tis_bitmask = GENMASK((board_config.rx_queue_offset -1), 0);
+    board_config.dbat_entry_num = (board_config.eth_ports * NUM_TX_QUEUE) + INTERNAL_GW + NUM_RX_QUEUE;
+    board_config.rx_queue_offset = 0;
+    board_config.ris_bitmask = GENMASK(NUM_RX_QUEUE -1, board_config.rx_queue_offset);
+    board_config.tis_bitmask = GENMASK((board_config.dbat_entry_num -1), NUM_RX_QUEUE);
     iowrite32(0xFFFFFFFF , ioaddr + RCDC);   
     return 0;
 };
@@ -3978,6 +4486,13 @@ MODULE_VERSION(__DATE__"-"__TIME__);
     2020-08-24    AK  Phy VC3 Configuration(Untested)
     2020-09-03    AK  Added Proc Statistics, automatic gwca offset, pciid check, module unload, fix cpu rx
     2020-09-10    AK  Bug Fix MAC address order in RMAC
+    2020-09-13    AK  Phy Configuration testing and bug fixes
+    2020-09-18    AK  Added Internal Gateway Port, Tx Descriptor queue width set max
+    2020-09-30    AK  Phy Configuration support 1Gbps(Autoneg not showing any activity on phy handler but link gets active)
+    2020-10-01    AK  Swapped line 6 to 7 device tree change needed
+    2020-10-05    AK  Updated timing sequence for Phy configuration
+    2020-10-07    AK  Updated for tsngw descriptor change
 
 */
+
 

@@ -78,7 +78,7 @@ MODULE_PARM_DESC(deviceid, "device id of pci");
 /* Global Variables */
 DEFINE_SPINLOCK(vc2_fpga_platform_lock);
 static int            vc2_fpga_pltfrm_devmajor;
-struct proc_dir_entry *root_debug_dir;
+static struct proc_dir_entry *root_debug_dir;
 static struct class * vc2_fpga_pltfrm_devclass = NULL;
 static dev_t          vc2_fpga_pltfrm_dev;
 static struct cdev    vc2_fpga_pltfrm_cdev;
@@ -100,7 +100,7 @@ EXPORT_SYMBOL(ioaddr);
 EXPORT_SYMBOL(pci_id);
 EXPORT_SYMBOL(ioaddr_pci);
 EXPORT_SYMBOL(pcidev);
-EXPORT_SYMBOL(root_debug_dir);
+
 static const struct pci_device_id vc2_fpgapltfrm_pci_tbl[] = {
     { PCI_DEVICE(PCI_ANY_ID, PCI_ANY_ID), },
     { 0, }
@@ -410,11 +410,11 @@ static int vc2_fpga_platform_open(struct inode *inode, struct file* file)
     minor = MINOR(file->f_inode->i_rdev);
 
     if (minor < 0) {
-        printk("[VC2-FPGA-PLATFORM] Invalid Minor Number\n");
+        printk("[VC-FPGA-PLATFORM] Invalid Minor Number\n");
         return -ENODEV;
     }
 
-    printk("[[VC2-FPGA-PLATFORM] Device Opened with minor number %d \n", minor);
+    //printk("[[VC-FPGA-PLATFORM] Device Opened with minor number %d \n", minor);
 
     return 0;
 }
@@ -429,7 +429,7 @@ static int vc2_fpga_platform_open(struct inode *inode, struct file* file)
 static int vc2_fpga_platform_release(struct inode *inode, struct file* file)
 {
 #ifdef DEBUG_PRINT
-    printk("[VC2-FPGA-PLATFORM] Device CLOSED \n");
+    printk("[VC-FPGA-PLATFORM] Device CLOSED \n");
 #endif
 
 
@@ -455,7 +455,7 @@ static long vc2_fpga_pltfrm_ioctl(struct file * file, unsigned int cmd, unsigned
     case VC2_FPGA_PLTFRM_IOCTL_WRITEBITFILE:
         return vc2_fpga_pltfrm_ioctl_writebitfilememory(file,arg);
     default:
-        pr_err("[VC2_FPGA_PLTFRM] IOCTL Unknown: 0x%08X\n", cmd);
+        pr_err("[VC_FPGA_PLTFRM] IOCTL Unknown: 0x%08X\n", cmd);
         ret = -EINVAL;
     }
 
@@ -483,9 +483,9 @@ static ssize_t vc2_fpga_platform_write(struct file * filep, const char * buffer,
 
     struct vc2_file_op file_op;
     send_data = kmalloc(len, GFP_ATOMIC);
-    printk("vc2_fpga_platform_write called \n");
+    printk("vc_fpga_platform_write called \n");
     if (send_data == NULL) {
-        printk(KERN_INFO "[VC2-FPGA-PLATFORM] Failed to allocate %lu bytes for send buffer\n", len);
+        printk(KERN_INFO "[VC-FPGA-PLATFORM] Failed to allocate %lu bytes for send buffer\n", len);
         return -ENOMEM;
     }
 
@@ -494,7 +494,7 @@ static ssize_t vc2_fpga_platform_write(struct file * filep, const char * buffer,
     /* Copy to FPGA Area */
     error_count = copy_from_user(send_data, buffer, len);
     if (error_count == 0) {
-        printk(KERN_INFO "[VC2-FPGA-PLATFORM] Received %ld characters from the user with offset %d, buffer[len -1]=%x\n", len, (int)*offset,buffer[len -1]);
+        printk(KERN_INFO "[VC-FPGA-PLATFORM] Received %ld characters from the user with offset %d, buffer[len -1]=%x\n", len, (int)*offset,buffer[len -1]);
         i +=len;
         if(buffer[len -1] == 0xFF) {
             file_op.file_end = 1;
@@ -509,25 +509,25 @@ static ssize_t vc2_fpga_platform_write(struct file * filep, const char * buffer,
         spin_unlock_irqrestore(&vc2_fpga_platform_lock, flags);
         //Critical section end
         if(ret < 0) {
-            printk(KERN_ALERT "[VC2-FPGA-PLATFORM] FPGA Write Failed \n");
+            printk(KERN_ALERT "[VC-FPGA-PLATFORM] FPGA Write Failed \n");
             return -EFAULT;
         }
         *offset = i;
 #ifdef DEBUG_PRINT
         int i = 0;
-        printk(KERN_INFO "[VC2-FPGA-PLATFORM] Received %d characters from the user\n", len);
+        printk(KERN_INFO "[VC-FPGA-PLATFORM] Received %d characters from the user\n", len);
         for (i = 0; i < len; i++) {
-            printk("[VC2-FPGA-PLATFORM] Characters Received = %0x \n", send_data[i]);
+            printk("[VC-FPGA-PLATFORM] Characters Received = %0x \n", send_data[i]);
         }
 #endif
     } else {
-        printk(KERN_INFO "[VC2-FPGA-PLATFORM] Write Failed - copy_from_user error %d\n", error_count);
+        printk(KERN_INFO "[VC-FPGA-PLATFORM] Write Failed - copy_from_user error %d\n", error_count);
         return -EFAULT;
     }
 
     //ret = vc2_fpga_platform_write_data(send_data, len);
     if (ret < 0) {
-        printk(KERN_INFO "[VC2-FPGA-PLATFORM] Cannot Write Data \n");
+        printk(KERN_INFO "[VC-FPGA-PLATFORM] Cannot Write Data \n");
         return -EFAULT;
     }
 
@@ -577,10 +577,10 @@ static ssize_t vc2_fpga_platform_read(struct file * filep, char * buff, size_t l
     //error_count = copy_to_user(buff, &fpga_read_buffer, sizeof(fpga_read_buffer));
     if (error_count == 0) {
 #ifdef DEBUG_PRINT
-        printk(KERN_INFO "[VC2-FPGA-PLATFORM] Sent %d characters to the user\n", num_bytes_read);
+        printk(KERN_INFO "[VC-FPGA-PLATFORM] Sent %d characters to the user\n", num_bytes_read);
 #endif
     } else {
-        printk(KERN_INFO "[VC2-FPGA-PLATFORM] Read Failed - copy_to_user error %d\n", error_count);
+        printk(KERN_INFO "[VC-FPGA-PLATFORM] Read Failed - copy_to_user error %d\n", error_count);
         return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
     }
 
@@ -624,7 +624,7 @@ static int _probe_chrdev(void)
     vc2_fpga_pltfrm_devclass = class_create(THIS_MODULE, VC2_FPGA_PLTFRM_CLASS);
     if (IS_ERR(vc2_fpga_pltfrm_devclass)) {
         ret = PTR_ERR(vc2_fpga_pltfrm_devclass);
-        pr_err("[VC2_FPGA_PLTFRM] failed to create '%s' class. rc=%d\n", VC2_FPGA_PLTFRM_CLASS, ret);
+        pr_err("[VC-FPGA-PLTFRM] failed to create '%s' class. rc=%d\n", VC2_FPGA_PLTFRM_CLASS, ret);
         return ret;
     }
 
@@ -635,7 +635,7 @@ static int _probe_chrdev(void)
         ret = alloc_chrdev_region(&vc2_fpga_pltfrm_dev, 0, 1, VC2_FPGA_PLTFRM_CLASS);
     }
     if (ret < 0) {
-        pr_err("[VC2-FPGA-PLTFRM] failed to register '%s' character device. rc=%d\n", VC2_FPGA_PLTFRM_CLASS, ret);
+        pr_err("[VC-FPGA-PLTFRM] failed to register '%s' character device. rc=%d\n", VC2_FPGA_PLTFRM_CLASS, ret);
         class_destroy(vc2_fpga_pltfrm_devclass);
         return ret;
     }
@@ -646,7 +646,7 @@ static int _probe_chrdev(void)
 
     ret = cdev_add(&vc2_fpga_pltfrm_cdev, vc2_fpga_pltfrm_dev, VC2_FPGA_PLTFRM_CTRL_MINOR + 1);
     if (ret < 0) {
-        pr_err("[VC2-FPGA-PLTFRM] failed to add '%s' character device. rc=%d\n", VC2_FPGA_PLTFRM_CLASS, ret);
+        pr_err("[VC-FPGA-PLTFRM] failed to add '%s' character device. rc=%d\n", VC2_FPGA_PLTFRM_CLASS, ret);
         unregister_chrdev_region(vc2_fpga_pltfrm_dev, 1);
         class_destroy(vc2_fpga_pltfrm_devclass);
         return ret;
@@ -661,7 +661,7 @@ static int _probe_chrdev(void)
 
     ret = device_add(dev);
     if (ret < 0) {
-        pr_err("[VC2-FPGA-PLTFRM] failed to add '%s' device. rc=%d\n", VC2_FPGA_PLTFRM_DEVICE_NAME, ret);
+        pr_err("[VC-FPGA-PLTFRM] failed to add '%s' device. rc=%d\n", VC2_FPGA_PLTFRM_DEVICE_NAME, ret);
         cdev_del(&vc2_fpga_pltfrm_cdev);
         unregister_chrdev_region(vc2_fpga_pltfrm_dev, 1);
         class_destroy(vc2_fpga_pltfrm_devclass);
@@ -753,7 +753,7 @@ static int vc2_fpgapltfrm_init_pci(struct pci_dev *dev, const struct pci_device_
     int rc = 0;
     const int region = 0;
     u32 *ptr = NULL;
-    printk("\n[VC2-FPGA-PLTFRM] (%s %s) version %s, Probing '%s' .....\n", __DATE__, __TIME__, VC2_FPGA_PLTFRM_DRIVER_VERSION, DRV_NAME);
+    printk("\n[VC-FPGA-PLTFRM] (%s %s) version %s, Probing '%s' .....\n", __DATE__, __TIME__, VC2_FPGA_PLTFRM_DRIVER_VERSION, DRV_NAME);
     if((dev->vendor == vendorid) && ((dev->device == deviceid)|| ((dev->device >= 0xE000) && (dev->device <= 0xE0FF)))) {
         rc = pci_enable_device(dev);
         if (rc) {
@@ -858,12 +858,14 @@ static int __init vc2_fpgapltfrm_init(void)
 {
     int ret_pci;
 
-
     ret_pci = pci_register_driver(&vc2_fpgapltfrm_driver_pci);
-
-    if ((ret_pci < 0) /*&& (ret_platform < 0)*/)
+    if ((ret_pci < 0) /*&& (ret_platform < 0)*/) {
         return ret_pci;
-
+    }
+    if(pcidev == NULL) {
+        pci_unregister_driver(&vc2_fpgapltfrm_driver_pci);
+        return -ENODEV;
+    }
     return 0;
 }
 
@@ -885,7 +887,7 @@ module_init(vc2_fpgapltfrm_init);
 module_exit(vc2_fpgapltfrm_cleanup);
 
 MODULE_AUTHOR("Asad Kamal");
-MODULE_DESCRIPTION("Renesas VC2 FPGA PLATFORM Driver");
+MODULE_DESCRIPTION("Renesas VC FPGA PLATFORM Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_VERSION(__DATE__"-"__TIME__);
 
@@ -895,7 +897,8 @@ MODULE_VERSION(__DATE__"-"__TIME__);
     2020-08-10    AK  Raw Reading for Port Version 
     2020-08-28    AK  Added Proc statistics, module parameter for vendor id & device id 
     2020-09-03    AK  Added check for range of pci id, pci id to proc and export for further checking  driver name changed
-    
+    2020-09-30    AK  Module automatic unload on failed probe added
+    2020-10-07    AK  Root Proc directory separated
 */
 
 

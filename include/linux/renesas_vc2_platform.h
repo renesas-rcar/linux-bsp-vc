@@ -32,7 +32,7 @@ extern void __iomem          *ioaddr;
 extern void __iomem          *ioaddr_pci;
 extern u32                   pci_id;
 extern struct pci_dev        *pcidev;
-extern struct proc_dir_entry *root_debug_dir;
+
 
 enum vc2_bfile_op_type {
     VC2_IOCTL_BFILE_OP,

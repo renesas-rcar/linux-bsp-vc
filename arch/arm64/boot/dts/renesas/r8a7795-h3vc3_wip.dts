@@ -1,8 +1,7 @@
 /*
- * Device Tree Source for the H3VC2 (R-Car VehicleCompute2) board
+ * Device Tree Source for the H3VC3 (R-Car Vehicle Computer 3) board
  *
- * Copyright (C) 2018 Renesas Electronics Corp.
- * Copyright (C) 2018 Cogent Embedded, Inc.
+ * Copyright (C) 2018-2020 Renesas Electronics Corp.
  *
  * This file is licensed under the terms of the GNU General Public License
  * version 2.  This program is licensed "as is" without any warranty of any
@@ -15,14 +14,13 @@
 #include <dt-bindings/input/input.h>
 
 / {
-	model = "Renesas VC2 board based on r8a7795 ES2.0+";
-	compatible = "renesas,h3vc2", "renesas,r8a7795";
+	model = "Renesas VC3 board based on r8a7795 ES2.0+";
+	compatible = "renesas,h3vc3", "renesas,r8a7795";
 
 	aliases {
 		serial0 = &scif2;
 		serial1 = &scif1;
 		ethernet0 = &avb;
-		uboot_part = &uboot;
 		/* mdio-gpio0 = &mdio0; */
 	};
 
@@ -254,7 +252,6 @@
 
 		status = "okay";
 	};
-
 	cetibox-power {
 		status = "okay";
 		compatible = "cetitec,cetibox-poweroff";
@@ -266,67 +263,48 @@
         rswitch:ethernet {
 			compatible = "rswitch2-tsn";
 			status = "okay";
+                        mdio-gpio = <&gpio0 1 GPIO_ACTIVE_HIGH>;
+                        board-variant  = <3>;
 			ports {
 			        #address-cells = <1>;
 			        #size-cells = <0>;
-				port@0 {
-					/* tsn0 */
-					label = "tsn0";
-					phy-handle = <&phytsn0>;
+                                port@0 {
+					/* tsn6 */
+					label = "tsn6";
+					phy-handle = <&phytsn6>;
 					phy-mode = "rgmii";
-					reg = <0>;
+					reg = <4>;
 				};
-				port@1 {
-					/* tsn1 */
-					label = "tsn1";
-					phy-handle = <&phytsn1>;
+                                port@1 {
+					/* tsn4 */
+					label = "tsn4";
+					phy-handle = <&phytsn4>;
+					phy-mode = "rgmii";
+					reg = <3>;
+				};
+				port@2 {
+					/* tsn5 */
+					label = "tsn5";
+					phy-handle = <&phytsn5>;
+					phy-mode = "rgmii";
+					reg = <2>;
+				};
+                                port@3 {
+					/* tsn7 */
+					label = "tsn7";
+					phy-handle = <&phytsn7>;
 					phy-mode = "rgmii";
 					reg = <1>;
 				};
+                                
+				
 			};
         };
 
 
-        mdio-mux {
-                #address-cells = <1>;
-		#size-cells = <0>;
-		compatible = "mdio-mux-gpio";
-		mdio-parent-bus = <&avb>;
-		gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>, <&gpio0 2 GPIO_ACTIVE_HIGH>;
-                mdio_mux_1: mdio@1 {
-                                    #address-cells = <1>;
-		 	            #size-cells = <0>;
-				    reg = <2>;                
-                                    phytsn0: tsn_phy0 {
-						     compatible = "ethernet-phy-idFFFF.FFFE";
-						     reg = <0x0>;
-						     phy-fixup-registers = <&rswitch_bcast_fixup>;
-						     speed = <100>;
-					     };
-                              
-			    };
-                
-                mdio_mux_2: mdio@2 {
-                                    #address-cells = <1>;
-			            #size-cells = <0>;
-				    reg = <1>;    
-                                    phytsn3: tsn_phy3 {
-						     compatible = "ethernet-phy-idFFFF.FFFE";
-						     reg = <0x0>;
-						     phy-fixup-registers = <&rswitch_bcast_fixup>;
-						     speed = <100>;
-					     };
-                              
-			    };
-	};
-
-        
-                	      
-       rswitch_bcast_fixup: rswitch_bcast_fixup {
-				    fixup-registers = <0x1f 0x43 0x18 0x98 0x1f 0x42>;
-       };
              
 };
+
 
 &audio_clk_a {
 	clock-frequency = <22579200>;
@@ -345,12 +323,33 @@
 		compatible = "ethernet-phy-idFFFF.FFFE";
 		reg = <0x1f>;
 	};
-        phytsn1: tsn_phy1 {
+        phyeth1: eth_phy1 {
                  compatible = "ethernet-phy-idFFFF.FFFE";
-	       	 reg = <0x3>;
-                 phy-fixup-registers = <&rswitch_bcast_fixup>;
+	       	 reg = <0x4>;
 		 speed = <100>;
 	};
+        phytsn4: tsn_phy4 {
+                 compatible = "ethernet-phy-idFFFF.FFFE";
+	       	 reg = <0x0>;
+		 speed = <100>;
+	};
+        phytsn5: tsn_phy5 {
+                 compatible = "ethernet-phy-idFFFF.FFFE";
+	       	 reg = <0x1>;
+		 speed = <100>;
+	};
+        phytsn6: tsn_phy6 {
+                 compatible = "ethernet-phy-idFFFF.FFFE";
+	       	 reg = <0x2>;
+		 speed = <100>;
+	};
+        phytsn7: tsn_phy7 {
+                 compatible = "ethernet-phy-idFFFF.FFFE";
+	       	 reg = <0x3>;
+		 speed = <100>;
+	};
+        
+        
 };
 
 &a57_0 {
@@ -547,11 +546,6 @@
 				remote-endpoint = <&csi20_in>;
 			};
 		};
-	};
-
-	isl1208_rtc: rtc@6f {
-		compatible = "isil,isl1208";
-		reg = <0x6f>;
 	};
 };
 
@@ -922,7 +916,6 @@
 	};
 };
 
-/*
 &gpio2 {
 	net_reset {
 		gpio-hog;
@@ -930,7 +923,6 @@
 		output-low;
 	};
 };
-*/
 
 &gpio5 {
 	canfd_en {
@@ -1173,7 +1165,7 @@
 				reg = <0x001C0000 0x480000>;
 				read-only;
 			};
-			uboot: uboot@00640000 {
+			uboot@00640000 {
 				reg = <0x00640000 0x0C0000>;
 				read-only;
 			};

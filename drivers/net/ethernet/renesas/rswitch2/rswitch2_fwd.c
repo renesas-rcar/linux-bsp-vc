@@ -904,7 +904,7 @@ static int rswitch2_l2_mac_tbl_config(struct rswitch2_l2_fwd_config* config)
 static int rswitch2_l2_table_update_config(struct  rswitch2_l2_fwd_config *config)
 {
     int ret = 0;
-    if(config->l2_fwd_mac_config_entries)
+    //if(config->l2_fwd_mac_config_entries)
     {
         ret = rswitch2_l2_mac_tbl_reset();
         if(ret < 0) {
@@ -1409,6 +1409,36 @@ static int rswitch2fwd_ioctl_getfconfig(struct file * file, unsigned long arg)
 }
 
 /**
+    @brief  FWD Port Forwarding Configuration
+
+    @param  config Forwarding Port Forwarding Configuration structure
+
+    @param  agent Agnet Number
+
+    @return int
+
+*/
+static int rswitch2_port_fwding_config(struct rswitch2_port_forwarding * config, u32 agent)
+{
+    u32 dpv = 0;
+    u32 dest_ports = 0;
+    u32 fwpbfc = 0;
+    for(dest_ports = 0; dest_ports < config->destination_vector_config.dest_eth_ports; dest_ports++) {
+        dpv |= 1 << config->destination_vector_config.port_number[dest_ports];
+    }
+    dpv |= config->destination_vector_config.cpu << board_config.eth_ports;
+    fwpbfc =  (config->force_frame_priority << 26) | (config->ipv6_priority_decode << 25) |
+              (config->ipv4_priority_decode << 23) | (config->ipv4_priority_decode_mode << 24) |
+              (config->security_learn << 22) | (config->mirroring_config.cpu_mirror_enable << 21) |
+              (config->mirroring_config.eth_mirror_enable << 20) |  (config->mirroring_config.ipv_config.ipv_update_enable << 19) |
+              (config->mirroring_config.ipv_config.ipv_value << 16) | dpv;
+    iowrite32(fwpbfc, (ioaddr + FWPBFC0 + (agent * 0x10)));
+    iowrite32(config->csdn, (ioaddr + FWPBFCSDC00 + (agent * 0x10)));
+
+    return 0;
+}
+
+/**
     @brief  FWD General Configuration
 
     @param  config Forwarding General Configuration structure
@@ -1448,9 +1478,16 @@ static int rswitch2_fwd_gen_config(struct rswitch2_fwd_gen_config *config)
                 (config->fwd_gen_port_config[i].l3_tbl_active << 0 );
         if(config->fwd_gen_port_config[i].cpu) {
             iowrite32(fwpc0, (ioaddr + FWPC00 + (board_config.eth_ports * 0x10)));
+                if(config->fwd_gen_port_config[i].port_forwarding.bEnable) {
+                    rswitch2_port_fwding_config(&config->fwd_gen_port_config[i].port_forwarding, board_config.eth_ports);
+                }
         } else {
             iowrite32(fwpc0, (ioaddr + FWPC00 + (config->fwd_gen_port_config[i].portnumber * 0x10)));
+            if(config->fwd_gen_port_config[i].port_forwarding.bEnable) {
+                rswitch2_port_fwding_config(&config->fwd_gen_port_config[i].port_forwarding, config->fwd_gen_port_config[i].portnumber);
+            }
         }
+        
 #ifdef DEBUG
         printk("Register address= %x Write value = %x \n",FWPC00 + (i * 0x10),
                fwpc0);
@@ -1903,9 +1940,9 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
     u8 c = 0;
     u32 fwvlantsr1 = 0;
     u32 fwvlantsr3 = 0;
-    seq_printf(m, "======================================MAC-TABLE====================================================================\n");
-    seq_printf(m, "Line    MAC                Aeging    Learn-Disable    Dynamic    Security    Dest-Lock        Dest-Lock-CPU\n");
-    seq_printf(m, "===================================================================================================================\n");
+    seq_printf(m, "======================================MAC-TABLE==========================================\n");
+    seq_printf(m, "Line        MAC         Mode     Targets         Mirror   Src-Lock      Dst-Lock     IPV\n");
+    seq_printf(m, "=========================================================================================\n");
     for(entry = 0; entry <= 1023; entry++){
         iowrite32(entry, ioaddr + FWMACTR);
         for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
@@ -1935,63 +1972,66 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
                     mac[3] = (fwmactrr3 >> 16) & 0xFF;
                     mac[4] = (fwmactrr3 >> 8) & 0xFF;
                     mac[5] = (fwmactrr3 >> 0) & 0xFF;
+
                     seq_printf(m,"%-4d", entry);
-                    seq_printf(m,"%6x:%2x:%2x:%2x:%2x:%2x", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-                    seq_printf(m,"%8d", aeging);
-                    seq_printf(m,"%17s", learn_disable ? "Yes" : "No");
-                    seq_printf(m,"%11s", dynamic ? "Yes" : "No");
-                    seq_printf(m,"%12s", security ? "Yes" : "No");
+                    seq_printf(m," %02x:%02x:%02x:%02x:%02x:%02x", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+                    seq_printf(m,"  %-7s", dynamic ? ((aeging) ? "Aged" : "Dynamic") : "Static");
+                    
+                    seq_printf(m, " ");
                     for (c = 0; c < board_config.eth_ports; c++) {
-                        if(((destlockdpv >> c) & 0x01) == 1) {
-                            seq_printf(m, "%5d ", c);
+                        if(((dpv >> c) & 0x01) == 1) {
+                            seq_printf(m, " %d", c);
                         } else {
                             seq_printf(m, "  ");
                         }
                     }
-                    if(((destlockdpv >> board_config.eth_ports) & 0x01) == 0x01) {
-                        seq_printf(m, " %14s  \n","Yes");
-                    }else {
-                        seq_printf(m, " %14s  \n","No");
+                    if (((dpv >> board_config.eth_ports) & 0x01) == 0x01) {
+                        seq_printf(m, " CPU:%-3d", csdn);
+                    } else {
+                        seq_printf(m, "        ");
                     }
-                    if(!first_print) {
-                        seq_printf(m, "Src-Lock       Src-Lock-CPU    Eth-Mirror    CPU-Mirror   Dest-Port        CSDN    IPV\n");
-                    }
+
+                    seq_printf(m," %-3s", eth_mirror ? "Eth" : "No");
+                    seq_printf(m," %-3s", cpu_mirror ? "CPU" : "No");
+                    
+                    seq_printf(m, " ");
                     for (c = 0; c < board_config.eth_ports; c++) {
                         if(((srclockdpv >> c) & 0x01) == 1) {
-                            seq_printf(m, "%2d ", c);
+                            seq_printf(m, " %d", c);
                         } else {
                             seq_printf(m, "  ");
                         }
                     }
                     if(((srclockdpv >> board_config.eth_ports) & 0x01) == 0x01) {
-                        seq_printf(m, " %20s  ","Yes");
+                        seq_printf(m, " CPU");
                     }else {
-                        seq_printf(m, " %20s  ","No");
+                        seq_printf(m, "    ");
                     }
-                    seq_printf(m,"%14s", eth_mirror ? "Yes" : "No");
-                    seq_printf(m,"%12s", cpu_mirror ? "Yes" : "No");
-                    
-                    //printk("dpv=%x \n", dpv);
+
+                    seq_printf(m, "  ");
                     for (c = 0; c < board_config.eth_ports; c++) {
-                        if(((dpv >> c) & 0x01) == 1) {
-                            seq_printf(m, "%4d ", c);
+                        if(((destlockdpv >> c) & 0x01) == 1) {
+                            seq_printf(m, " %d", c);
                         } else {
                             seq_printf(m, "  ");
                         }
                     }
-                    if((dpv >> board_config.eth_ports) == 0x01) {
-                        seq_printf(m, "  %14d    ",csdn);
+                    if(((destlockdpv >> board_config.eth_ports) & 0x01) == 0x01) {
+                        seq_printf(m, " %s", "CPU");
+                    }else {
+                        seq_printf(m, "    ");
                     }
-                    else {
-                        seq_printf(m, "%14s", "No");
-                    }
+
                     if(ipv_enable) {
-                        seq_printf(m, "%7d ", ipv_value);
+                        seq_printf(m, "  %d ", ipv_value);
                     } else {
-                        seq_printf(m, "%7s", "No");
+                        seq_printf(m, "  -");
                     }
+
+                    //seq_printf(m,"%12s", security ? "Yes" : "No");
+                    //seq_printf(m,"%17s", learn_disable ? "Yes" : "No");
+
                     seq_printf(m, "\n");
-                    seq_printf(m, "===================================================================================================================\n");
                 }
                 break;
             }
@@ -2000,7 +2040,7 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
         
     }
     first_print = 0;
-    seq_printf(m, "======================================VLAN-TABLE====================================================================\n");
+    seq_printf(m, "\n======================================VLAN-TABLE====================================================================\n");
     seq_printf(m, "VID    Learn-Disable    Security    Src-Lock        Src-Lock-CPU    Eth-Mirror    CPU-Mirror    IPV-Update \n");
     seq_printf(m, "===================================================================================================================\n");
     for(entry = 0; entry <= 0xFFF; entry++){
@@ -2706,11 +2746,11 @@ static void rswitch2_fwd_create_proc_entry(void)
     /*
         create root & sub-directories
     */
-    proc_create(RSWITCH2_FWD_PROC_FILE_ERRORS,0,root_debug_dir, &rswitch2_fwd_errors_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_COUNTERS,0,root_debug_dir, &rswitch2_fwd_counters_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_L3,0,root_debug_dir, &rswitch2_fwd_l3_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE,0,root_debug_dir, &rswitch2_fwd_l2_l3_update_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_L2,0,root_debug_dir, &rswitch2_fwd_l2_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_ERRORS,0,root_dir, &rswitch2_fwd_errors_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_COUNTERS,0,root_dir, &rswitch2_fwd_counters_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_L3,0,root_dir, &rswitch2_fwd_l3_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE,0,root_dir, &rswitch2_fwd_l2_l3_update_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_L2,0,root_dir, &rswitch2_fwd_l2_fops);
 
 }
 
@@ -2726,11 +2766,11 @@ static void rswitch2_fwd_create_proc_entry(void)
 static void rswitch2_fwd_remove_proc_entry(void)
 {
 
-    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_ERRORS, root_debug_dir);
-    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_COUNTERS, root_debug_dir);
-    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L3, root_debug_dir);
-    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE, root_debug_dir);
-    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L2, root_debug_dir);
+    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_ERRORS, root_dir);
+    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_COUNTERS, root_dir);
+    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L3, root_dir);
+    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE, root_dir);
+    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L2, root_dir);
 }
 
 
@@ -2777,5 +2817,6 @@ int rswitch2_fwd_exit(void)
     2020-09-03    AK  Added Proc Statistics
     2020-09-07    AK  Updated for L2/L3 Update, Proc statistics L2/L3 Update
     2020-09-09    AK  Layer 2 Forwarding Support, Proc statistics
+    2020-10-07    AK  Updated for Port Forwarding, Proc root directory change
 
 */

@@ -29,16 +29,18 @@
 #define RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT  0x00000002
 #define RSWITCH2_TSN_RXTSTAMP_TYPE          0x00000006
 #define RENESAS_RSWITCH2_PHYS       4
-#define NUM_RX_QUEUE    2
 #define NUM_TX_QUEUE    2
+#define INTERNAL_GW     1
+#define RSWITCH2_RX_GW_QUEUE_NUM 0
+#define NUM_RX_QUEUE    2 + INTERNAL_GW
 #define RENESAS_RSWITCH2_BASE_PORT_MAC                  { 0x02, 0x00, 0x00, 0x88, 0x88, 0x00 }
 #define PORT_BITMASK (unsigned int)(GENMASK_ULL(RENESAS_RSWITCH2_MAX_ETHERNET_PORTS, 0))
 #define PORTGWCA_BITMASK (unsigned int)(GENMASK_ULL(RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1, 0))
 #define RCE_BIT 1 << 16
 #define RX_DBAT_ENTRY_NUM   64
 #define TX_DBAT_ENTRY_NUM   1024
-#define DBAT_ENTRY_NUM    (RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE) + NUM_RX_QUEUE
-#define RX_QUEUE_OFFSET   (RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE)
+#define DBAT_ENTRY_NUM    (RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE) + NUM_RX_QUEUE + INTERNAL_GW
+#define RX_QUEUE_OFFSET   (RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE) + INTERNAL_GW
 #define RSWITCH2_BE 0
 #define RSWITCH2_NC 1
 #define TX_RING_SIZE0   1024    /* TX ring size for Best Effort */
@@ -48,11 +50,12 @@
 #define RX_RING_SIZE2   1024
 #define DPTR_ALIGN  4
 #define RSWITCH2_QUEUE_NC                  1
+#define RENESAS_RSWITCH2_RX_GW_QUEUE 2
 #define RIS_BITMASK   GENMASK(DBAT_ENTRY_NUM, RX_QUEUE_OFFSET)
 #define TIS_BITMASK   GENMASK(RX_QUEUE_OFFSET -1, 0)
 #define RSWITCH2_COM_BPIOG 0x01
 #define RSWITCH2_COM_BPR   0x02
-#define RSWITCH2_ETH_DRIVER_VERSION "0.0.1"
+#define RSWITCH2_ETH_DRIVER_VERSION "0.0.3"
 /* Use 2 Tx Descriptor per frame */
 #define NUM_TX_DESC     2
 #define RSWITCH2_DEF_MSG_ENABLE \
@@ -265,5 +268,7 @@ struct port_private {
     Change History
     2020-08-10    AK  Initial Version
     2020-08-19    AK  Structure for port and Masks
+    2020-09-18    AK  Changes for Internal GW port
+    2020-10-07    AK  Changes for Internal GW port Descriptor chain movement
 
 */

@@ -22,6 +22,7 @@
 		serial1 = &scif1;
 		ethernet0 = &avb;
 		/* mdio-gpio0 = &mdio0; */
+		uboot_part = &uboot;
 	};
 
 	chosen {
@@ -241,56 +242,55 @@
 		clock-frequency = <16000000>;
 	};
 
-	usb3_phy: usb-phy@e65e8000 {
-		compatible = "renesas,usb3-phy-r8a7795", "renesas,rcar-gen3-usb3-phy";
-		reg = <0 0xe65ee000 0 0x90>;
-		/*interrupts = <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>;*/
-		clocks = <&cpg CPG_MOD 328>, <&usb_extal_clk>;
-		clock-names = "usb3-if", "usb_extal";
-		power-domains = <&sysc R8A7795_PD_ALWAYS_ON>;
-		#phy-cells = <0>;
 
+	cetibox-power {
 		status = "okay";
+		compatible = "cetitec,cetibox-poweroff";
+		wakecpld = <&i2c5 0x3C>; /* i2c bus, i2c addr */
+		//wakecpld-config = <&i2c1 0x60>; /* i2c bus, i2c addr */
 	};
-        rswitch: ethernet {
+
+    rswitch: ethernet {
 		compatible = "rswitch2-tsn";
 		status = "okay";
-                mdio-gpio = <&gpio0 1 GPIO_ACTIVE_HIGH>;
-                board-variant  = <2>;
+		mdio-gpio = <&gpio0 1 GPIO_ACTIVE_HIGH>;
+		board-variant = <3>;
 		ports {
-		        #address-cells = <1>;
-		        #size-cells = <0>;
-                         port@0 {
-				/* eth1 */
-				label = "tsn0";
-				/* phy-handle = <&phyeth1>; */
-				/* phy-mode = "rgmii"; */
-				reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			port@0 {
+				/* tsn6 */
+				label = "tsn6";
+				phy-handle = <&phytsn6>;
+				phy-mode = "rgmii";
+				reg = <4>;
 			};
-                        port@1 {
+			port@1 {
 				/* tsn4 */
-				label = "tsn1";
-				/* phy-handle = <&phytsn4>; */
-				/* phy-mode = "rgmii"; */
-				reg = <1>;
+				label = "tsn4";
+				phy-handle = <&phytsn4>;
+				phy-mode = "rgmii";
+				reg = <3>;
 			};
 			port@2 {
 				/* tsn5 */
-				label = "tsn2";
-				/* phy-handle = <&phytsn5>; */
-				/* phy-mode = "rgmii"; */
+				label = "tsn5";
+				phy-handle = <&phytsn5>;
+				phy-mode = "rgmii";
 				reg = <2>;
 			};
-                        port@3 {
-				/* tsn6 */
-				label = "tsn3";
-				/* phy-handle = <&phytsn6>; */
-				/* phy-mode = "rgmii"; */
-				reg = <3>;
+			port@3 {
+				/* tsn7 */
+				label = "tsn7";
+				phy-handle = <&phytsn7>;
+				phy-mode = "rgmii";
+				reg = <1>;
 			};
 		};
-        };
+	};
 };
+
+
 
 &audio_clk_a {
 	clock-frequency = <22579200>;
@@ -300,42 +300,35 @@
 	pinctrl-0 = <&avb_pins>;
 	pinctrl-names = "default";
 	renesas,no-ether-link;
-	phy-handle = <&phy1f>;
+	phy-handle = <&phyeth0>;
 	status = "okay";
 
 	phy-mode = "rgmii";
 
-	phy1f: dummy_phy {
+	phyeth0: eth_phy0 {
 		compatible = "ethernet-phy-idFFFF.FFFE";
 		reg = <0x1f>;
 	};
-        phyeth1: eth_phy1 {
-                 compatible = "ethernet-phy-idFFFF.FFFE";
-	       	 reg = <0x4>;
-		 speed = <100>;
+	phyeth1: eth_phy1 {
+		compatible = "ethernet-phy-idFFFF.FFFE";
+		reg = <0x4>;
 	};
-        phytsn4: tsn_phy4 {
-                 compatible = "ethernet-phy-idFFFF.FFFE";
-	       	 reg = <0x0>;
-		 speed = <100>;
+	phytsn4: tsn_phy4 {
+		compatible = "ethernet-phy-idFFFF.FFFE";
+		 reg = <0x0>;
 	};
-        phytsn5: tsn_phy5 {
-                 compatible = "ethernet-phy-idFFFF.FFFE";
-	       	 reg = <0x1>;
-		 speed = <100>;
+	phytsn5: tsn_phy5 {
+		compatible = "ethernet-phy-idFFFF.FFFE";
+		reg = <0x1>;
 	};
-        phytsn6: tsn_phy6 {
-                 compatible = "ethernet-phy-idFFFF.FFFE";
-	       	 reg = <0x2>;
-		 speed = <100>;
+	phytsn6: tsn_phy6 {
+		compatible = "ethernet-phy-idFFFF.FFFE";
+		reg = <0x2>;
 	};
-        phytsn7: tsn_phy7 {
-                 compatible = "ethernet-phy-idFFFF.FFFE";
-	       	 reg = <0x3>;
-		 speed = <100>;
+	phytsn7: tsn_phy7 {
+		compatible = "ethernet-phy-idFFFF.FFFE";
+		reg = <0x3>;
 	};
-        
-        
 };
 
 &a57_0 {
@@ -532,6 +525,11 @@
 				remote-endpoint = <&csi20_in>;
 			};
 		};
+	};
+
+	isl1208_rtc: rtc@6f {
+		compatible = "isil,isl1208";
+		reg = <0x6f>;
 	};
 };
 
@@ -812,12 +810,10 @@
 		function = "usb1";
 	};
 
-	/* FIXME uncomment on HW rev. B
 	usb2_pins: usb2 {
 		groups = "usb2";
 		function = "usb2";
 	};
-	*/
 
 	usb23_pins: usb2_ch3 {
 		groups = "usb2_ch3";
@@ -1025,10 +1021,6 @@
 	status = "okay";
 };
 
-&ehci3 {
-	status = "okay";
-};
-
 &ohci0 {
        status = "okay";
 };
@@ -1041,24 +1033,13 @@
        status = "okay";
 };
 
-&ohci3 {
-       status = "okay";
+
+&hsusb3 {
+        dr_mode = "peripheral";
+        status = "okay";
 };
 
 
-
-&usb3_peri0 {
-	status = "okay";
-};
-
-&xhci0 {
-	iommus = <&ipmmu_hc 12>;
-
-	phys = <&usb3_phy>;
-	phy-names = "usb";
-
-	status = "okay";
-};
 
 /* MOST */
 &usb2_phy0 {
@@ -1067,7 +1048,7 @@
 	status = "okay";
 };
 
-/* CN10 */
+/* CN12 */
 &usb2_phy1 {
 	pinctrl-0 = <&usb1_pins>;
 	pinctrl-names = "default";
@@ -1077,17 +1058,18 @@
 
 /* CN11 */
 &usb2_phy2 {
-	/* FIXME uncomment on HW rev. B
-	   pinctrl-0 = <&usb2_pins>;
-	   pinctrl-names = "default"; */
+	pinctrl-0 = <&usb2_pins>;
+	pinctrl-names = "default";
+
 	status = "okay";
 };
 
-/* DBG */
+/* CN 7 / USB device */
 &usb2_phy3 {
 	pinctrl-0 = <&usb23_pins>;
 	pinctrl-names = "default";
-	dr_mode = "otg";
+
+	dr_mode = "peripheral";
 	status = "okay";
 };
 
@@ -1151,7 +1133,7 @@
 				reg = <0x001C0000 0x480000>;
 				read-only;
 			};
-			uboot@00640000 {
+			uboot: uboot@00640000 {
 				reg = <0x00640000 0x0C0000>;
 				read-only;
 			};

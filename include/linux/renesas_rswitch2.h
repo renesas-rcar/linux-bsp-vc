@@ -76,7 +76,7 @@
 #define RENESAS_RSWITCH2_MAX_HASH_EQUATION 0xFFFF
 #define RENESAS_RSWITCH2_VC_PCI_ID       0xE002
 typedef  __uint128_t uint128_t;
-
+extern struct proc_dir_entry *root_dir;
 enum rswitch2_gwca_mode {
     rswitch2_gwca_mode_reset,
     rswitch2_gwca_mode_disable,
@@ -168,6 +168,11 @@ enum rswitch2_enable_disable {
     enable,
 };
 
+
+enum rswitch2_priority_decode_mode {
+    precedent,
+    tos,
+};
 
 struct  rswitch2_source_lock_config {
     uint32_t source_ports;
@@ -274,6 +279,20 @@ struct rswitch2_ipv_fwd_config {
 
 };
 
+struct rswitch2_port_forwarding {
+    uint32_t bEnable;
+    enum rswitch2_enable_disable    force_frame_priority;
+    enum rswitch2_enable_disable    ipv6_priority_decode;
+    enum rswitch2_enable_disable    ipv4_priority_decode;
+    enum rswitch2_priority_decode_mode  ipv4_priority_decode_mode;
+    uint32_t security_learn;
+    uint32_t csdn;
+    struct rswitch2_mirroring_config mirroring_config;
+    struct rswitch2_destination_vector_config    destination_vector_config;
+    
+
+};
+
 struct rswitch2_fwd_gen_port_config {
     uint32_t portnumber;
     uint32_t cpu;
@@ -308,6 +327,7 @@ struct rswitch2_fwd_gen_port_config {
     uint32_t l3_reject_unknown_secure_stream;
     uint32_t l3_reject_unknown_stream;
     uint32_t l3_tbl_active;
+    struct rswitch2_port_forwarding port_forwarding;
 
 };
 
@@ -519,5 +539,6 @@ extern int rswitch2_fwd_exit(void);
     Change History
     2020-08-10    AK  Initial Version
     2020-09-07    AK  Updated for L2/L3 Update
+    2020-10-07    AK  Updated for Port Forwarding
 
 */
