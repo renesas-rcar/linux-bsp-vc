@@ -1,9 +1,10 @@
+#define CONFIG_RENESAS_RSWITCH2_STATS 1
 /**
     @brief  Renesas R-SWITCH2 Ethernet Driver
 
     Provide APIs to Network Interface Part of Ethernet Driver
 
-    @bugs/issues: Autoneg not working 
+    @bugs/issues: Autoneg not working
 
     @notes
 
@@ -55,6 +56,7 @@
 #include <linux/pci.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/skbuff.h>
 #include "rswitch2_reg.h"
 #include "rswitch2_eth.h"
 #include "rswitch2_eth_usr.h"
@@ -66,24 +68,26 @@
 #include <linux/renesas_rswitch2.h>
 #include <linux/renesas_rswitch2_platform.h>
 #include <linux/renesas_vc2_platform.h>
+#include <linux/phy_led_triggers.h>
 
 //#define DEBUG 1
 
 //#define PHY_CONFIG_SUPPORT
 #define BOARD_VC3
+#define TX_TS_FEATURE 1
 #define RSWITCH2_PM_OPS	NULL
 #define  RSWITCH2_ETH_INTERRUPT_LINES  1
 #define RSWITCH2_INT_LINE_GPIO 511
 #define RSWITCH2_ETH_CTRL_MINOR  (127)
 #define PHY_SEL_MUX  0x01004CC0
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
-#define RSWITCH2_PROC_ROOT_DIR "rswitch2"
-#define RSWITCH2_ETH_PROC_FILE_DRIVER  "ethdriver"
-#define RSWITCH2_ETH_PROC_FILE_ERRORS   "etherrors"
-#define RSWITCH2_ETH_PROC_FILE_COUNTERS "ethcounters"
-#define RSWITCH2_ETH_PROC_FILE_TX       "tx"
-#define RSWITCH2_ETH_PROC_FILE_RX       "rx"
-#define FUTURE_USE 
+  #define RSWITCH2_PROC_ROOT_DIR "rswitch2"
+  #define RSWITCH2_ETH_PROC_FILE_DRIVER     "VERSION"
+  #define RSWITCH2_ETH_PROC_FILE_ERRORS     "etherrors"
+  #define RSWITCH2_ETH_PROC_FILE_COUNTERS   "etha"
+  #define RSWITCH2_ETH_PROC_FILE_RXTX       "rxtx-all"
+  #define RSWITCH2_ETH_PROC_FILE_RXTX_SHORT "rxtx"
+  #define FUTURE_USE
 #endif
 /***************************************Global Variables Start ****************************************************************/
 DEFINE_SPINLOCK(port_lock);
@@ -93,37 +97,46 @@ struct ethports_config      board_config;
 
 static void __iomem       * ethport_addr[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS];
 u32 desc_bat_size;
+u32 ts_desc_bat_size;
 u32 tx_ts_desc_bat_size;
 dma_addr_t desc_bat_dma;
+dma_addr_t ts_desc_bat_dma;
 dma_addr_t tx_desc_dma[NUM_TX_QUEUE];
 
-static struct rswitch2_ext_ts_desc *desc_end[NUM_RX_QUEUE];
+
 dma_addr_t rx_desc_bat_dma[NUM_RX_QUEUE];
 dma_addr_t rx_desc_dma[NUM_RX_QUEUE];
+dma_addr_t ts_desc_dma;
 struct rswitch2_ext_ts_desc *rx_desc_bat[NUM_RX_QUEUE];
 struct sk_buff **rx_skb[NUM_RX_QUEUE];
 u32 rx_desc_bat_size;
 u32 num_rx_ring[NUM_RX_QUEUE + 1];
 u32 cur_rx[NUM_RX_QUEUE];   /* Consumer ring indices */
 u32 dirty_rx[NUM_RX_QUEUE]; /* Producer ring indices */
+u32 num_ts_ring;
+u32 cur_ts; /* Consumer ring indices */
+u32 dirty_ts;   /* Producer ring indices */
 struct rswitch2_ext_ts_desc *rx_ring[NUM_RX_QUEUE];
 struct rswitch2_desc *desc_bat;
-
+struct rswitch2_desc *ts_desc_bat;
+struct rswitch2_ts_desc *ts_ring;
 ktime_t         ktime;
 static int board_variant = 0;
 unsigned int		gpio;
 static bool mux_port = 0;
+static u64  rxtx_all_clear  = 1;
+static u64  error_clear  = 1;
 static unsigned int nonetdev  = 0;
 static unsigned int netdev_created = 0;
 struct rswitch2_eth_config       config;                     ///< @brief Active Operational Configuration
 struct rswitch2_eth_config       config_new;                 ///< @brief New Operational Configuration
+static struct rswitch2_proc_counter counter;
 static int                  rswitchtsn_devmajor;
 module_param(rswitchtsn_devmajor, int, 0440);
 static struct class       * rswitchtsn_devclass = NULL;
 static dev_t                rswitchtsn_dev;
 static struct cdev          rswitchtsn_cdev;
 static struct device        rswitchtsn_device;
-
 #define MS_TO_NS(x) (x * 1E6L)
 static const struct of_device_id rswitch2_of_tbl[] = {
     { .compatible = "rswitch2-tsn", .data = NULL },
@@ -150,7 +163,7 @@ int                rswitch2_eth_irq[RSWITCH2_ETH_INTERRUPT_LINES];
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
 /* Proc Directories*/
 static struct {
-    struct proc_dir_entry   * rootdir;                      
+    struct proc_dir_entry   * rootdir;
 } rswitch2_eth_procdir;
 #endif
 /***************************************Global Variables End  ****************************************************************/
@@ -374,7 +387,7 @@ static void port_generate_mac_address(u32 Port, struct net_device * ndev )
 */
 static void port_set_mac_address(struct net_device * ndev)
 {
-    
+
     portreg_write(ndev, ( (ndev->dev_addr[5]      ) |
                           (ndev->dev_addr[4] << 8 ) |
                           (ndev->dev_addr[3] << 16) |
@@ -519,9 +532,9 @@ static int port_set_settings(struct net_device * ndev, const struct ethtool_link
     if (ndev->phydev != NULL)
     {
         //spin_lock_irqsave(&port_lock, flags);
-        
-        
- 
+
+
+
         mdelay(1);
         if(ecmd->base.speed == 100) {
             port_changestate(ndev, rswitch2_portstate_disable);
@@ -531,7 +544,7 @@ static int port_set_settings(struct net_device * ndev, const struct ethtool_link
             phydev_disable_bcast_seterrata(ndev,100,mdp->priv_flags);
         }
         else if(ecmd->base.speed == 1000) {
-            
+
             port_changestate(ndev, rswitch2_portstate_disable);
             port_changestate(ndev, rswitch2_portstate_config);
             portreg_write(ndev, (0x01130000 + 0x13), MPIC);
@@ -545,7 +558,7 @@ static int port_set_settings(struct net_device * ndev, const struct ethtool_link
             //spin_unlock_irqrestore(&port_lock, flags);
             return ret;
         }
-        
+
         //spin_unlock_irqrestore(&port_lock, flags);
     }
     else
@@ -555,6 +568,78 @@ static int port_set_settings(struct net_device * ndev, const struct ethtool_link
     }
     return 0;
 }
+
+/**
+    @brief  Query timestamping capabilities of port
+
+    Return to the socket layer the port timestamping capabilities
+    - External AVB ports. Show we can do hardware timestamping
+    - Internal AVB port. Show we cannot do any hardware timestamping
+
+    @param  ndev    net_device for the individual switch port device 'avb{n}'
+    @param  tsinfo
+
+    @return < 0, or 0 on success
+*/
+static int rswitch2_port_get_ts_info(struct net_device * ndev, struct ethtool_ts_info * tsinfo)
+{
+    struct port_private * mdp = netdev_priv(ndev);
+
+    /*
+        SOF_TIMESTAMPING_TX_HARDWARE:  try to obtain send time stamp in hardware
+        SOF_TIMESTAMPING_TX_SOFTWARE:  if SOF_TIMESTAMPING_TX_HARDWARE is off or fails, then do it in software
+        SOF_TIMESTAMPING_RX_HARDWARE:  return the original, unmodified time stamp as generated by the hardware
+        SOF_TIMESTAMPING_RX_SOFTWARE:  if SOF_TIMESTAMPING_RX_HARDWARE is off or fails, then do it in software
+        SOF_TIMESTAMPING_RAW_HARDWARE: return original raw hardware time stamp
+        SOF_TIMESTAMPING_SYS_HARDWARE: return hardware time stamp transformed to the system time base
+        SOF_TIMESTAMPING_SOFTWARE:     return system time stamp generated in software
+
+        The bits in the 'tx_types' and 'rx_filters' fields correspond to the 'hwtstamp_tx_types' and
+        'hwtstamp_rx_filters' enumeration values,
+    */
+    if(mdp->portnumber != board_config.eth_ports)
+    {
+        if(mdp->portstate != rswitch2_portstate_operate)
+        {
+            printk("ethtool:Info: Device not Up PTP Clock not set, showing Default\n");
+            tsinfo->phc_index = 0;
+            return 0;
+        }
+        tsinfo->phc_index = ptp_clock_index(mdp->ptp.clock);
+
+        tsinfo->so_timestamping = SOF_TIMESTAMPING_TX_HARDWARE |
+        SOF_TIMESTAMPING_RX_HARDWARE |
+        SOF_TIMESTAMPING_SOFTWARE |
+        SOF_TIMESTAMPING_TX_SOFTWARE |
+        SOF_TIMESTAMPING_RX_SOFTWARE |
+        SOF_TIMESTAMPING_RAW_HARDWARE;
+        tsinfo->tx_types = (1 << HWTSTAMP_TX_OFF) |
+        (1 << HWTSTAMP_TX_ON);
+        tsinfo->rx_filters = (1 << HWTSTAMP_FILTER_NONE) |
+        (1 << HWTSTAMP_FILTER_ALL);
+
+
+    }
+    else
+    {
+        if(mdp->portstate != rswitch2_portstate_operate)
+        {
+            printk("ethtool:Info: Device not Up PTP Clock not set, showing Default\n");
+            tsinfo->phc_index = 0;
+            return 0;
+        }
+        tsinfo->phc_index = 0;
+        return 0;
+
+    }
+
+
+
+
+
+    return 0;
+}
+
 
 /**
     @brief  ethtool operations
@@ -569,6 +654,7 @@ static const struct ethtool_ops     port_ethtool_ops = {
     .get_priv_flags	= port_get_priv_flags,
     .set_priv_flags	= port_set_priv_flags,
     .get_link           = ethtool_op_get_link,
+    .get_ts_info        = rswitch2_port_get_ts_info,
 
 };
 
@@ -585,6 +671,7 @@ static int port_dev_init(struct net_device * ndev)
 {
     int                     ret = 0;
     u32   priority = 0;
+    u32   eavtc    = 0;
     /* Enable Promiscous mode */
     portreg_write(ndev, 0x00070007, MRAFC);
     /* Set MAC address */
@@ -593,27 +680,32 @@ static int port_dev_init(struct net_device * ndev)
     for(priority = 0; priority < RSWITCH2_MAX_CTAG_PCP; priority++) {
         portreg_write(ndev, 0x7FF, (EATDQDC0 + (priority * 4)));
     }
+    /* Set VLAN Egress Mode to SC-TAG*/
+    portreg_write(ndev, (RSWITCH2_VLAN_EGRESS_SCTAG_MODE), EAVCC);
+    eavtc = (RSWITCH2_DEF_CTAG_VLAN_ID << 0) | (RSWITCH2_DEF_CTAG_PCP << 12) | (RSWITCH2_DEF_CTAG_DEI << 15)
+            | (RSWITCH2_DEF_STAG_VLAN_ID << 16) | (RSWITCH2_DEF_STAG_PCP << 28) | (RSWITCH2_DEF_STAG_DEI << 31);
+    portreg_write(ndev, eavtc, EAVTC);
     return ret;
 }
 /**
     @brief  Set Port Speed
 
-    @param  ndev    net_device for the individual switch port device 
+    @param  ndev    net_device for the individual switch port device
 */
 static void port_set_rate(struct net_device * ndev)
 {
     struct port_private * mdp = netdev_priv(ndev);
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     switch (mdp->speed)
     {
         case 100:       /* 100BASE */
-            
-            
+
+
             port_changestate(ndev, rswitch2_portstate_config);
             portreg_write(ndev, (0x01130000 + 0x0b), MPIC);
             port_changestate(ndev, rswitch2_portstate_operate);
@@ -621,7 +713,7 @@ static void port_set_rate(struct net_device * ndev)
             /* Software reset Phy can be in PDWN mode*/
             //phy_write(ndev->phydev,0, 0x8000);
                 phydev_disable_bcast_seterrata(ndev,100, port_get_priv_flags(ndev));
-            }  
+            }
             break;
         case 1000:      /* 1000BASE */
             port_changestate(ndev, rswitch2_portstate_config);
@@ -631,14 +723,14 @@ static void port_set_rate(struct net_device * ndev)
             /* Software reset Phy can be in PDWN mode*/
             //phy_write(ndev->phydev,0, 0x8000);
                 phydev_disable_bcast_seterrata(ndev,1000, port_get_priv_flags(ndev));
-            }  
-            
+            }
+
             break;
         default:
             printk("[RSWITCH2] %s Cannot set speed %uMBit - not supported\n", ndev->name, mdp->speed);
     }
-    
-    
+
+
 
 }
 
@@ -690,12 +782,29 @@ static void port_phy_eventhandler(struct net_device * ndev)
 
 }
 
+static bool is_realtek_t1_phy(struct device_node *phy_node)
+{
+    u32 phy_addr = 0;
+    bool ret;
 
+    of_property_read_u32(phy_node, "reg", &phy_addr);
 
+    /* Realtek T1 phys have
+     * addresses 0x0, 0x1, 0x2 and
+     * 0x3 */
+    switch (phy_addr) {
+    case 0x0:
+    case 0x1:
+    case 0x2:
+    case 0x3:
+	ret = true;
+	break;
+    default:
+	ret = false;
+    }
 
-
-
-
+    return ret;
+}
 
 
 /**
@@ -735,16 +844,15 @@ static int rswitch2_phy_init(struct device_node *child, struct net_device *ndev)
 
     phydev = of_phy_connect(ndev, pn, port_phy_eventhandler, 0,
                             priv->phy_interface);
-    of_node_put(pn);
     if (!phydev) {
         netdev_err(ndev, "failed to connect PHY\n");
         err = -ENOENT;
         goto err_deregister_fixed_link;
     }
     phydev->irq = PHY_POLL;
-   
+
     phy_set_max_speed(phydev, SPEED_1000);
-    
+
     phydev->supported = PHY_1000BT_FEATURES | PHY_100BT_FEATURES| SUPPORTED_Autoneg;
     /* 10BASE is not supported */
     phydev->supported &= ~PHY_10BT_FEATURES;
@@ -753,8 +861,25 @@ static int rswitch2_phy_init(struct device_node *child, struct net_device *ndev)
     priv->phydev = phydev;
     priv->phydev->autoneg =0;
 
+    /* Workaround: Normally the phy led-triggers are automatically
+     * created when calling of_phy_connect(), one trigger for each
+     * supported speed that is read from the phy BMSR register.
+     * However our Realtek T1 phys return no supported speed from BMSR
+     * so we need to call phy_led_triggers_register() again here
+     * *after* the supported speed have been set in
+     * phydev->supported.
+     * This will be removed once we have a Realtek PHY driver instead
+     * of the genphy. */
+    if (is_realtek_t1_phy(pn)) {
+	err = phy_led_triggers_register(phydev);
+	if (err)
+	    printk("phy_led_triggers_register() for node \"%s\" failed!! (err=%d)\n", pn->name, err);
+    }
+
     mdio_val = mdiobus_read(phydev->mdio.bus,0x0,0x18);
     printk("Phy Register address for 0 is %x \n", mdio_val);
+
+    of_node_put(pn);
 
     return 0;
 err_deregister_fixed_link:
@@ -775,6 +900,7 @@ err_deregister_fixed_link:
 static int rswitch2_enable_interrupts(void)
 {
     iowrite32(0xFFFF, gwca_addr + GWDIE0);
+    iowrite32(0x1, gwca_addr + GWTSDIE);
 
     return 0;
 }
@@ -824,33 +950,34 @@ static int port_open(struct net_device * ndev)
         printk("Port Change State to Operate Failed \n");
         return ret;
     }
+    ptp_rswitch2_port_init(ndev, mdp->pdev);
     netif_start_queue(ndev);
     mdp->opened = true;
     //ndev->phydev->state = PHY_UP;
-    
+
     if(board_variant == 3){
-        
+
         if(mdp->portindex !=0 ){
             /* Software reset Phy can be in PDWN mode*/
             phy_write(ndev->phydev,0, 0x8000);
-            ret = phydev_disable_bcast_seterrata(ndev,100, 1);        
+            ret = phydev_disable_bcast_seterrata(ndev,100, 1);
             if(ret < 0) {
                 printk("Phy Disable Bcast and config failed \n");
                 return ret;
             }
-            
-            phy_start(ndev->phydev);       
+
+            phy_start(ndev->phydev);
         }
-        
-        
-        
+
+
+
     }
     else if(board_variant == 2){
 #ifdef PHY_CONFIG_SUPPORT
         phy_start(ndev->phydev);
 #endif
-    }   
-        
+    }
+
 
 
     if(port_count == 0) {
@@ -898,7 +1025,7 @@ static struct net_device_stats  * port_get_statistics(struct net_device * ndev)
 static int port_close(struct net_device * ndev)
 {
     struct port_private    * mdp = netdev_priv(ndev);
-
+    struct rswitch2_tstamp_skb *ts_skb, *ts_skb2;
 
     int err = 0;
 
@@ -911,6 +1038,10 @@ static int port_close(struct net_device * ndev)
         netif_stop_queue(ndev);
 
     } else {
+        list_for_each_entry_safe(ts_skb, ts_skb2, &mdp->ts_skb_list, list) {
+            list_del(&ts_skb->list);
+            kfree(ts_skb);
+        }
         napi_disable(&mdp->napi[0]);
         napi_disable(&mdp->napi[1]);
         netif_stop_queue(ndev);
@@ -1019,7 +1150,7 @@ static int port_start_xmit(struct sk_buff * skb, struct net_device * ndev)
 
     struct port_private *priv ;
 
-    
+
     struct net_device_stats * stats;
     u16 q = 0;
     struct rswitch2_ext_desc *desc;
@@ -1029,9 +1160,10 @@ static int port_start_xmit(struct sk_buff * skb, struct net_device * ndev)
     void *buffer;
     u32 entry;
     u32 len;
+    struct rswitch2_tstamp_skb *ts_skb;
     priv = netdev_priv(ndev);
     stats = &priv->stats;
-    
+
 #ifdef DEBUG
     printk("Xmit called \n");
 #endif
@@ -1085,16 +1217,16 @@ static int port_start_xmit(struct sk_buff * skb, struct net_device * ndev)
     desc_first = desc;
     desc->dptrl = cpu_to_le32(dma_addr);
     desc->info_ds = cpu_to_le16(len);
-    
+
 #ifdef INTERNAL_GW
-    if(priv->portnumber != board_config.eth_ports) 
+    if(priv->portnumber != board_config.eth_ports)
 #endif
     {
         desc->info1l = 0x01 << 2; // Direct Descriptor
-    } 
+    }
 
 #ifdef INTERNAL_GW
-    if(priv->portnumber != board_config.eth_ports) 
+    if(priv->portnumber != board_config.eth_ports)
 #endif
     {
         desc->info1h = (((u32)1) << priv->portnumber) << 16;
@@ -1135,20 +1267,15 @@ static int port_start_xmit(struct sk_buff * skb, struct net_device * ndev)
         /* TAG and timestamp required flag */
         skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 
-        desc_first->info1l = (ts_skb->tag & 0xFF);// | TX_TSR;
-        desc_first->info1l  = desc_first->info1l | (1 << 8);
+        desc_first->info1l |= (ts_skb->tag & 0xFF) << 8;
+        desc_first->info1l  |= (1 << 3);// | TX_TSR;
 
     }
 #endif
     skb_tx_timestamp(skb);
     /* Descriptor type must be set after all the above writes */
     dma_wmb();
-    
-    if(q == RSWITCH2_QUEUE_NC) {
-        desc->die_dt = DT_FEND;
-    } else {
-        desc->die_dt = DT_FEND;
-    }
+    desc->die_dt = DT_FEND;
     desc--;
     desc->die_dt = DT_FSTART;
 
@@ -1162,7 +1289,7 @@ static int port_start_xmit(struct sk_buff * skb, struct net_device * ndev)
     }
     stats->tx_packets++;
     stats->tx_bytes += len;
-    
+
 exit:
     mmiowb();
     spin_unlock_irqrestore(&priv->lock, flags);
@@ -1187,6 +1314,140 @@ drop:
 
 
 /**
+    @brief  Get HW TS  IOCTL
+
+    @param  ndev    net_device for the port device
+
+    @param  req
+
+    @return < 0, or 0 on success
+*/
+static int rswitch2_hwtstamp_get(struct net_device *ndev, struct ifreq *req)
+{
+    struct port_private  * mdp = netdev_priv(ndev);
+    struct hwtstamp_config config;
+
+    config.flags = 0;
+    config.tx_type = mdp->tstamp_tx_ctrl ? HWTSTAMP_TX_ON :
+    HWTSTAMP_TX_OFF;
+    if (mdp->tstamp_rx_ctrl & RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT)
+    config.rx_filter = HWTSTAMP_FILTER_PTP_V2_L2_EVENT;
+    else if (mdp->tstamp_rx_ctrl & RSWITCH2_RXTSTAMP_TYPE_ALL)
+    config.rx_filter = HWTSTAMP_FILTER_ALL;
+    else
+    config.rx_filter = HWTSTAMP_FILTER_NONE;
+
+    return copy_to_user(req->ifr_data, &config, sizeof(config)) ?
+    -EFAULT : 0;
+
+}
+
+
+/**
+    @brief  Control hardware time stamping
+
+    @param  ndev    net_device for the individual switch port device 'tsn{n}'
+    @param  ifr
+    @param  cmd
+
+    @return < 0, or 0 on success
+*/
+static int rswitch2_port_hwtstamp_set(struct net_device *ndev, struct ifreq *ifr, int cmd)
+{
+    struct port_private  * mdp = netdev_priv(ndev);
+    struct hwtstamp_config   config;
+    u32 tstamp_tx_ctrl;
+    u32 tstamp_rx_ctrl = RSWITCH2_TSN_RXTSTAMP_ENABLED;
+
+
+    if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
+    {
+        return -EFAULT;
+    }
+
+    /* reserved for future extensions */
+    if (config.flags)
+    {
+        return -EINVAL;
+    }
+
+    switch (config.tx_type)
+    {
+
+    case HWTSTAMP_TX_OFF:
+        tstamp_tx_ctrl = 0;
+    case HWTSTAMP_TX_ON:
+        tstamp_tx_ctrl = RSWITCH2_TSN_TXTSTAMP_ENABLED;
+        break;
+        /* Below line for One Step Timestamping */
+    case 2:
+        tstamp_tx_ctrl = RSWITCH2_TSN_TXTSTAMP_ENABLED;
+        break;
+    default:
+        printk("[RSWITCH] %s Set HW TimeStamp. Tx_type(%u) Invalid\n", ndev->name, config.tx_type);
+        return -ERANGE;
+    }
+
+    switch (config.rx_filter)
+    {
+    case HWTSTAMP_FILTER_NONE:
+        tstamp_rx_ctrl = 0;
+        break;
+    case HWTSTAMP_FILTER_PTP_V2_L2_EVENT:
+        tstamp_rx_ctrl |= RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT;
+        break;
+    default:
+        config.rx_filter = HWTSTAMP_FILTER_ALL;
+        tstamp_rx_ctrl |= RSWITCH2_RXTSTAMP_TYPE_ALL;
+    }
+
+    mdp->tstamp_tx_ctrl = tstamp_tx_ctrl;
+    mdp->tstamp_rx_ctrl = tstamp_rx_ctrl;
+
+
+    return copy_to_user(ifr->ifr_data, &config, sizeof(config)) ? -EFAULT : 0;
+}
+
+
+/**
+    @brief IOCTL to device
+
+    (IOCTLs for the Switch are handled elsewhere)
+
+    @param  ndev    net_device for the individual switch port device 'tsn{n}'
+    @param  rq
+    @param  cmd
+
+    @return < 0, or 0 on success
+*/
+static int rswitch2_port_IOCTL(struct net_device * ndev, struct ifreq * rq, int cmd)
+{
+
+
+    struct port_private * mdp = netdev_priv(ndev);
+    struct phy_device     * phydev = mdp->phydev;
+    if (NOT netif_running(ndev))
+    {
+        return -EINVAL;
+    }
+
+    switch (cmd)
+    {
+
+    case SIOCGHWTSTAMP:
+        return rswitch2_hwtstamp_get(ndev, rq);
+    case SIOCSHWTSTAMP:
+        return rswitch2_port_hwtstamp_set(ndev, rq, cmd);
+
+    default:
+        return phy_mii_ioctl(phydev, rq, cmd);
+        return -1;
+    }
+}
+
+
+
+/**
     @brief  Device operations
 */
 static const struct net_device_ops  port_netdev_ops = {
@@ -1195,9 +1456,7 @@ static const struct net_device_ops  port_netdev_ops = {
     .ndo_open               = port_open,         // Called when the network interface is up'ed
 
     .ndo_stop               = port_close,        // Called when the network interface is down'ed
-#if 0
     .ndo_do_ioctl           = rswitch2_port_IOCTL,
-#endif
     .ndo_start_xmit         = port_start_xmit,   // Start the transmission of a frame
     .ndo_get_stats          = port_get_statistics,
     .ndo_validate_addr      = eth_validate_addr,
@@ -1246,7 +1505,43 @@ static int port_mii_initialise(struct net_device * ndev)
 
 
 
+/**
+    @brief  Platform Driver TS Descriptor Initiaisation
 
+    @param  pdev The device to be instantiated
+
+    @return 0, or < 0 on error
+*/
+static int rswitch2_ts_desc_init(struct platform_device * pdev)
+{
+
+    int error = 0;
+
+    /* Allocate descriptor base address table */
+
+    ts_desc_bat_size = sizeof(struct rswitch2_desc) * NUM_TS_DESC;
+    ts_desc_bat = dma_alloc_coherent(&pcidev->dev, ts_desc_bat_size,
+                                  &ts_desc_bat_dma, GFP_KERNEL);
+#ifdef DEBUG
+    printk("TS Desc bat = %llx \n", ts_desc_bat_dma);
+#endif
+    if (!ts_desc_bat) {
+        dev_err(&pdev->dev,
+                "Cannot allocate desc base address table (size %d bytes)\n",
+                ts_desc_bat_size);
+        error = -ENOMEM;
+
+    }
+
+    ts_desc_bat->die_dt = DT_EOS;
+    iowrite32(ts_desc_bat_dma, gwca_addr + GWTDCAC10);
+    iowrite32(0x0, gwca_addr + GWTDCAC00);
+    return error;
+
+
+
+
+}
 
 
 
@@ -1339,12 +1634,13 @@ static bool rswitch2_rx(struct net_device *ndev, int *quota, int q)
         if((priv->portnumber == board_config.eth_ports)) {
 
             portnumber = board_config.eth_ports;
+            //printk("Port Number = %d \n", portnumber);
 
         }
 #endif
 
         ndev = ppndev[portnumber];
-
+        //printk("Port Number1 = %d \n", portnumber);
 
         if(priv->portnumber != portnumber) {
 #ifdef DEBUG_RX
@@ -1371,24 +1667,20 @@ static bool rswitch2_rx(struct net_device *ndev, int *quota, int q)
 
         skb = rx_skb[q][entry];
 
-        memcpy(skb->data, phys_to_virt(desc->dptrl), pkt_len);
-
         rx_skb[q][entry] = NULL;
 
         dma_unmap_single(&pcidev->dev, le32_to_cpu(desc->dptrl),
                          PKT_BUF_SZ,
                          DMA_FROM_DEVICE);
 
-        get_ts &= (q == RSWITCH2_NC) ?RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT :~RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT;
-
+        get_ts &= (q == RSWITCH2_DESC_NC) ?RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT :~RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT;
         if (get_ts) {
             struct skb_shared_hwtstamps *shhwtstamps;
 
             shhwtstamps = skb_hwtstamps(skb);
             memset(shhwtstamps, 0, sizeof(*shhwtstamps));
             ts.tv_sec = (u64) le32_to_cpu(desc->ts_sec);
-
-            ts.tv_nsec = le32_to_cpu(desc->ts_nsec);
+            ts.tv_nsec = le32_to_cpu(desc->ts_nsec &0x3FFFFFFF);
             shhwtstamps->hwtstamp = timespec64_to_ktime(ts);
         }
 
@@ -1411,7 +1703,7 @@ static bool rswitch2_rx(struct net_device *ndev, int *quota, int q)
 
 
     }
-    desc_end[q] = desc;
+
     /* Refill the RX ring buffers. */
 
 
@@ -1480,63 +1772,51 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
 
     int quota = budget;
     u32 ris, tis;
-    static void __iomem *desc_end_base;
-    u32 *rx_desc;
-    u32 frame_check = 0;
     u32 tis_q = 0;
     u32 rxq = q;
+    u32 rx_mask = 0;
     u32 tis_port  = 0;
     int entry = 0;
-    //u32 dis = 0;
-    //printk("In rswitch poll \n");
+    u32 dis = 0;
 #ifdef INTERNAL_GW
     /* Try registering separate poller for Internal GW */
     if((priv->portnumber == board_config.eth_ports)) {
         rxq = RSWITCH2_RX_GW_QUEUE_NUM;
     } else {
 
-        rxq = q;
+        rxq = q + 1;
     }
 #endif
-    //printk("In rswitch poll \n");
+
     for (;;) {
 
-        if(desc_end[rxq] != NULL) {
+        rx_mask = BIT(rxq);
+        dis = ioread32(gwca_addr + GWDIS0);
+        ris = (dis & board_config.ris_bitmask) >> board_config.rx_queue_offset;
+        tis = (dis & board_config.tis_bitmask) >> (NUM_RX_QUEUE);
+#ifdef DEBUG
+        printk("Value of ris =%x\n", ris);
+        printk("Value of tis =%x\n", tis);
+        printk("rx_mask = %d \n", rx_mask);
+#endif
 
-            desc_end_base =  phys_to_virt((long long unsigned int)desc_end[rxq]);
-            desc_end_base =  (desc_end[rxq]);
-
-
-            rx_desc = desc_end_base;
-
-            frame_check = *rx_desc;
-
-
-        }
-
-
-        ris = (ioread32(gwca_addr + GWDIS0) & board_config.ris_bitmask) >> board_config.rx_queue_offset;
-        tis = (ioread32(gwca_addr + GWDIS0) & board_config.tis_bitmask) >> (NUM_RX_QUEUE);
-        //dis = ioread32(ioaddr + GWDIS0);
-        //printk("Value of ris =%x\n", ris);
-        //printk("Value of tis =%x\n", tis);
-        if ((!((ris & 0xFFFFFFFF) || ((tis  >> (q + (priv->portnumber * 2))))))  && (((frame_check>>28) & 0x0F)!= 0x8) ) {
-            //printk("Break \n");
+        if ((!((ris & rx_mask) || ((tis  >> (q + (priv->portnumber * 2))))))) {
             break;
         }
 
-        
 
 
 
-        
-        if ((ris & 0x7FFFFFFF) || (((frame_check>>28) & 0x0F)== 0x8)) {
+
+
+
+          if ((ris & rx_mask)) {
             /* Processing RX Descriptor Ring */
             entry = cur_rx[rxq] % num_rx_ring[rxq];
             desc = &rx_ring[rxq][entry];
             portnumber = ((u64)(desc->info1 >> 36)) & 0x7;
-        
-            if((priv->portnumber == board_config.eth_ports)) {
+
+            if(((priv->portnumber == board_config.eth_ports)) || (ris == 0x01)) {
                 portnumber = board_config.eth_ports;
 
             }
@@ -1547,12 +1827,12 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
 #endif
             }
             /* Clear RX interrupt */
-            iowrite32((ris << board_config.rx_queue_offset), gwca_addr + GWDIS0);
+            iowrite32(((rx_mask)), gwca_addr + GWDIS0);
             if (rswitch2_rx(ppndev[portnumber], &quota, rxq)) {
                 goto out;
             }
         }
-        
+
 
         /* Processing TX Descriptor Ring */
         tis_q = tis % 2;
@@ -1632,6 +1912,72 @@ static bool rswitch2_queue_interrupt(struct net_device *ndev, int q)
 
 }
 
+/**
+    @brief  Rswitch2 TX Timestamp Interrupt handling
+
+    @param  ndev
+
+    @return < 0, or 0 on success
+
+*/
+static bool rswitch2_tx_ts_interrupt(struct net_device *ndev)
+{
+    struct port_private *priv = netdev_priv(ndev);
+    struct rswitch2_ts_desc *desc;
+    struct rswitch2_tstamp_skb *ts_skb, *ts_skb2;
+    struct skb_shared_hwtstamps shhwtstamps;
+    struct timespec64 ts;
+    struct sk_buff *skb;
+    u16 tsun, tfa_tsun;
+    int entry = cur_ts % TS_RING_SIZE;
+    desc = &ts_ring[entry];
+    if(desc->die_dt != DT_FEMPTY_ND)
+    {
+
+        ts.tv_nsec  = desc->ts_nsec & 0x3FFFFFFF;
+        ts.tv_sec   = desc->ts_sec;
+        tfa_tsun = ((desc->dptrl) & 0xFF) ;
+
+        memset(&shhwtstamps, 0, sizeof(shhwtstamps));
+        shhwtstamps.hwtstamp = timespec64_to_ktime(ts);
+
+        list_for_each_entry_safe(ts_skb, ts_skb2, &priv->ts_skb_list,list)
+        {
+            skb = ts_skb->skb;
+            tsun = ts_skb->tag;
+
+            list_del(&ts_skb->list);
+            kfree(ts_skb);
+
+            if (tsun == tfa_tsun)
+            {
+                /* If timestamp for given tsun find clone skb and pass back to socket */
+
+                skb_tstamp_tx(skb, &shhwtstamps);
+                dev_kfree_skb_any(skb);
+                break;
+            }
+        }
+        entry = (++cur_ts) % TS_RING_SIZE;
+        desc = &ts_ring[entry];
+
+
+    }
+
+    for (; cur_ts - dirty_ts > 0; dirty_ts++) {
+        entry = dirty_ts % TS_RING_SIZE;
+
+
+        desc = &ts_ring[entry];
+        //desc->info_ds = cpu_to_le16(PKT_BUF_SZ);
+        desc->info_ds = 0;
+        desc->die_dt = DT_FEMPTY_ND;
+
+    }
+    return 0;
+
+}
+
 
 /**
     @brief  Interruot Sub Routine
@@ -1648,54 +1994,68 @@ static irqreturn_t rswitch2_eth_interrupt(int IRQ, void * dev_id)
 
     u32                 ris = 0;
     u32                 tis = 0;
+    u32                 tsdis = 0;
     int q  = 0;
     struct rswitch2_ext_ts_desc *desc;
+    struct rswitch2_ts_desc     *ts_desc;
     u32 portnumber = 0;
+    u32 entry  = 0;
     irqreturn_t ret = IRQ_HANDLED;
-    //u32 dis = 0;
+    u32 dis = 0;
 #ifdef DEBUG
-    //printk("Interrupt Happened \n");
+    printk("Interrupt Happened \n");
 #endif
 
     spin_lock(&port_lock);
 
     /* Check Descriptor Interrupt status*/
-
-    ris = (ioread32(gwca_addr + GWDIS0) & board_config.ris_bitmask) >> board_config.rx_queue_offset;
-    tis = (ioread32(gwca_addr + GWDIS0) & board_config.tis_bitmask) >> (NUM_RX_QUEUE);
-    //dis = ioread32(gwca_addr + GWDIS0);
-    //printk("Value of dis = %x \n",dis);
-    //printk("Value of ris = %x \n",ris);
-    //printk("Value of tis = %x \n",tis);
-    if((ris != 0)) {
-
-        for(q = NUM_RX_QUEUE -1; q >= 0; q--) {
-            if(((ris >> q) & 0x01) == 0x01) {
-                int entry = cur_rx[q] % num_rx_ring[q];
-                desc = &rx_ring[q][entry];
-                portnumber = ((u64)(desc->info1 >> 36)) & 0x7;
+    tsdis = ioread32(gwca_addr + GWTSDIS);
+    dis = ioread32(gwca_addr + GWDIS0);
+    ris = (dis & board_config.ris_bitmask) >> board_config.rx_queue_offset;
+    tis = (dis & board_config.tis_bitmask) >> (NUM_RX_QUEUE);
+    entry = cur_ts % num_ts_ring;
+    ts_desc = &ts_ring[entry];
+    do {
+        if((tsdis !=0 ))
+        {
+            iowrite32(0x01, (gwca_addr + GWTSDID));
+            iowrite32(0x01, (gwca_addr + GWTSDIS));
+            portnumber = ((uint64_t)(ts_desc->dptrl >> 16)) & 0x7;
+            rswitch2_tx_ts_interrupt(ppndev[portnumber]);
+            iowrite32(0x01, (gwca_addr + GWTSDIE));
+            ret = IRQ_HANDLED;
+        }
+        if((ris != 0)) {
+            for(q = NUM_RX_QUEUE -1; q >= 0; q--) {
+                if(((ris >> q) & 0x01) == 0x01) {
+                    int entry = cur_rx[q] % num_rx_ring[q];
+                    desc = &rx_ring[q][entry];
+                    portnumber = ((u64)(desc->info1 >> 36)) & 0x7;
 #ifdef INTERNAL_GW
-                if(q == RSWITCH2_RX_GW_QUEUE_NUM) {
-                    portnumber = board_config.eth_ports;
-
-                }
+                    if(q == RSWITCH2_RX_GW_QUEUE_NUM) {
+                        portnumber = board_config.eth_ports;
+                    }
+                    else {
+                      q = q -1;
+                    }
 #endif
-                //printk("portnumber = %d \n", portnumber);
-                if(rswitch2_queue_interrupt(ppndev[portnumber], q)) {
-                    ret = IRQ_HANDLED;
+                    if(rswitch2_queue_interrupt(ppndev[portnumber], q)) {
+                        ret = IRQ_HANDLED;
+                    }
                 }
             }
         }
-    }
-    if((tis != 0)) {
-        for(q = (board_config.dbat_entry_num); q >= 0; q--) {
-            if((tis >> q) & 0x01) {
-                if(rswitch2_queue_interrupt(ppndev[q/2], q)) {
-                    ret = IRQ_HANDLED;
+        if((tis != 0)) {
+            for(q = (board_config.dbat_entry_num); q >= 0; q--) {
+                if((tis >> q) & 0x01) {
+                    if(rswitch2_queue_interrupt(ppndev[q/2], q)) {
+                        ret = IRQ_HANDLED;
+                    }
                 }
             }
         }
-    }
+        tsdis = ioread32(gwca_addr + GWTSDIS);
+    } while(tsdis != 0);
     spin_unlock(&port_lock);
     return ret;
 }
@@ -1748,7 +2108,7 @@ static int drv_probe_createnetdev(struct platform_device * pdev, u32 portnumber,
     else if(board_variant == 0x02){
          sprintf(portname, "%s%u", RSWITCH2ETH_BASE_PORTNAME, portnumber);
     }
-    
+
     ndev = alloc_etherdev(sizeof(struct port_private));
     if (ndev == NULL) {
         dev_err(&pdev->dev, "[RSWITCH2] Failed to allocate %s device\n", portname);
@@ -1758,7 +2118,7 @@ static int drv_probe_createnetdev(struct platform_device * pdev, u32 portnumber,
     index = portnumber;
     if(board_variant == 0x03){
         if((portnumber == 4) || (portnumber == 5)) {
-            
+
             portnumber = 0;
 
         }
@@ -1925,7 +2285,7 @@ static int drv_probe_createvirtualnetdev(struct platform_device * pdev, uint32_t
 {
     struct  net_device       * ndev = NULL;
     struct  port_private     * mdp = NULL;
-    
+
     int     err = 0;
 
 
@@ -1981,7 +2341,7 @@ static int drv_probe_createvirtualnetdev(struct platform_device * pdev, uint32_t
     mdp->ether_link_active_low  = false;
 
     mdp->edmac_endian           = EDMAC_LITTLE_ENDIAN;
-    
+
     /*
         set function (Open/Close/Xmit/IOCTL etc)
     */
@@ -2086,6 +2446,10 @@ static int rswitch2_clock_enable(void)
 #ifdef DEBUG
     printk("Reg=%x value = %x \n", RCEC, board_config.port_bitmask | RCE_BIT);
 #endif
+    rcec_val = ioread32(ioaddr + RCEC);
+    if(rcec_val == (board_config.port_bitmask | RCE_BIT) ) {
+        return 0;
+    }
     iowrite32(board_config.port_bitmask | RCE_BIT , ioaddr + RCEC);
     rcec_val = ioread32(ioaddr + RCEC);
 
@@ -2192,7 +2556,7 @@ static int rswitch2_gwca_reset(void)
 
 static int rswitch2_reset(void)
 {
-    rswitch2_gwca_reset();
+
 #ifdef DEBUG
     printk("Reg=%x value = %x \n", RRC, 0x01);
 #endif
@@ -2262,6 +2626,61 @@ static int rswitch2_gwca_axi_ram_reset(void)
     return -1;
 
 
+}
+
+/**
+    @brief  MCAST Table Learn Status
+
+    @return int
+
+*/
+int rswitch2_mcast_tbl_learn_status(void)
+{
+    int i = 0;
+    int value = 0;
+    for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
+
+        value = ioread32(gwca_addr + GWMSTLR);
+        if (((value >> 31) & 0x01) == 0x0) {
+            if( ((value >> 1) & 0x01) || ((value >> 0) & 0x01) ) {
+                printk("MCAST Table learn fail value = %x \n", value);
+                return -1;
+            }
+            return 0;
+        }
+        mdelay(1);
+    }
+    printk("MCAST Table entry Learn Timeout \n");
+    return -1;
+
+
+}
+
+/**
+    @brief  GWCA Multicast Rx Descriptor Chain Config Test Function
+
+    @return int
+
+*/
+static int rswitch2_mcast_rx_desc_chain_test(void)
+{
+    u32 msenl = 0;
+    u32 mnl = 0;
+    u32 mnrcnl = 0;
+    u32 gwmstls_val = 0;
+    s32 ret = 0;
+    rswitch2_gwca_mcast_tbl_reset();
+    /* Value fixed for test purpose*/
+    msenl = RSWITCH2_MCAST_DESC_CHAIN_NUM_START;
+    mnl = RSWITCH2_MCAST_DESC_NUM;
+    mnrcnl = RSWITCH2_MCAST_NEXT_DESC_NUM;
+    gwmstls_val = (msenl << 16) | (mnl << 8) | (mnrcnl << 0);
+    iowrite32(gwmstls_val, gwca_addr + GWMSTLS);
+    ret = rswitch2_mcast_tbl_learn_status();
+    if(ret < 0) {
+            printk("MCAST Table  Learning Failed \n");
+    }
+    return 0;
 }
 
 /**
@@ -2387,6 +2806,91 @@ static int rswitch2_tx_ring_format(struct net_device *ndev, int q)
 }
 
 
+
+/**
+    @brief  Free TS Ring Buffers
+
+    @param  void
+
+    @return < 0, or 0 on success
+
+*/
+static int rswitch2_ts_ring_free(void)
+{
+
+    struct rswitch2_ts_desc *ts_desc;
+    int ts_ring_size = sizeof(*ts_desc) * num_ts_ring;
+    if (ts_ring) {
+
+
+        dma_free_coherent(&pcidev->dev, ts_ring_size, ts_ring,
+        ts_desc_dma);
+        ts_ring = NULL;
+    }
+
+
+    return 0;
+
+}
+
+/**
+    @brief  Format TS Ring Buffers
+
+    @param  void
+
+    @return void
+
+*/
+static void rswitch2_ts_ring_format( void)
+{
+    struct rswitch2_ts_desc *ts_desc;
+    struct rswitch2_desc *desc;
+    s32 i;
+
+    u32 dcs = 0;
+    u32 te = 0;
+
+
+    u32 ts_ring_size = sizeof(*ts_desc) * num_ts_ring;
+
+    cur_ts = 0;
+
+    dirty_ts = 0;
+
+
+    /* Check if multiplication required */
+    memset(ts_ring, 0, ts_ring_size);
+
+    for (i = 0, ts_desc = ts_ring; i < num_ts_ring; i++,ts_desc++) {
+
+        /* TS descriptor */
+        //ts_desc->info_ds = cpu_to_le16(PKT_BUF_SZ); // Needs to be seen if you need zero byte descriptor for timestamp
+        ts_desc->info_ds = 0;
+        ts_desc->die_dt = DT_FEMPTY_ND;
+
+    }
+
+
+    ts_desc->dptrl = cpu_to_le32((u32)ts_desc_dma);
+    ts_desc->die_dt = DT_LINKFIX; /* type */
+
+
+
+
+    desc = ts_desc_bat;
+    desc->die_dt = DT_LINKFIX; /* type */
+    desc->dptrl = cpu_to_le32((u32)ts_desc_dma);
+
+    dcs = 0 << 2;
+    te = 1 << 0;
+    iowrite32((dcs | te), gwca_addr + (GWTSDCC0));
+
+
+
+
+}
+
+
 /**
     @brief  Tx Ring Init
 
@@ -2418,7 +2922,7 @@ static int rswitch2_tx_ring_init(struct net_device *ndev, int q)
 
     }
 
-    
+
 
     /* Allocate rings for the aligned buffers */
     priv->tx_align[q] = kmalloc(DPTR_ALIGN * priv->num_tx_ring[q] +
@@ -2426,7 +2930,7 @@ static int rswitch2_tx_ring_init(struct net_device *ndev, int q)
     if (!priv->tx_align[q])
         goto error;
 
-    
+
 
     /* Allocate all TX descriptors. */
     ring_size = sizeof(struct rswitch2_ext_desc) *
@@ -2436,7 +2940,7 @@ static int rswitch2_tx_ring_init(struct net_device *ndev, int q)
     priv->tx_ring[q]    = dma_alloc_coherent(&pcidev->dev, ring_size,
                           &priv->tx_desc_dma[q],
                           GFP_KERNEL);
-    
+
     if (!priv->tx_ring[q])
         goto error;
 
@@ -2448,6 +2952,30 @@ error:
     return -ENOMEM;
 
 
+
+}
+
+
+/**
+    @brief  Initialises TS Ring Buffers
+
+    @param  void
+
+    @return < 0, or 0 on success
+
+*/
+static int rswitch2_ts_ring_init(void)
+{
+    int ts_ring_size = 0;
+    ts_ring_size = sizeof(struct rswitch2_ts_desc) * (num_ts_ring + 1);
+    ts_ring = dma_alloc_coherent(&pcidev->dev, ts_ring_size,
+    &ts_desc_dma, GFP_KERNEL);
+
+
+
+    dirty_ts = 0;
+
+    return 0;
 
 }
 
@@ -2507,14 +3035,14 @@ static int rswitch2_gw_txdmac_init(struct net_device *ndev)
         printk("TX Ring Init Failed \n");
         return error;
     }
-    
+
     /* Descriptor format */
     error = rswitch2_tx_ring_format(ndev, RSWITCH2_BE);
     if(error < 0) {
         printk("TX Ring Format Failed \n");
         return error;
     }
-    
+
     return 0;
 
 
@@ -2597,6 +3125,7 @@ static int rswitch2_rx_ring_format( int q)
     printk("Reg=%x value = %x Desc num=%d\n", (GWDCC0 + ((q + board_config.rx_queue_offset)*4)), (balr | dqt | ede | ets), q + board_config.rx_queue_offset);
 #endif
     iowrite32((balr | dqt | ets | ede), gwca_addr + (GWDCC0 + ((q + board_config.rx_queue_offset) *4)) );
+
     return 0;
 }
 
@@ -2703,14 +3232,14 @@ static int rswitch2_gw_rxdmac_init(void)
         printk("RX Ring Init Failed \n");
         return error;
     }
-    
+
     /* Descriptor format */
     error = rswitch2_rx_ring_format(RSWITCH2_RX_GW_QUEUE_NUM);
     if(error < 0) {
         printk("RX Ring Format Failed \n");
         return error;
     }
-    
+
 
     return 0;
 
@@ -2848,7 +3377,7 @@ int  config_vlan_tagging(struct net_device *ndev, struct rswitch2_eth_vlan_confi
     eavtc = (config->eth_vlan_tag_config.ctag_vlan << 0) | (config->eth_vlan_tag_config.ctag_pcp << 12)
             | (config->eth_vlan_tag_config.ctag_dei << 15) | (config->eth_vlan_tag_config.stag_vlan << 16)
             | (config->eth_vlan_tag_config.stag_pcp << 28) | (config->eth_vlan_tag_config.stag_dei << 31);
-    eavcc = (config->vlan_filtering.unknown_tag << 8) | (config->vlan_filtering.scr_tag << 7) 
+    eavcc = (config->vlan_filtering.unknown_tag << 8) | (config->vlan_filtering.scr_tag << 7)
             | (config->vlan_filtering.sc_tag << 6) | (config->vlan_filtering.cr_tag << 5)
             | (config->vlan_filtering.c_tag << 4) | (config->vlan_filtering.cosr_tag << 3)
             | (config->vlan_filtering.cos_tag << 2) | (config->vlan_filtering.r_tag << 1)
@@ -2874,7 +3403,7 @@ static long ioctl_setportconfig(struct file * file, unsigned long arg)
 
     int     err = 0;
 
-    
+
     enum rswitch2_portstate estate;
 
 #ifdef DEBUG
@@ -2896,6 +3425,9 @@ static long ioctl_setportconfig(struct file * file, unsigned long arg)
         return -EINVAL;
     }
     memcpy(&config, &config_new, sizeof(config));
+    if(config.mcast_rx_desc_test_enable) {
+        rswitch2_mcast_rx_desc_chain_test();
+    }
     for (a = 0; a < config_new.ports; a++) {
         struct net_device   * ndev = ppndev[config_new.eth_port_config[a].port_number];
         if (config_new.eth_port_config[a].port_number > board_config.eth_ports) {
@@ -2914,8 +3446,8 @@ static long ioctl_setportconfig(struct file * file, unsigned long arg)
                 }
 
             }
-        } 
-        
+        }
+
     }
 
     return err;
@@ -3035,15 +3567,15 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u
     index = mdp->portindex;
     if(board_variant == 0x03){
         if((index > 0) && (index < 5)){
-            if(count == 0x0){     
-                count++; 
-                printk("Disabling Bcast \n");                       
-                mdiobus_write(ndev->phydev->mdio.bus,0, 0x18, 0x90);                                
+            if(count == 0x0){
+                count++;
+                printk("Disabling Bcast \n");
+                mdiobus_write(ndev->phydev->mdio.bus,0, 0x18, 0x90);
             }
             phy_write(ndev->phydev,0x1b, 0xDD00);
             phy_write(ndev->phydev,0x1c, 0x0020);
             msleep(20);
-            mdiobus_write(ndev->phydev->mdio.bus,0, 0x18, 0x90);  
+            mdiobus_write(ndev->phydev->mdio.bus,0, 0x18, 0x90);
             /* Read Register 0x02 0x03 to check phy ids and then for checking phy is operational */
             read_val = phy_read(ndev->phydev, 0x02);
             if(read_val != 0x001C){
@@ -3117,7 +3649,7 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u
                 phy_write(ndev->phydev,0x1c, 0x075E);
                 phy_write(ndev->phydev,0x1b, 0xC028);
                 phy_write(ndev->phydev,0x1c, 0x0534);
-                
+
             } else if (speed == 1000) {
                 phy_write(ndev->phydev,0x1b, 0xBC40);
                 phy_write(ndev->phydev,0x1c, 0x0FDA);
@@ -3184,9 +3716,9 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u
                 phy_write(ndev->phydev,0x1b, 0xC028);
                 phy_write(ndev->phydev,0x1c, 0x0534);
             }
-            
-            
-            
+
+
+
             /*Step3 Optional application specific configurations*/
 
             /*RGMII timing correction for Rx*/
@@ -3196,14 +3728,14 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u
             /*RGMII timing correction for Tx*/
             phy_write(ndev->phydev,0x1b, 0xd084);
             phy_write(ndev->phydev,0x1c, 0x0000);
- 
+
             phy_write(ndev->phydev,0x1b, 0xd084);
             if(ndev->phydev->phy_id == 0x02) {  //Id of the muxed interface
                 phy_write(ndev->phydev,0x1c, 0xC000);
             } else {
                 phy_write(ndev->phydev,0x1c, 0x4000);
             }
- 
+
             phy_write(ndev->phydev,0x1b, 0xd084);
             if(ndev->phydev->phy_id == 0x02) {
                 phy_write(ndev->phydev,0x1c, 0xC007);
@@ -3245,8 +3777,8 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u
             } else {
                 phy_write(ndev->phydev,9, 0x000);
             }
-            
-        } 
+
+        }
     } else{
         phy_write(ndev->phydev, 0x31, 0xa43);
         phy_read(ndev->phydev, 0x18);
@@ -3254,7 +3786,7 @@ static int phydev_disable_bcast_seterrata(struct net_device * ndev, u32 speed, u
         phy_read(ndev->phydev, 0x18);
         phy_write(ndev->phydev, 0x31, 0xa42);
     }
-    
+
     return 0;
 
 }
@@ -3281,7 +3813,7 @@ static void drv_unload_unmap(void)
 
 void rswitch2_clock_disable(void)
 {
-    iowrite32(0xFFFFFFFF , ioaddr + RCDC);   
+    iowrite32(0xFFFFFFFF , ioaddr + RCDC);
 }
 
 
@@ -3294,7 +3826,7 @@ void rswitch2_clock_disable(void)
 */
 static void drv_unload_cleanup(void)
 {
-    
+
     rswitch2_gwca_change_mode(rswitch2_gwca_mode_disable);
     if (ppndev != NULL) {
         kfree(ppndev);
@@ -3479,10 +4011,12 @@ static int drv_unload_remove_netdevs(void)
     /* Add RX Ring Format for GW Port */
     rswitch2_rx_ring_free(2);
 #endif
-    //rswitch_ts_ring_free();
-    
+    rswitch2_ts_ring_free();
+
     dma_free_coherent(&pcidev->dev, desc_bat_size, desc_bat,
 			  desc_bat_dma);
+    dma_free_coherent(&pcidev->dev, ts_desc_bat_size, ts_desc_bat,
+			  ts_desc_bat_dma);
 
     return err;
 }
@@ -3501,7 +4035,7 @@ static int drv_unload_remove_netdevs(void)
 */
 static int rswitch2_eth_driver_show(struct seq_file * m, void * v)
 {
-    seq_printf(m, "S/W Version: %s\n", RSWITCH2_ETH_DRIVER_VERSION);
+    seq_printf(m, "S/W Version: %s\n", RSWITCH2_DRIVER_VERSION);
     seq_printf(m, "Build on %s at %s\n", __DATE__, __TIME__);
 #ifdef DEBUG
     seq_printf(m, "Debug Level: %d \n", DEBUG);
@@ -3512,9 +4046,233 @@ static int rswitch2_eth_driver_show(struct seq_file * m, void * v)
     return 0;
 }
 
+/**
+    @brief Helper function to print a table of values(u64)
+
+    @param  seq_file *
+
+    @param  const char *
+
+    @param  const char *
+
+    @param  u64 []
+
+    @param  int
+
+    @return void
+
+*/
+static void proc_print_u64(struct seq_file *m, const char *title, const char *valueFmt, u64 values[], int cnt)
+{
+    u32 port;
+
+    seq_printf(m, "%s", title);
+    for (port = 0; port < cnt; port++) {
+        seq_printf(m, valueFmt, values[port]);
+    }
+    seq_printf(m, "\n");
+}
 
 /**
-    @brief Rx Show Show Proc Function
+    @brief Helper function to print a table of values
+
+    @param  seq_file *
+
+    @param  const char *
+
+    @param  const char *
+
+    @param  u32 []
+
+    @param  int
+
+    @return void
+
+*/
+static void proc_print_u32(struct seq_file *m, const char *title, const char *valueFmt, u32 values[], int cnt)
+{
+    u32 port;
+
+    seq_printf(m, "%s", title);
+    for (port = 0; port < cnt; port++) {
+        seq_printf(m, valueFmt, values[port]);
+    }
+    seq_printf(m, "\n");
+}
+
+/**
+    @brief Helper function to print a table of values
+
+    @param  seq_file *
+
+    @param  const char *
+
+    @param  const char *
+
+    @param  const char * []
+
+    @param  int
+
+    @return void
+
+*/
+static void proc_print_str(struct seq_file *m, const char *title, const char *valueFmt, const char *values[], int cnt)
+{
+    u32 port;
+
+    seq_printf(m, "%s", title);
+    for (port = 0; port < cnt; port++) {
+        seq_printf(m, valueFmt, values[port]);
+    }
+    seq_printf(m, "\n");
+}
+
+/**
+    @brief rswitch2 Rx Tx counters clear function
+
+    @param  void
+
+    @return int
+
+*/
+static int rswitch2_rx_tx_counter_clear_func(void)
+{
+    memset(&counter.rx_tx_counter,0, sizeof(struct rswitch2_proc_rx_tx_counter) );
+    return 0;
+}
+
+/**
+    @brief rswitch2 Error counters clear function
+
+    @param  void
+
+    @return int
+
+*/
+static int rswitch2_error_counter_clear_func(void)
+{
+    memset(&counter.err_counter,0, sizeof(struct rswitch2_proc_eth_err_counter) );
+    return 0;
+}
+
+
+
+/**
+    @brief rswitch2 counters clear function
+
+    @param  void
+
+    @return int
+
+*/
+
+static int rswitch2_counter_clear_func(void)
+{
+    rswitch2_rx_tx_counter_clear_func();
+    rswitch2_error_counter_clear_func();
+    return 0;
+}
+
+/**
+    @brief Show Rx/Tx counters in /proc either in long or short format
+
+    @param  seq_file *
+
+    @param  int
+
+    @return int
+
+*/
+static int rswitch2_eth_rxtx_show(struct seq_file * m, int longReport)
+{
+    struct net_device * ndev;
+    u32 port = 0;
+    const char * portName[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    for (port = 0; port < board_config.eth_ports; port++){
+        ndev = ppndev[port];
+
+        portName[port] = ndev->name;
+
+
+
+        counter.rx_tx_counter.eframe[port] += portreg_read(ndev, MRGFCE);
+        counter.rx_tx_counter.pframe[port]  += portreg_read(ndev, MRGFCP);
+        counter.rx_tx_counter.ebyte[port] += ((u64)portreg_read(ndev, MRXBCEU) << 32) | portreg_read(ndev, MRXBCEL);
+        counter.rx_tx_counter.pbyte[port]  += ((u64)portreg_read(ndev, MRXBCPU) << 32) | portreg_read(ndev, MRXBCPL);
+        counter.rx_tx_counter.bframe[port] += portreg_read(ndev, MRBFC);
+        counter.rx_tx_counter.mframe[port]  += portreg_read(ndev, MRMFC);
+        counter.rx_tx_counter.uframe[port]  += portreg_read(ndev, MRUFC);
+        counter.rx_tx_counter.phyerror[port]  += portreg_read(ndev, MRPEFC);
+        counter.rx_tx_counter.nibbleerror[port] += portreg_read(ndev, MRNEFC);
+        counter.rx_tx_counter.crcerror[port] += portreg_read(ndev, MRFMEFC);
+        counter.rx_tx_counter.fragmisserror[port] += portreg_read(ndev, MRFFMEFC);
+        counter.rx_tx_counter.cfragerror[port] += portreg_read(ndev, MRCFCEFC);
+        counter.rx_tx_counter.fragerror[port] += portreg_read(ndev, MRFCEFC);
+        counter.rx_tx_counter.rmacfiltererror[port] += portreg_read(ndev, MRRCFEFC);
+        counter.rx_tx_counter.undersizeerrorgood[port] += portreg_read(ndev, MRGUEFC);
+        counter.rx_tx_counter.undersizeerrorbad[port] += portreg_read(ndev, MRBUEFC);
+        counter.rx_tx_counter.oversizeerrorgood[port] += portreg_read(ndev, MRGOEFC);
+        counter.rx_tx_counter.oversizeerrorbad[port] += portreg_read(ndev, MRBOEFC);
+        counter.rx_tx_counter.txeframe[port] += portreg_read(ndev, MTGFCE);
+        counter.rx_tx_counter.txpframe[port] += portreg_read(ndev, MTGFCP);
+        counter.rx_tx_counter.txebyte[port]  += ((u64)portreg_read(ndev, MTXBCEU) << 32) | portreg_read(ndev, MTXBCEL);
+        counter.rx_tx_counter.txpbyte[port]  += ((u64)portreg_read(ndev, MTXBCPU) << 32) | portreg_read(ndev, MTXBCPL);
+        counter.rx_tx_counter.txerror[port]  += portreg_read(ndev, MTEFC);
+        counter.rx_tx_counter.txbframe[port] += portreg_read(ndev, MTBFC);
+        counter.rx_tx_counter.txmframe[port] += portreg_read(ndev, MTMFC);
+        counter.rx_tx_counter.txuframe[port] += portreg_read(ndev, MTUFC);
+    }
+    //read the tsngw related ports (always at ethport +1)
+    port = board_config.eth_ports;
+    portName[port] = "tsngw";
+    counter.rx_tx_counter.eframe[port] += ioread32(gwca_addr + GWRDCN);
+    counter.rx_tx_counter.txeframe[port] += ioread32(gwca_addr + GWTDCN);
+
+    proc_print_str(m, "Interface      ", " %10s", portName, board_config.eth_ports+1);
+    seq_printf(m,     "================");
+    for (port = 0; port < board_config.eth_ports+1; port++)
+        seq_printf(m, "=%.10s", "====================================");
+    seq_printf(m, "\n");
+    proc_print_u32(m, "Rx (eMAC)      ", " %10d", counter.rx_tx_counter.eframe, board_config.eth_ports + 1);
+    proc_print_u32(m, "Rx (pMAC)      ", " %10d", counter.rx_tx_counter.pframe, board_config.eth_ports);
+    if (longReport) {
+        proc_print_u32(m, "  Broadcast    ", " %10d", counter.rx_tx_counter.bframe, board_config.eth_ports);
+        proc_print_u32(m, "  Multicast    ", " %10d", counter.rx_tx_counter.mframe, board_config.eth_ports);
+        proc_print_u32(m, "  Unicast      ", " %10d", counter.rx_tx_counter.uframe, board_config.eth_ports);
+    }
+    proc_print_u32(m, "Rx CRC Error   ", " %10d", counter.rx_tx_counter.crcerror, board_config.eth_ports);
+    proc_print_u32(m, "Rx Phy Error   ", " %10d", counter.rx_tx_counter.phyerror, board_config.eth_ports);
+    proc_print_u32(m, "Rx RMAC Filter ", " %10d", counter.rx_tx_counter.rmacfiltererror, board_config.eth_ports);
+    if (longReport) {
+        proc_print_u32(m, "Nibble Error   ", " %10d", counter.rx_tx_counter.nibbleerror, board_config.eth_ports);
+        proc_print_u32(m, "Undersize Good ", " %10d", counter.rx_tx_counter.undersizeerrorgood, board_config.eth_ports);
+        proc_print_u32(m, "Undersize Bad  ", " %10d", counter.rx_tx_counter.undersizeerrorbad, board_config.eth_ports);
+        proc_print_u32(m, "Oversize Good  ", " %10d", counter.rx_tx_counter.oversizeerrorgood, board_config.eth_ports);
+        proc_print_u32(m, "Oversize Bad   ", " %10d", counter.rx_tx_counter.oversizeerrorbad, board_config.eth_ports);
+        proc_print_u32(m, "Frag Miss      ", " %10d", counter.rx_tx_counter.fragmisserror, board_config.eth_ports);
+        proc_print_u32(m, "C Frag Error   ", " %10d", counter.rx_tx_counter.cfragerror, board_config.eth_ports);
+        proc_print_u32(m, "Frag Error     ", " %10d", counter.rx_tx_counter.fragerror, board_config.eth_ports);
+        proc_print_u64(m, "Rx bytes (eMAC)", " %10d", counter.rx_tx_counter.ebyte, board_config.eth_ports);
+        proc_print_u64(m, "Rx bytes (pMAC)", " %10d", counter.rx_tx_counter.pbyte, board_config.eth_ports);
+        seq_printf(m, "\n");
+    }
+    proc_print_u32(m, "Tx (eMAC)      ", " %10d", counter.rx_tx_counter.txeframe, board_config.eth_ports + 1);
+    proc_print_u32(m, "Tx (pMAC)      ", " %10d", counter.rx_tx_counter.txpframe, board_config.eth_ports);
+    if (longReport) {
+        proc_print_u32(m, "  Broadcast    ", " %10d", counter.rx_tx_counter.txbframe, board_config.eth_ports);
+        proc_print_u32(m, "  Multicast    ", " %10d", counter.rx_tx_counter.txmframe, board_config.eth_ports);
+        proc_print_u32(m, "  Unicast      ", " %10d", counter.rx_tx_counter.txuframe, board_config.eth_ports);
+    }
+    proc_print_u32(m, "Tx Errors      ", " %10d", counter.rx_tx_counter.txerror, board_config.eth_ports);
+    if (longReport) {
+        proc_print_u64(m, "Tx bytes (eMAC)", " %10d", counter.rx_tx_counter.txebyte, board_config.eth_ports);
+        proc_print_u64(m, "Tx bytes (pMAC)", " %10d", counter.rx_tx_counter.txpbyte, board_config.eth_ports);
+    }
+    return 0;
+}
+
+/**
+    @brief Wrapper function to show Rx/Tx counters in /proc either in long format
 
     @param  seq_file *
 
@@ -3523,89 +4281,13 @@ static int rswitch2_eth_driver_show(struct seq_file * m, void * v)
     @return int
 
 */
-static int rswitch2_eth_rx_show(struct seq_file * m, void * v)
+static int rswitch2_eth_rxtx_all_show(struct seq_file * m, void * v)
 {
-    struct net_device * ndev;
-    struct port_private * mdp;
-    u32 port = 0;
-    static u32 eframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 pframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 ebyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 pbyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 mframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 bframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 uframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 phyerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 nibbleerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 crcerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 fragmisserror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 cfragerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 fragerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 rmacfiltererror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 undersizeerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 oversizeerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    for(port = 0; port < board_config.eth_ports; port++){
-        ndev = ppndev[port];
-        mdp = netdev_priv(ndev);
-        
-        seq_printf(m, "Port =%s \n",ndev->name);
-        
-        eframe[port] += portreg_read(ndev, MRGFCE);
-        pframe[port]  += portreg_read(ndev, MRGFCP);
-        ebyte[port] += portreg_read(ndev, MRXBCE);
-        pbyte[port]  += portreg_read(ndev, MRXBCP);
-        bframe[port] += portreg_read(ndev, MRMFC);
-        mframe[port]  += portreg_read(ndev, MRMFC);
-        uframe[port]  += portreg_read(ndev, MRUFC);
-        phyerror[port]  += portreg_read(ndev, MRPEFC);
-        nibbleerror[port] += portreg_read(ndev, MRNEFC);
-        crcerror[port] += portreg_read(ndev, MRFMEFC);
-        fragmisserror[port] += portreg_read(ndev, MRFFMEFC);
-        cfragerror[port] += portreg_read(ndev, MRCFCEFC);
-        fragerror[port] += portreg_read(ndev, MRFCEFC);
-        rmacfiltererror[port] += portreg_read(ndev, MRRCFEFC);
-        undersizeerror[port] += portreg_read(ndev, MRUEFC);
-        oversizeerror[port] += portreg_read(ndev, MROEFC);
-        seq_printf(m,
-                   "E frames   = %d       \n", eframe[port]);
-        seq_printf(m,
-                   "P frames   = %d       \n", pframe[port]);
-        seq_printf(m,
-                   "Broadcast frames   = %d       \n", bframe[port]);
-        seq_printf(m,
-                   "Multi frames   = %d       \n", mframe[port]);
-        seq_printf(m,
-                   "Unicast frames    = %d      \n", uframe[port]);
-        seq_printf(m,
-                   "E Bytes   = %d       \n", ebyte[port]);
-        seq_printf(m,
-                   "P Bytes   = %d       \n", pbyte[port]);
-        seq_printf(m,
-                   "Phy Error   = %d       \n", phyerror[port]);
-        seq_printf(m,
-                   "Nibble Error   = %d       \n", nibbleerror[port]);
-        seq_printf(m,
-                   "CRC Error   = %d       \n", crcerror[port]);
-        seq_printf(m,
-                  "Frag Miss Error   = %d       \n", fragmisserror[port]);
-        seq_printf(m,
-                   "C Frag Error   = %d       \n", cfragerror[port]);
-        seq_printf(m,
-                   "Frag Error   = %d       \n", fragerror[port]);
-        seq_printf(m,
-                   "RMAC Filter Error   = %d       \n", rmacfiltererror[port]);
-        seq_printf(m,
-                   "Undersize Error   = %d       \n", undersizeerror[port]);
-        seq_printf(m,
-                   "Oversize Error   = %d       \n", oversizeerror[port]);
-        seq_printf(m,"====================================================\n");
-    }
-    return 0;
+    return rswitch2_eth_rxtx_show(m, 1);
 }
 
-
 /**
-    @brief Tx Show Show Proc Function
+    @brief Wrapper function to show Rx/Tx counters in /proc either in short format
 
     @param  seq_file *
 
@@ -3614,53 +4296,10 @@ static int rswitch2_eth_rx_show(struct seq_file * m, void * v)
     @return int
 
 */
-static int rswitch2_eth_tx_show(struct seq_file * m, void * v)
+static int rswitch2_eth_rxtx_short_show(struct seq_file * m, void * v)
 {
-    struct net_device * ndev;
-    struct port_private * mdp;
-    u32 port = 0;
-    static u32 eframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 pframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 ebyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 pbyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 txerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 bframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 mframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    static u32 uframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1] = {0,0,0,0,0};
-    for(port = 0; port < board_config.eth_ports; port++){
-        ndev = ppndev[port];
-        mdp = netdev_priv(ndev);
-        seq_printf(m, "Port =%s \n",ndev->name);
-        eframe[port] += portreg_read(ndev, MTGFCE);
-        pframe[port]  += portreg_read(ndev, MTGFCP);
-        ebyte[port] += portreg_read(ndev, MTXBCE);
-        pbyte[port]  += portreg_read(ndev, MTXBCP);
-        txerror[port] +=portreg_read(ndev, MTEFC);
-        bframe[port] += portreg_read(ndev, MTBFC);
-        mframe[port]  += portreg_read(ndev, MTMFC);
-        uframe[port] += portreg_read(ndev, MTUFC);
-        seq_printf(m,
-                   "E frames   = %d       \n", eframe[port]);
-        seq_printf(m,
-                   "P frames   = %d       \n", pframe[port]);
-        seq_printf(m,
-                   "E bytes   = %d       \n", ebyte[port]);
-        seq_printf(m,
-                   "P bytes   = %d       \n", pbyte[port]);
-        seq_printf(m,
-                   "Broadcast frames   = %d       \n", bframe[port]);
-        seq_printf(m,
-                   "Multicast frames   = %d       \n", mframe[port]);
-        seq_printf(m,
-                   "Unicast frames   = %d       \n", uframe[port]);
-        seq_printf(m,
-                  "Error frames   = %d       \n", txerror[port]);
-        seq_printf(m,"====================================================\n");
-    }
-
-    return 0;
+    return rswitch2_eth_rxtx_show(m, 0);
 }
-
 
 /**
     @brief Errors Show Show Proc Function
@@ -3702,23 +4341,23 @@ static int rswitch2_eth_errors_show(struct seq_file * m, void * v)
         seq_printf(m, "Frame Size Error Status: \n");
         for(priority = 0; priority < 8; priority++) {
            seq_printf(m, "Priority%d   ", priority);
-           
+
         }
         seq_printf(m,"\n");
         for(priority = 0; priority < 8; priority++) {
            seq_printf(m, "%8ld   ", ((portreg_read(ndev, EAEIS0) >> (0x08 + priority)) & 0x01));
-           
+
         }
         seq_printf(m,"\n");
         seq_printf(m, "Descriptor Queue Overflow Error Status: \n");
         for(priority = 0; priority < 8; priority++) {
            seq_printf(m, "Priority%d   ", priority);
-           
+
         }
         seq_printf(m,"\n");
         for(priority = 0; priority < 8; priority++) {
            seq_printf(m, "%8ld   ", ((portreg_read(ndev, EAEIS2) >> (0x00 + priority)) & 0x01));
-           
+
         }
         seq_printf(m,"\n");
         seq_printf(m,
@@ -3726,12 +4365,12 @@ static int rswitch2_eth_errors_show(struct seq_file * m, void * v)
         seq_printf(m, "Descriptor Queue Security Error Status: \n");
         for(priority = 0; priority < 8; priority++) {
            seq_printf(m, "Priority%d   ", priority);
-           
+
         }
         seq_printf(m,"\n");
         for(priority = 0; priority < 8; priority++) {
            seq_printf(m, "%8ld   ", ((portreg_read(ndev, EAEIS2) >> (16 + priority)) & 0x01));
-           
+
         }
         seq_printf(m,"\n");
         seq_printf(m,"==================================================================================================================\n");
@@ -3751,25 +4390,148 @@ static int rswitch2_eth_errors_show(struct seq_file * m, void * v)
 */
 static int rswitch2_eth_counters_show(struct seq_file * m, void * v)
 {
-    struct net_device * ndev;
-    struct port_private * mdp;
-    u32 port = 0;
-    seq_printf(m, "Port    MinFrameSzerror      TagFilterError       FrameSzError     DEscQOflowError        DescQsecerror            CsumError \n"); 
-    for(port = 0; port < board_config.eth_ports; port++){
-        ndev = ppndev[port];
-        mdp = netdev_priv(ndev);
-        
-            
-        seq_printf(m, "%s    %15ld     %15ld    %15ld     %15ld      %15ld      %15ld\n",ndev->name, portreg_read(ndev, EAUSMFSECN),
-                        portreg_read(ndev, EATFECN),
-                        portreg_read(ndev, EAFSECN),
-                        portreg_read(ndev, EADQOECN),
-                        portreg_read(ndev, EADQSECN),
-                        portreg_read(ndev, EACKSECN)); 
-        
-    }
-    return 0;
+	int i, j;
+	const char * portName[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+
+	u32 port;
+	u32 r; //, rl, rh;
+	//u32 total;
+	//const u32 ports = 5;
+	//int sum=0;
+
+	for (port = 0; port < board_config.eth_ports; port++)
+		portName[port] = ppndev[port]->name;
+
+	proc_print_str(m, "Interface               ", " %6s", portName, board_config.eth_ports);
+	seq_printf(m,     "========================");
+	for (port = 0; port < board_config.eth_ports; port++)
+		seq_printf(m, "=%.6s", "====================================");
+	seq_printf(m, "\n");
+
+	for (j = 0; j < 8; j++) {
+		seq_printf(m, "Pending frames in Q#%d   ", j);
+		for (i = 0; i < board_config.eth_ports; i++) {
+			r = ioread32(ioaddr + EATDQM0+(i*4) + 0xA000 + j*0x2000);
+			seq_printf(m, " %6d", r);
+		}
+		seq_printf(m, "\n");
+	}
+
+
+	seq_printf(m, "\n%-24s", "Minimum Frame Size Error");
+	for (port = 0; port < board_config.eth_ports; port++) {
+		counter.err_counter.min_frame_sz_err[port] += portreg_read(ppndev[port], EAUSMFSECN);
+		seq_printf(m, " %6d", counter.err_counter.min_frame_sz_err[port]);
+	}
+
+	seq_printf(m, "\n%-24s", "Tag Filtering Error");
+	for (port = 0; port < board_config.eth_ports; port++) {
+		counter.err_counter.tag_filter_err[port] += portreg_read(ppndev[port], EATFECN);
+		seq_printf(m, " %6d", counter.err_counter.tag_filter_err[port]);
+	}
+
+	seq_printf(m, "\n%-24s", "Frame Size Error");
+	for (port = 0; port < board_config.eth_ports; port++) {
+		counter.err_counter.frame_size_err[port] += portreg_read(ppndev[port], EAFSECN);
+		seq_printf(m, " %6d", counter.err_counter.frame_size_err[port]);
+	}
+
+	seq_printf(m, "\n%-24s", "Descr Queue Overflow Err");
+	for (port = 0; port < board_config.eth_ports; port++) {
+		counter.err_counter.desc_q_oflow_err[port] += portreg_read(ppndev[port], EADQOECN);
+		seq_printf(m, " %6d", counter.err_counter.desc_q_oflow_err[port]);
+	}
+
+	seq_printf(m, "\n%-24s", "Descr Queue Security Err");
+	for (port = 0; port < board_config.eth_ports; port++) {
+		counter.err_counter.desc_q_sec_err[port] += portreg_read(ppndev[port], EADQSECN);
+		seq_printf(m, " %6d", counter.err_counter.desc_q_sec_err[port]);
+	}
+
+	seq_printf(m, "\n%-24s", "ChecKSum Error");
+	for (port = 0; port < board_config.eth_ports; port++) {
+		counter.err_counter.csum_err[port] += portreg_read(ppndev[port], EACKSECN);
+		seq_printf(m, " %6d", counter.err_counter.csum_err[port]);
+	}
+	//~ seq_printf(m, "                     \n");
+    //~ for(port = 0; port < board_config.eth_ports; port++){
+        //~ ndev = ppndev[port];
+        //~ mdp = netdev_priv(ndev);
+
+
+        //~ seq_printf(m, "%s    %15ld     %15ld    %15ld     %15ld      %15ld      %15ld\n",ndev->name,
+			//portreg_read(ndev, ),
+                        //~ portreg_read(ndev, ),
+                        //~ portreg_read(ndev, ),
+                        //~ portreg_read(ndev, ),
+                        //~ portreg_read(ndev, ),
+                        //~ portreg_read(ndev, ));
+
+    //~ }
+	seq_printf(m, "\n");
+	return 0;
+
 }
+
+
+/**
+    @brief Write Rx TX ALL Clear Function for Proc
+
+    @param  struct file *
+
+    @param  const char *
+
+    @param  size_t
+
+    @param  loff_t *
+
+    @return ssize_t
+
+*/
+static ssize_t rx_tx_all_clear(struct file *filp, const char *buff, size_t len, loff_t * off)
+{
+    u32 ret = 0;
+    ret = kstrtoull_from_user(buff, len, 10, &rxtx_all_clear);
+    if (ret) {
+        /* Negative error code. */
+        pr_info("ko = %d\n", ret);
+        return ret;
+    } else {
+        rswitch2_rx_tx_counter_clear_func();
+        return len;
+    }
+}
+
+/**
+    @brief Write Error Clear Function for Proc
+
+    @param  struct file *
+
+    @param  const char *
+
+    @param  size_t
+
+    @param  loff_t *
+
+    @return ssize_t
+
+*/
+static ssize_t error_counter_clear(struct file *filp, const char *buff, size_t len, loff_t * off)
+{
+    u32 ret = 0;
+    ret = kstrtoull_from_user(buff, len, 10, &error_clear);
+    if (ret) {
+        /* Negative error code. */
+        pr_info("ko = %d\n", ret);
+        return ret;
+    } else {
+        rswitch2_error_counter_clear_func();
+        return len;
+    }
+}
+
+
+
 
 
 
@@ -3801,27 +4563,15 @@ static int rswitch2_eth_driver_open(struct inode * inode, struct  file * file)
     @return int
 
 */
-static int rswitch2_eth_rx_open(struct inode * inode, struct  file * file)
+static int rswitch2_eth_rxtx_open(struct inode * inode, struct  file * file)
 {
-    return single_open(file, rswitch2_eth_rx_show, NULL);
+    return single_open(file, rswitch2_eth_rxtx_all_show, NULL);
 }
 
-
-/**
-    @brief Open TX Proc Directory
-
-    @param  inode *
-
-    @param  file *
-
-    @return int
-
-*/
-static int rswitch2_eth_tx_open(struct inode * inode, struct  file * file)
+static int rswitch2_eth_rxtx_short_open(struct inode * inode, struct  file * file)
 {
-    return single_open(file, rswitch2_eth_tx_show, NULL);
+    return single_open(file, rswitch2_eth_rxtx_short_show, NULL);
 }
-
 
 /**
     @brief Open Error Proc Directory
@@ -3872,23 +4622,19 @@ static const struct file_operations     rswitch2_eth_driver_fops = {
     @brief  Proc File Operation
 
 */
-static const struct file_operations     rswitch2_eth_rx_fops = {
+static const struct file_operations     rswitch2_eth_rxtx_fops = {
     .owner   = THIS_MODULE,
-    .open    = rswitch2_eth_rx_open,
+    .open    = rswitch2_eth_rxtx_open,
     .read    = seq_read,
+    .write   = rx_tx_all_clear,
     .llseek  = seq_lseek,
     .release = single_release,
 };
-
-
-/**
-    @brief  Proc File Operation
-
-*/
-static const struct file_operations     rswitch2_eth_tx_fops = {
+static const struct file_operations     rswitch2_eth_rxtx_short_fops = {
     .owner   = THIS_MODULE,
-    .open    = rswitch2_eth_tx_open,
+    .open    = rswitch2_eth_rxtx_short_open,
     .read    = seq_read,
+    .write   = rx_tx_all_clear,
     .llseek  = seq_lseek,
     .release = single_release,
 };
@@ -3915,6 +4661,7 @@ static const struct file_operations     rswitch2_eth_counters_fops = {
     .owner   = THIS_MODULE,
     .open    = rswitch2_eth_counters_open,
     .read    = seq_read,
+    .write   = error_counter_clear,
     .llseek  = seq_lseek,
     .release = single_release,
 };
@@ -3931,39 +4678,20 @@ static const struct file_operations     rswitch2_eth_counters_fops = {
 */
 static void rswitch2_eth_create_proc_entry(void)
 {
-
     /*
         create root & sub-directories
     */
     memset(&rswitch2_eth_procdir, 0, sizeof(rswitch2_eth_procdir));
-
-
-
-
 
     rswitch2_eth_procdir.rootdir = proc_mkdir(RSWITCH2_PROC_ROOT_DIR, NULL);;
 
     root_dir = rswitch2_eth_procdir.rootdir;
     proc_create(RSWITCH2_ETH_PROC_FILE_DRIVER, 0, rswitch2_eth_procdir.rootdir, &rswitch2_eth_driver_fops);
 
-
-
-
-
-
     proc_create(RSWITCH2_ETH_PROC_FILE_ERRORS,0,rswitch2_eth_procdir.rootdir, &rswitch2_eth_errors_fops);
     proc_create(RSWITCH2_ETH_PROC_FILE_COUNTERS,0,rswitch2_eth_procdir.rootdir, &rswitch2_eth_counters_fops);
-    proc_create(RSWITCH2_ETH_PROC_FILE_TX,0,rswitch2_eth_procdir.rootdir, &rswitch2_eth_tx_fops);
-    proc_create(RSWITCH2_ETH_PROC_FILE_RX,0,rswitch2_eth_procdir.rootdir, &rswitch2_eth_rx_fops);
-    
-
-
-
-
-
-
-
-
+    proc_create(RSWITCH2_ETH_PROC_FILE_RXTX,0,rswitch2_eth_procdir.rootdir, &rswitch2_eth_rxtx_fops);
+    proc_create(RSWITCH2_ETH_PROC_FILE_RXTX_SHORT,0,rswitch2_eth_procdir.rootdir, &rswitch2_eth_rxtx_short_fops);
 }
 
 
@@ -3978,18 +4706,14 @@ static void rswitch2_eth_create_proc_entry(void)
 */
 static void rswitch2_eth_remove_proc_entry(void)
 {
-
-
-
     remove_proc_entry(RSWITCH2_ETH_PROC_FILE_ERRORS, rswitch2_eth_procdir.rootdir);
 
     remove_proc_entry(RSWITCH2_ETH_PROC_FILE_DRIVER, rswitch2_eth_procdir.rootdir);
 
     remove_proc_entry(RSWITCH2_ETH_PROC_FILE_COUNTERS, rswitch2_eth_procdir.rootdir);
 
-    remove_proc_entry(RSWITCH2_ETH_PROC_FILE_TX, rswitch2_eth_procdir.rootdir);
-
-    remove_proc_entry(RSWITCH2_ETH_PROC_FILE_RX, rswitch2_eth_procdir.rootdir);
+    remove_proc_entry(RSWITCH2_ETH_PROC_FILE_RXTX, rswitch2_eth_procdir.rootdir);
+    remove_proc_entry(RSWITCH2_ETH_PROC_FILE_RXTX_SHORT, rswitch2_eth_procdir.rootdir);
     remove_proc_entry(RSWITCH2_PROC_ROOT_DIR, NULL);
 }
 #endif
@@ -4036,11 +4760,13 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
     struct device_node *ports_node;
     struct device_node *child;
     int err = 0;
+    u32 gwvtc = 0;
     u32 eth_ports = 0;
     u32 a  = 0;
     u32 value = 0;
     err = drv_probe_ioremap_common(pdev);
     err = rswitch2_clock_enable();
+    rswitch2_gwca_reset();
     if(err < 0){
         printk("Clock Enable Failed \n");
         return err;
@@ -4050,6 +4776,11 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         printk("GWCA Init Failed\n");
         return err;
     }
+    /* Set VLAN egress mode for GWCA to SCTAG*/
+    iowrite32((RSWITCH2_VLAN_EGRESS_SCTAG_MODE), (gwca_addr + GWVCC));
+    gwvtc = (RSWITCH2_DEF_CTAG_VLAN_ID << 0) | (RSWITCH2_DEF_CTAG_PCP << 12) | (RSWITCH2_DEF_CTAG_DEI << 15)
+            | (RSWITCH2_DEF_STAG_VLAN_ID << 16) | (RSWITCH2_DEF_STAG_PCP << 28) | (RSWITCH2_DEF_STAG_DEI << 31);
+    iowrite32(gwvtc, (gwca_addr + GWVTC));
     ports_node = of_get_child_by_name(np, "ports");
     if (!ports_node) {
         printk("Incorrect bindings: absent \"ports\" node\n");
@@ -4069,7 +4800,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         return err;
     }
     memset(ppndev, 0, sizeof(struct net_device *) * (board_config.eth_ports + 1));
-    
+
     if(board_variant == 0x03){
         gpio = of_get_named_gpio(np,"mdio-gpio",  0);
         if (gpio_is_valid(gpio)) {
@@ -4145,9 +4876,9 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
                         printk("Phy Init Failed \n");
                         return err;
                     }
-                    
-                    
-                    
+
+
+
                     if(err < 0) {
                         printk("Phy Disable Bcast and config failed \n");
                         return err;
@@ -4158,7 +4889,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
                         printk("Phy Init Failed \n");
                         return err;
                     }
-                   
+
                     if(err < 0) {
                         printk("Phy Disable Bcast and config failed \n");
                         return err;
@@ -4174,7 +4905,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
                 iowrite32(0x1, ((ioaddr - 0x01040000) + PHY_SEL_MUX));
             }
         }else{
-#ifdef PHY_CONFIG_SUPPORT       
+#ifdef PHY_CONFIG_SUPPORT
             err = rswitch2_phy_init(child, ppndev[index]);
             if(err < 0) {
                 printk("Phy Init Failed \n");
@@ -4193,7 +4924,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
 #endif
     platform_set_drvdata(pdev, ppndev);
 
-    
+
     /*
             Add character device for IOCTL interface
     */
@@ -4209,9 +4940,10 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
     num_rx_ring[RSWITCH2_BE] = RX_RING_SIZE0;
 
     num_rx_ring[RSWITCH2_NC] = RX_RING_SIZE1;
+    num_ts_ring = TS_RING_SIZE;
 
     rswitch2_desc_init(pdev);
-
+    rswitch2_ts_desc_init(pdev);
     printk("board_config.eth_ports = %d \n",board_config.eth_ports);
 
     for (a = 0; a < eth_ports; a++) {
@@ -4229,7 +4961,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
             printk("TX DMAC Init  Failed \n");
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
             rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
             drv_unload_remove_chrdev();
             drv_unload_remove_netdevs();
             drv_unload_cleanup();
@@ -4245,7 +4977,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         printk("RX DMAC Init Failed \n");
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
         rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
         drv_unload_remove_chrdev();
         drv_unload_remove_netdevs();
         drv_unload_cleanup();
@@ -4261,12 +4993,14 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
     iowrite32(2048,gwca_addr + GWIICBSC);
     value = ioread32(gwca_addr+GWMDNC);
     iowrite32((value | (0xF << 8)), gwca_addr+GWMDNC);
+    rswitch2_ts_ring_init();
+    rswitch2_ts_ring_format();
     err = rswitch2_gwca_change_mode(rswitch2_gwca_mode_disable);
     if(err < 0) {
         printk("gwCA Mode Change Failed \n");
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
         rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
         drv_unload_remove_chrdev();
         drv_unload_remove_netdevs();
         drv_unload_cleanup();
@@ -4277,7 +5011,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         printk("gwCA Mode Change Failed \n");
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
         rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
         drv_unload_remove_chrdev();
         drv_unload_remove_netdevs();
         drv_unload_cleanup();
@@ -4288,7 +5022,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         printk("Bpool Config Failed \n");
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
         rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
         drv_unload_remove_chrdev();
         drv_unload_remove_netdevs();
         drv_unload_cleanup();
@@ -4303,7 +5037,7 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         printk("Interrupt Probe Failed \n");
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
         rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
         drv_unload_remove_chrdev();
         drv_unload_remove_netdevs();
         drv_unload_cleanup();
@@ -4315,13 +5049,15 @@ int rswitch2_eth_init(struct platform_device *pdev, struct pci_dev *pcidev)
         printk("Register Interrupt Failed \n");
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
         rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
         drv_unload_remove_chrdev();
         drv_unload_remove_netdevs();
         drv_unload_cleanup();
         return err;
     }
+    rswitch2_counter_clear_func();
     rswitch2_fwd_init(&board_config);
+    ptp_rswitch2_init(pdev);
     printk("After Forwarding Init \n");
     return 0;
 }
@@ -4377,9 +5113,10 @@ static void rswitch2_drv_remove_interrupts(void)
 static int rswitch2_remove_one_platform(struct platform_device *pdev)
 {
     rswitch2_fwd_exit();
+    ptp_rswitch2_remove(pdev);
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
     rswitch2_eth_remove_proc_entry();
-#endif 
+#endif
     drv_unload_remove_chrdev();
     drv_unload_remove_netdevs();
     rswitch2_drv_remove_interrupts();
@@ -4397,14 +5134,14 @@ int rswitch2_port_probe(void)
 {
     u32 rcec_val = 0;
     u32 ports = 0;
-    iowrite32(0xFFFFFFFF , ioaddr + RCEC);   
+    iowrite32(0xFFFFFFFF , ioaddr + RCEC);
     rcec_val = ioread32(ioaddr + RCEC);
     rcec_val  = rcec_val & 0xFF;
     for(ports = 0; ports < 8; ports++){
         if(!((rcec_val >> ports) & 0x01)){
             break;
         }
-        
+
     }
 
     board_config.eth_ports = ports -2;
@@ -4416,7 +5153,7 @@ int rswitch2_port_probe(void)
     board_config.rx_queue_offset = 0;
     board_config.ris_bitmask = GENMASK(NUM_RX_QUEUE -1, board_config.rx_queue_offset);
     board_config.tis_bitmask = GENMASK((board_config.dbat_entry_num -1), NUM_RX_QUEUE);
-    iowrite32(0xFFFFFFFF , ioaddr + RCDC);   
+    iowrite32(0xFFFFFFFF , ioaddr + RCDC);
     return 0;
 };
 
@@ -4446,10 +5183,12 @@ static int rswitch2_init_one_platform(struct platform_device *pdev)
     match = of_match_device(rswitch2_of_tbl, &pdev->dev);
     if (!match)
         return -EINVAL;
+    rswitch2_reset();
     rswitch2_port_probe();
     err = rswitch2_eth_init(pdev, pcidev);
     if(err < 0) {
         printk("Driver Probe failed \n");
+        platform_set_drvdata(pdev, NULL);
         return err;
 
     }
@@ -4492,7 +5231,16 @@ MODULE_VERSION(__DATE__"-"__TIME__);
     2020-10-01    AK  Swapped line 6 to 7 device tree change needed
     2020-10-05    AK  Updated timing sequence for Phy configuration
     2020-10-07    AK  Updated for tsngw descriptor change
+    2020-10-12    AK  Updated for reset sequence
+    2020-10-14    AK  rx bug fix
+    2020-10-22    AK  Fixed Rx stale frame issue, to be confirmed by CMA
+    2020-11-04    AK  Updated RX Descriptor Multicast test
+    2020-11-05    AK  Fixed RX Tx Byte Counters
+    2020-11-19    AK  Updated for gptp HW TS Support Untested(WIP)
+    2020-11-25    AK  Bug Fixes while testing
 
 */
+
+
 
 

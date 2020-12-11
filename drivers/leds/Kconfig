@@ -696,6 +696,14 @@ config LEDS_NIC78BX
 	  To compile this driver as a module, choose M here: the module
 	  will be called leds-nic78bx.
 
+config LEDS_RENESAS_VC
+	tristate "LED support for Renesas Vehicle Computer boards"
+	depends on LEDS_CLASS && I2C
+	select REGMAP_I2C
+	help
+	  This option enabled support for CPLD controlled LEDs on Renesas
+	  Vehicle Computer boards. Say Y to enabled these.
+
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"
 

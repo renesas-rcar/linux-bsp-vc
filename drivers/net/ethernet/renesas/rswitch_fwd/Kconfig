@@ -1,0 +1,20 @@
+# A.Kamal (RSWITCH)
+#
+# Renesas RSWITCH , Forwarding Engine configuration
+#
+
+config RENESAS_RSWITCH_FWD
+	tristate "Renesas R-SWITCH(RSWITCH). Forwarding Engine support"
+	default n
+	---help---
+	  Renesas R-SWITCH Forwarding Engine device driver for VC2. Compile as a module
+
+if RENESAS_RSWITCH_FWD
+config RENESAS_RSWITCH_FWD_STATS
+	bool "Renesas R-SWITCH(RSWITCH). Forwarding Engine statistics"
+	depends on RENESAS_RSWITCH_FWD
+	default n
+	---help---
+	  Renesas R-SWITCH Forwarding Engine device driver statistics for RSWITCH on VC2.
+endif # RENESAS_RSWITCH_FWD
+# A.Kamal (RSWITCH)

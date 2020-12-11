@@ -161,9 +161,9 @@ source "drivers/net/ethernet/qlogic/Kconfig"
 source "drivers/net/ethernet/qualcomm/Kconfig"
 source "drivers/net/ethernet/realtek/Kconfig"
 source "drivers/net/ethernet/renesas/Kconfig"
-# A.KAMAL (RSWITCH2)
+source "drivers/net/ethernet/renesas/rswitch_fwd/Kconfig"
+source "drivers/net/ethernet/renesas/rswitch_eth/Kconfig"
 source "drivers/net/ethernet/renesas/rswitch2/Kconfig"
-# A.kamal (RSWITCH2)
 source "drivers/net/ethernet/rdc/Kconfig"
 source "drivers/net/ethernet/rocker/Kconfig"
 source "drivers/net/ethernet/samsung/Kconfig"

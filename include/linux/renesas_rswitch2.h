@@ -26,10 +26,11 @@
 #define RENESAS_RSWITCH2_MAX_FWD_TBL_ENTRY 1024
 #define RSWITCH2_MAX_RTAG     3
 #define RSWITCH2_MAX_L2_3_UPDATE_ENTRIES   255
+#define RSWITCH2_MAX_PLATFORM_CLOCK   125000
 #define RENESAS_RSWITCH2_MAX_IPV4_ENTRY 1024
 #define RENESAS_RSWITCH2_MAX_ETHERNET_PORTS 4
-#define RSWITCH2_MAX_UNSECURE_ENTRY 1024
-#define RSWITCH2_MAX_L3_COLLISION  1024
+#define RSWITCH2_MAX_UNSECURE_ENTRY 0x7FF
+#define RSWITCH2_MAX_L3_COLLISION  1023
 #define RSWITCH2_MAX_CSDN  255
 #define RSWITCH2_MAX_CTAG_DEI 1
 #define RSWITCH2_MAX_CTAG_VLAN 0xFFF
@@ -73,8 +74,14 @@
 #define RSWITCH2_MAC_ID_LENGTH          6
 #define RSWITCH2_MAX_IPV4_STREAM_ENTRIES 1024
 #define RSWITCH2_MAX_TPID 0xFFFF
-#define RENESAS_RSWITCH2_MAX_HASH_EQUATION 0xFFFF
-#define RENESAS_RSWITCH2_VC_PCI_ID       0xE002
+#define RENESAS_RSWITCH2_MAX_HASH_EQUATION  0xFFFF
+#define RENESAS_RSWITCH2_MAX_UNSECURE_VLAN  0x1FFF
+#define RENESAS_RSWITCH2_VC_PCI_ID          0xE002
+#define PLATFORM_CLOCK_FREQUENCY_HZ         78125000
+#define RSWITCH2_MCAST_DESC_CHAIN_NUM_START 1
+#define RSWITCH2_MCAST_DESC_NUM             1
+#define RSWITCH2_MCAST_NEXT_DESC_NUM        2
+
 typedef  __uint128_t uint128_t;
 extern struct proc_dir_entry *root_dir;
 enum rswitch2_gwca_mode {
@@ -182,7 +189,47 @@ struct  rswitch2_source_lock_config {
 
 };
 
+struct rswitch2_proc_eth_err_counter {
+    uint32_t min_frame_sz_err[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t tag_filter_err[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t frame_size_err[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t desc_q_oflow_err[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t desc_q_sec_err[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t csum_err[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+};
+struct rswitch2_proc_rx_tx_counter {
+    uint32_t eframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t pframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint64_t ebyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint64_t pbyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t mframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t bframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t uframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t phyerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t nibbleerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t crcerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t fragmisserror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t cfragerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t fragerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t rmacfiltererror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t undersizeerrorgood[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t undersizeerrorbad[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t oversizeerrorgood[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t oversizeerrorbad[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t txeframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t txpframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint64_t txebyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint64_t txpbyte[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t txerror[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t txbframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t txmframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+    uint32_t txuframe[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1];
+};
 
+struct rswitch2_proc_counter {
+    struct rswitch2_proc_rx_tx_counter rx_tx_counter;
+    struct rswitch2_proc_eth_err_counter err_counter;
+};
 struct rswitch2_ipv_config {
     uint32_t ipv_update_enable;
     uint32_t ipv_value;
@@ -251,7 +298,15 @@ struct rswitch2_ipv_fwd_config_entry {
 
 };
 
+struct   rswitch2_mac_aging_config {
+    uint32_t bEnable;
+    uint32_t on_off;
+    uint32_t mac_aging_prescalar;
+    uint32_t mac_aging_polling_mode;
+    uint32_t mac_aging_security;
+    uint32_t mac_aging_time_sec;
 
+};
 
 
 struct rswitch2_l2_fwd_config {
@@ -259,6 +314,7 @@ struct rswitch2_l2_fwd_config {
     uint32_t max_unsecure_hash_entry;
     uint32_t max_hash_collision;
     uint32_t mac_hash_eqn;
+    struct   rswitch2_mac_aging_config mac_aging_config;
     uint32_t l2_fwd_mac_config_entries;
     struct rswitch2_l2_fwd_mac_config_entry l2_fwd_mac_config_entry[RSWITCH2_MAX_L2_FWD_ENTRIES];
     uint32_t max_unsecure_vlan_entry;
@@ -337,7 +393,9 @@ struct rswitch2_fwd_gen_port_config {
 
 struct rswitch2_fwd_gen_config {
     uint32_t vlan_mode;
-    uint32_t tpid;
+    uint32_t ctag_tpid;
+    uint32_t stag_tpid;
+    uint32_t vlan_mode_config_only;
     uint32_t bEnable;
     struct rswitch2_fwd_gen_port_config fwd_gen_port_config[RENESAS_RSWITCH2_MAX_PORT_AGENT];
 
@@ -526,12 +584,22 @@ struct rswitch2_eth_port_config {
 };
 
 struct rswitch2_eth_config {
+    uint32_t mcast_rx_desc_test_enable;
     uint32_t ports;
     struct rswitch2_eth_port_config eth_port_config[RENESAS_RSWITCH2_MAX_ETHERNET_PORTS];
 
 };
+
+struct rswitch2_config {
+    uint32_t chi_clk_mhz;
+    struct rswitch2_eth_config eth_config;
+    struct rswitch2_fwd_config fwd_config;
+};
 extern int rswitch2_fwd_init(struct ethports_config      *board_config);
 extern int rswitch2_fwd_exit(void);
+extern void ptp_rswitch2_port_init(struct net_device *ndev, struct platform_device *pdev);
+extern int ptp_rswitch2_init(struct platform_device *pdev);
+extern int ptp_rswitch2_remove(struct platform_device *pdev);
 #endif
 
 
@@ -540,5 +608,7 @@ extern int rswitch2_fwd_exit(void);
     2020-08-10    AK  Initial Version
     2020-09-07    AK  Updated for L2/L3 Update
     2020-10-07    AK  Updated for Port Forwarding
+    2020-10-07    AK  Updated for Aeging
+    2020-11-19    AK  PTP Support 
 
 */

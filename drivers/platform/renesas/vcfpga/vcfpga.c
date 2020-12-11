@@ -96,10 +96,12 @@ u32  pci_id = 0;
 u32  pci_sz = 0;
 void __iomem  *ioaddr_pci = 0;
 struct pci_dev        *pcidev;
+uint32_t bitfile_version = 0;
 EXPORT_SYMBOL(ioaddr);
 EXPORT_SYMBOL(pci_id);
 EXPORT_SYMBOL(ioaddr_pci);
 EXPORT_SYMBOL(pcidev);
+EXPORT_SYMBOL(bitfile_version);
 
 static const struct pci_device_id vc2_fpgapltfrm_pci_tbl[] = {
     { PCI_DEVICE(PCI_ANY_ID, PCI_ANY_ID), },
@@ -816,6 +818,8 @@ static int vc2_fpgapltfrm_init_pci(struct pci_dev *dev, const struct pci_device_
     pcidev = dev;
     pci_id = dev->device;
     vc2_fpgapltfrm_proc_initialise();
+
+    bitfile_version = ioread32((ioaddr - RSWITCH2_FPGA_PCI_OFFSET) + 0x01000000 + 0x4D40);
     return rc;
 err_out_free_res:
     pci_release_regions(dev);

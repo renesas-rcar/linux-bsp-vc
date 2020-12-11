@@ -1,0 +1,27 @@
+# A.Kamal (RSWITCH)
+#
+# R-Switch Ethernet devices configuration
+#
+
+config RENESAS_RSWITCH_ETH
+    tristate "Renesas R-Switch (RSWITCH). TSN Ethernet Ports"
+    default n
+	---help---
+	  Renesas R-Switch(TSN). Enable AVB/TSN Ethernet Ports. Compile as a module
+
+if RENESAS_RSWITCH_ETH
+config RENESAS_RSWITCH_ETH_PORTS
+	int "Renesas R-Switch (RSWITCH). Maximum TSN Ethernet ports"
+	default 6
+	depends on RENESAS_RSWITCH_ETH
+	---help---
+		The maximum number of TSN Ethernet ports attached to the Renesas R-Switch. 
+
+config RENESAS_RSWITCH_ETH_STATS
+	bool "Renesas R-Switch (RSWITCH). TSN Ethernet port Statistics"
+	default n
+	---help---
+	 Renesas R-Switch. TSN Ethernet Port device driver statistics for R-Switch
+
+endif # RENESAS_RSWITCH_ETH
+# A.Kamal (RSWITCH)

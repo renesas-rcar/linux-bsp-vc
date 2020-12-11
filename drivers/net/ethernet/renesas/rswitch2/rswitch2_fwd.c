@@ -1,3 +1,4 @@
+#define CONFIG_RENESAS_RSWITCH2_STATS 1
 /**
     @brief  Renesas R-SWITCH2 Switch Driver
 
@@ -67,18 +68,21 @@
 #define  L2_MAC_FWD
 #define  VLAN_FWD
 #ifdef CONFIG_RENESAS_RSWITCH2_STATS
-#define RSWITCH2_FWD_PROC_FILE_ERRORS   "fwderrors"
-#define RSWITCH2_FWD_PROC_FILE_COUNTERS "fwdcounters"
-#define RSWITCH2_FWD_PROC_FILE_L3       "L3"
-#define RSWITCH2_FWD_PROC_FILE_L2       "L2"
-#define RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE "Routtblupdate"
+  #define RSWITCH2_FWD_PROC_FILE_ERRORS   "fwderrors"
+  #define RSWITCH2_FWD_PROC_FILE_COUNTERS "fwdcounters"
+  #define RSWITCH2_FWD_PROC_FILE_L3       "L3"
+  #define RSWITCH2_FWD_PROC_FILE_L2       "l2"
+  #define RSWITCH2_FWD_PROC_FILE_VLAN     "vlan"
+  #define RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE "Routtblupdate"
+  #define RSWITCH2_FWD_PROC_FILE_BUFFER   "buffer"
 #endif
 /********************************************* Global Variables ************************************************/
 static struct rswitch2_fwd_config             rswitch2fwd_config;
 static struct  ethports_config      board_config;
 // Static config (passed from user)
 static struct rswitch2_fwd_config             rswitch2fwd_confignew;
-
+static int vlan_tbl_reconfig = 0;
+static int mac_tbl_reconfig = 0;
 struct rswitch2_l2_fwd_config l2_fwd_config;
 struct rswitch2_ipv_fwd_config ipv_fwd_config;
 struct rswitch2_ipv4_stream_fwd_config ipv4_stream_config;
@@ -89,6 +93,7 @@ static struct class * rswitch2fwd_devclass = NULL;
 static dev_t          rswitch2fwd_dev;
 static struct cdev    rswitch2fwd_cdev;
 static struct device  rswitch2fwd_device;
+extern struct net_device        ** ppndev;  //for the interface names
 #define RSWITCH2_FWD_CTRL_MINOR (127)
 #ifdef L2_MAC_FWD
 
@@ -103,7 +108,9 @@ static int rswitch2_l2_mac_tbl_reset(void)
     int i = 0;
     u32 value = 0;
     iowrite32((1 << 0), ioaddr + FWMACTIM);
+#ifdef DEBUG
     printk("Register address= %x Write value = %x \n",FWMACTIM, (1 << 0));
+#endif
     for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
 
         value = ioread32(ioaddr + FWMACTIM);
@@ -121,6 +128,10 @@ static int rswitch2_l2_mac_tbl_reset(void)
 }
 #endif
 
+
+
+
+
 #ifdef IP_TBL_FWD
 
 /**
@@ -134,7 +145,9 @@ static int rswitch2_ip_tbl_reset(void)
     int i = 0;
     u32 value = 0;
     iowrite32((1 << 0), ioaddr + FWIPTIM);
+#ifdef DEBUG
     printk("Register address= %x Write value = %x \n",FWIPTIM, (1 << 0));
+#endif
     for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
 
         value = ioread32(ioaddr + FWIPTIM);
@@ -164,7 +177,9 @@ static int rswitch2_l2_vlan_tbl_reset(void)
     int i = 0;
     u32 value = 0;
     iowrite32((1 << 0), ioaddr + FWVLANTIM);
+#ifdef DEBUG
     printk("Register address= %x Write value = %x \n",FWVLANTIM, (1 << 0));
+#endif
     for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
 
         value = ioread32(ioaddr + FWVLANTIM);
@@ -182,6 +197,36 @@ static int rswitch2_l2_vlan_tbl_reset(void)
 }
 #endif
 
+/**
+    @brief Write L2 Table Clear Function(Using Table Reset)
+
+    @param  struct file *
+
+    @param  const char *
+
+    @param  size_t
+
+    @param  loff_t *
+
+    @return ssize_t
+
+*/
+static ssize_t rswitch2_fwd_l2_clear(struct file *filp, const char *buff, size_t len, loff_t * off)
+{
+    u32 ret = 0;
+    u64 l2_tbl_clear = 0;
+    ret = kstrtoull_from_user(buff, len, 10, &l2_tbl_clear);
+    if (ret) {
+        /* Negative error code. */
+        pr_info("ko = %d\n", ret);
+        return ret;
+    } else {
+        rswitch2_l2_mac_tbl_reset();
+        rswitch2_l2_vlan_tbl_reset();
+        return len;
+    }
+}
+
 
 /**
     @brief  L2-3 Update Table Reset Function
@@ -194,7 +239,9 @@ static int rswitch2_l23_update_tbl_reset(void)
     int i = 0;
     u32 value = 0;
     iowrite32((1 << 0), ioaddr + FWL23UTIM);
+#ifdef DEBUG
     printk("Register address= %x Write value = %x \n",FWL23UTIM, (1 << 0));
+#endif
     for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
 
         value = ioread32(ioaddr + FWL23UTIM);
@@ -211,6 +258,36 @@ static int rswitch2_l23_update_tbl_reset(void)
 
 }
 
+
+/**
+    @brief Write L2 L3 Table Update Clear Function(Using Table Reset)
+
+    @param  struct file *
+
+    @param  const char *
+
+    @param  size_t
+
+    @param  loff_t *
+
+    @return ssize_t
+
+*/
+static ssize_t rswitch2_fwd_l2_l3_update_clear(struct file *filp, const char *buff, size_t len, loff_t * off)
+{
+    u32 ret = 0;
+    u64 l2l3_update_tbl_clear = 0;
+    ret = kstrtoull_from_user(buff, len, 10, &l2l3_update_tbl_clear);
+    if (ret) {
+        /* Negative error code. */
+        pr_info("ko = %d\n", ret);
+        return ret;
+    } else {
+        rswitch2_l23_update_tbl_reset();
+        return len;
+    }
+}
+
 /**
     @brief  L3 Table Reset Function
 
@@ -222,7 +299,9 @@ static int rswitch2_l3_tbl_reset(void)
     int i = 0;
     u32 value = 0;
     iowrite32((1 << 0), ioaddr + FWLTHTIM);
+#ifdef DEBUG
     printk("Register address= %x Write value = %x \n",FWLTHTIM, (1 << 0));
+#endif
     for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
 
         value = ioread32(ioaddr + FWLTHTIM);
@@ -237,6 +316,37 @@ static int rswitch2_l3_tbl_reset(void)
 
 
 
+}
+
+
+
+/**
+    @brief Write L3 Table Clear Function(Using Table Reset)
+
+    @param  struct file *
+
+    @param  const char *
+
+    @param  size_t
+
+    @param  loff_t *
+
+    @return ssize_t
+
+*/
+static ssize_t rswitch2_fwd_l3_clear(struct file *filp, const char *buff, size_t len, loff_t * off)
+{
+    u32 ret = 0;
+    u64 l3_tbl_clear = 0;
+    ret = kstrtoull_from_user(buff, len, 10, &l3_tbl_clear);
+    if (ret) {
+        /* Negative error code. */
+        pr_info("ko = %d\n", ret);
+        return ret;
+    } else {
+        rswitch2_l3_tbl_reset();
+        return len;
+    }
 }
 
 #ifdef IP_TBL_FWD
@@ -489,8 +599,9 @@ static int rswitch2_ipv4_stream_gen_config(struct rswitch2_ipv4_stream_fwd_confi
                   | (hashconfig->stag_pcp << 3) | (hashconfig->stag_vlan << 2) |(hashconfig->dest_mac << 0) | (hashconfig->src_mac << 1);
 #endif
     iowrite32(fwip4sc_val, ioaddr + FWIP4SC);
+#ifdef DEBUG
     printk("Register address= %x Write value = %x \n",FWIP4SC, fwip4sc_val);
-
+#endif
     return 0;
 }
 
@@ -524,24 +635,32 @@ static int rswitch2_calc_ipv4_hash(struct rswitch2_ipv4_hash_configuration *conf
 
     if(config->dest_mac) {
         iowrite32(((entry->dest_mac[3]<<24) | (entry->dest_mac[2]<<16) | (entry->dest_mac[1]<<8) | (entry->dest_mac[0]<<0)),ioaddr +  FWSHCR0);
+#ifdef DEBUG
         printk("Register address= %x Write value = %x \n",FWSHCR0,
                ((entry->dest_mac[3]<<24) | (entry->dest_mac[2]<<16) | (entry->dest_mac[1]<<8) | (entry->dest_mac[0]<<0)));
+#endif
         fwshcr1_val = (entry->dest_mac[5]<<24) | (entry->dest_mac[4]<<16);
         if(!config->src_mac) {
             iowrite32(fwshcr1_val, ioaddr + FWSHCR1);
+#ifdef DEBUG
             printk("Register address= %x Write value = %x \n",FWSHCR1,
                    fwshcr1_val);
+#endif
         }
     }
     if(config->src_mac) {
         fwshcr1_val |= (entry->src_mac[1]<<8) | (entry->src_mac[0]<<0);
         iowrite32(fwshcr1_val, ioaddr + FWSHCR1);
+#ifdef DEBUG
         printk("Register address= %x Write value = %x \n",FWSHCR1,
                fwshcr1_val);
+#endif
         fwshcr2_val = (entry->src_mac[5]<<24) | (entry->src_mac[4]<<16) | (entry->src_mac[3]<<8) | (entry->src_mac[2]<<0);
         iowrite32(fwshcr2_val, ioaddr + FWSHCR2);
+#ifdef DEBUG
         printk("Register address= %x Write value = %x \n",FWSHCR2,
                fwshcr2_val);
+#endif
 
 
     }
@@ -552,8 +671,10 @@ static int rswitch2_calc_ipv4_hash(struct rswitch2_ipv4_hash_configuration *conf
                        | (entry->stag_vlan << 16) | (entry->ctag_pcp << 13)
                        | (entry->ctag_dei << 12)  | (entry->ctag_vlan);
         iowrite32(fwshcr3_val, ioaddr + FWSHCR3);
+#ifdef DEBUG
         printk("Register address= %x Write value = %x \n",FWSHCR3,
                fwshcr3_val);
+#endif
 
     }
     iowrite32(0x0, ioaddr + FWSHCR4);
@@ -627,6 +748,8 @@ static int rswitch2_ipv4_l3_tbl_config(struct rswitch2_l3_stream_fwd *config)
 
 
     for(entries = 0; entries < config->ipv4_ipv6_stream_config.ipv4_stream_fwd_config.ipv4_stream_fwd_entries; entries++) {
+        dpv = 0;
+        ds_dpv = 0;
         memcpy(stream_id, &config->ipv4_ipv6_stream_config.ipv4_stream_fwd_config.ipv4_stream_fwd_entry[entries].stream_id, sizeof(struct rswitch2_ipv4_stream_id));
         fwlthtl0_val = (config->ipv4_ipv6_stream_config.ipv4_stream_fwd_config.ipv4_stream_fwd_entry[entries].security_learn << 8) | stream_id->frame_fmt;
         fwlthtl1_val = (stream_id->stag << 16) | stream_id->ctag;
@@ -778,6 +901,8 @@ static int rswitch2_l2_vlan_tbl_config(struct rswitch2_l2_fwd_config* config)
     vlantmue = config->max_unsecure_vlan_entry;
     iowrite32((vlantmue << 16), ioaddr + FWVLANTEC);
     for(entries = 0; entries < config->l2_fwd_vlan_config_entries; entries++) {
+        ds_dpv = 0;
+        dpv = 0;
         fwvlantl0_val = (config->l2_fwd_vlan_config_entry[entries].vlan_learn_disable << 10)
                         | (config->l2_fwd_vlan_config_entry[entries].vlan_security_learn << 8);
 
@@ -847,28 +972,29 @@ static int rswitch2_l2_mac_tbl_config(struct rswitch2_l2_fwd_config* config)
 
         ss_dpv = 0;
         dpv = 0;
+        ds_dpv = 0;
         fwmactl0_val = (config->l2_fwd_mac_config_entry[entries].mac_learn_disable << 10) | (config->l2_fwd_mac_config_entry[entries].mac_dynamic_learn << 9)
                        | (config->l2_fwd_mac_config_entry[entries].mac_security_learn << 8);
         iowrite32(fwmactl0_val, ioaddr + FWMACTL0);
         fwmactl1_val = (config->l2_fwd_mac_config_entry[entries].mac[0]<< 8) | (config->l2_fwd_mac_config_entry[entries].mac[1]<< 0);
         iowrite32(fwmactl1_val, ioaddr + FWMACTL1);
-        printk("FWMACTL1_val = %x \n", fwmactl1_val);
+
         fwmactl2_val = (config->l2_fwd_mac_config_entry[entries].mac[2]<< 24) | (config->l2_fwd_mac_config_entry[entries].mac[3]<< 16)
                        | (config->l2_fwd_mac_config_entry[entries].mac[4]<< 8) | (config->l2_fwd_mac_config_entry[entries].mac[5]<< 0);
-        printk("fwmactl2_val = %x \n", fwmactl2_val);
+
         iowrite32(fwmactl2_val, ioaddr + FWMACTL2);
         for(port_lock = 0; port_lock < config->l2_fwd_mac_config_entry[entries].destination_source.source_ports; port_lock++) {
             ds_dpv |= 1 << config->l2_fwd_mac_config_entry[entries].destination_source.source_port_number[port_lock];
 
         }
         ds_dpv  |=  config->l2_fwd_mac_config_entry[entries].destination_source.cpu << board_config.eth_ports;
-        printk("ss_dpv = %x \n", ss_dpv);
+
         for(port_lock = 0; port_lock < config->l2_fwd_mac_config_entry[entries].source_source.source_ports; port_lock++) {
             ss_dpv |= 1 << config->l2_fwd_mac_config_entry[entries].source_source.source_port_number[port_lock];
 
         }
         ss_dpv  |=  config->l2_fwd_mac_config_entry[entries].source_source.cpu << board_config.eth_ports;
-        printk("ss_dpv = %x \n", ss_dpv);
+
         fwmactl3_val = ss_dpv | (ds_dpv << 16);
         iowrite32(fwmactl3_val, ioaddr + FWMACTL3);
         iowrite32(config->l2_fwd_mac_config_entry[entries].csdn, ioaddr + FWMACTL4);
@@ -893,6 +1019,18 @@ static int rswitch2_l2_mac_tbl_config(struct rswitch2_l2_fwd_config* config)
 }
 #endif
 
+
+
+static int rswitch2_config_mac_aging(struct   rswitch2_mac_aging_config *config)
+{
+    u32 fwmacagc = 0;
+    iowrite32(config->mac_aging_prescalar, ioaddr + FWMACAGUSPC);
+    fwmacagc = (config->on_off << 24) | (config->mac_aging_polling_mode << 18) |
+               (config->mac_aging_security << 17) | (config->on_off << 16) |
+               (config->mac_aging_time_sec);
+    iowrite32(fwmacagc, ioaddr + FWMACAGC);
+    return 0;
+}
 /**
     @brief  L2  table  Update Configuration
 
@@ -906,10 +1044,13 @@ static int rswitch2_l2_table_update_config(struct  rswitch2_l2_fwd_config *confi
     int ret = 0;
     //if(config->l2_fwd_mac_config_entries)
     {
-        ret = rswitch2_l2_mac_tbl_reset();
-        if(ret < 0) {
-            printk("l2 MAC tbl Reset Failed \n");
-            return -1;
+        if(!mac_tbl_reconfig) {
+            ret = rswitch2_l2_mac_tbl_reset();
+            if(ret < 0) {
+                printk("l2 MAC tbl Reset Failed \n");
+                return -1;
+            }
+            mac_tbl_reconfig = 1;
         }
         iowrite32(((config->max_unsecure_hash_entry << 16) |config->max_hash_collision), ioaddr + FWMACHEC);
         iowrite32(config->mac_hash_eqn, ioaddr + FWMACHC);
@@ -918,13 +1059,19 @@ static int rswitch2_l2_table_update_config(struct  rswitch2_l2_fwd_config *confi
             printk("l2 MAC tbl Config Failed \n");
             return -1;
         }
+        if(config->mac_aging_config.bEnable) {
+            ret = rswitch2_config_mac_aging(&config->mac_aging_config);
+        }
     }
-    if(config->l2_fwd_vlan_config_entries)
+    //if(config->l2_fwd_vlan_config_entries)
     {
-        ret = rswitch2_l2_vlan_tbl_reset();
-        if(ret < 0) {
-            printk("l2 VLAN tbl Reset Failed \n");
-            return -1;
+        if(!vlan_tbl_reconfig) {
+            ret = rswitch2_l2_vlan_tbl_reset();
+            if(ret < 0) {
+                printk("l2 VLAN tbl Reset Failed \n");
+                return -1;
+            }
+            vlan_tbl_reconfig = 1;
         }
         iowrite32(((config->max_unsecure_vlan_entry << 16)), ioaddr + FWVLANTEC);
         ret = rswitch2_l2_vlan_tbl_config(config);
@@ -934,7 +1081,7 @@ static int rswitch2_l2_table_update_config(struct  rswitch2_l2_fwd_config *confi
         }
     }
     return 0;
-    
+
 }
 /**
     @brief  L23  table  Update Configuration
@@ -960,10 +1107,13 @@ static int rswitch2_l23_table_update_config(struct rswitch2_l23_update *config)
         return -1;
     }
     for(entries = 0; entries < config->entries; entries++) {
+        dpv = 0;
         for(dest_ports = 0; dest_ports < config->l23_update_config[entries].routing_port_update.dest_eth_ports; dest_ports++) {
             dpv |= 1 << config->l23_update_config[entries].routing_port_update.port_number[dest_ports];
         }
-        //printk("config->l23_update_config[entries].src_mac_update = %x \n", config->l23_update_config[entries].src_mac_update);
+#ifdef DEBUG
+        printk("config->l23_update_config[entries].src_mac_update = %x \n", config->l23_update_config[entries].src_mac_update);
+#endif
         dpv |= config->l23_update_config[entries].routing_port_update.cpu << board_config.eth_ports;
         fwl23url0 = (dpv << 16) | (config->l23_update_config[entries].routing_number);
         fwl23url1 = ((config->l23_update_config[entries].rtag  & 0x03) << 25) |
@@ -989,7 +1139,9 @@ static int rswitch2_l23_table_update_config(struct rswitch2_l23_update *config)
                     ((config->l23_update_config[entries].ctag_pcp  & 0x07) << 12) |
                     ((config->l23_update_config[entries].ctag_vlan  & 0xFFF) << 0);
         iowrite32(fwl23url0, ioaddr + FWL23URL0);
-        //printk("fwl23url1=%x\n",fwl23url1);
+#ifdef DEBUG
+        printk("fwl23url1=%x\n",fwl23url1);
+#endif
         iowrite32(fwl23url1, ioaddr + FWL23URL1);
         iowrite32(fwl23url2, ioaddr + FWL23URL2);
         iowrite32(fwl23url3, ioaddr + FWL23URL3);
@@ -1451,12 +1603,11 @@ static int rswitch2_fwd_gen_config(struct rswitch2_fwd_gen_config *config)
 
     u32 fwpc0 = 0;
     u32 i = 0;
-    if(config->vlan_mode == 0x1) {
-        iowrite32(config->vlan_mode, (ioaddr + FWGC));
-        iowrite32(config->tpid, (ioaddr + FWTTC0));
-    } else if(config->vlan_mode == 0x2) {
-        iowrite32(config->vlan_mode, (ioaddr + FWGC));
-        iowrite32((config->tpid << 16), (ioaddr + FWTTC0));
+
+    iowrite32(config->vlan_mode, (ioaddr + FWGC));
+    iowrite32(((config->stag_tpid << 16) | config->ctag_tpid), (ioaddr + FWTTC0));
+    if(config->vlan_mode_config_only) {
+        return 0;
     }
     for(i = 0; i < board_config.agents; i++) {
         fwpc0 = 0;
@@ -1487,7 +1638,7 @@ static int rswitch2_fwd_gen_config(struct rswitch2_fwd_gen_config *config)
                 rswitch2_port_fwding_config(&config->fwd_gen_port_config[i].port_forwarding, config->fwd_gen_port_config[i].portnumber);
             }
         }
-        
+
 #ifdef DEBUG
         printk("Register address= %x Write value = %x \n",FWPC00 + (i * 0x10),
                fwpc0);
@@ -1639,7 +1790,7 @@ static int rswitch2fwd_drv_remove_chrdev(void)
     device_del(&rswitch2fwd_device);
     cdev_del(&rswitch2fwd_cdev);
     class_destroy(rswitch2fwd_devclass);
-    
+
     return ret;
 }
 
@@ -1809,7 +1960,7 @@ static int rswitch2_fwd_l2_l3_update_show(struct seq_file * m, void * v)
     u8 mac[6] = {0,0,0,0,0,0,};
     u32 dpv = 0;
     seq_printf(m, "Line     RTAG    STAG-DEI     STAG-PCP      STAG-ID       CTAG-DEI     CTAG-PCP      CTAG-ID  \n");
-    
+
     for(entry = 0; entry <= 255; entry++){
         iowrite32(entry, ioaddr + FWL23URR);
         for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
@@ -1818,11 +1969,13 @@ static int rswitch2_fwd_l2_l3_update_show(struct seq_file * m, void * v)
                 if((((value >> 16) & 0x01) == 0) && (value & 0xFFFF)) {
                     dpv = value & 0xFF;
                     fwl23urrr1 = ioread32(ioaddr + FWL23URRR1);
-                    //printk("fwl23urrr1 = %x \n",fwl23urrr1);
+#ifdef DEBUG
+                    printk("fwl23urrr1 = %x \n",fwl23urrr1);
+#endif
                     fwl23urrr2 = ioread32(ioaddr + FWL23URRR2);
-                    fwl23urrr3 = ioread32(ioaddr + FWL23URRR3); 
+                    fwl23urrr3 = ioread32(ioaddr + FWL23URRR3);
                     rtag = (fwl23urrr1 >> 25) & 0x03;
-                    seq_printf(m, "%4d   %6d", entry, rtag); 
+                    seq_printf(m, "%4d   %6d", entry, rtag);
                     if((fwl23urrr1 >> 24) & 0x01) {
                         seq_printf(m, "%12d", (fwl23urrr3>>31) & 0x01);
                     } else {
@@ -1853,7 +2006,7 @@ static int rswitch2_fwd_l2_l3_update_show(struct seq_file * m, void * v)
                     } else {
                         seq_printf(m, "%12s", "-\n");
                     }
-                    
+
                     if(!first_print) {
                         seq_printf(m, "Src-Addr-Update      TTL-Update    Dest-MAC           Routing-Ports       Routing-CPU\n");
                         first_print = 1;
@@ -1898,9 +2051,43 @@ static int rswitch2_fwd_l2_l3_update_show(struct seq_file * m, void * v)
             }
             mdelay(1);
         }
-           
+
     }
     return 0;
+}
+
+/**
+    @brief Helper function to get a port name string
+
+    @param  char *
+
+    @param  int *
+
+    @return void
+
+*/
+static void getPortNameString(char *buffer, int *number)
+{
+	int i;
+	char s[10];
+
+	if (board_config.eth_ports < *number)
+		*number = board_config.eth_ports;
+
+	for (i=0; i < *number; i++) {
+		buffer[i] = '?';
+		strncpy(s, ppndev[i]->name, 10);
+		s[9] = 0;
+		if (strcmp(s, "eth1") == 0)
+			buffer[i] = 'E';
+		else if (strcmp(s, "tsn0") == 0)
+			buffer[i] = 'M';
+		else {
+			s[3] = 0;
+			if (strcmp(s, "tsn") == 0)
+				buffer[i] = ppndev[i]->name[3];  //the interface number
+		}
+	}
 }
 
 /**
@@ -1924,8 +2111,7 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
     u32 fwmactrr4 = 0;
     u32 fwmactrr6 = 0;
     u32 csdn = 0;
-    u8 first_print = 0;
-    u8 aeging = 0;
+    u8 ageing = 0;
     u8 learn_disable = 0;
     u8 dynamic = 0;
     u8 security = 0;
@@ -1938,11 +2124,15 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
     u8 cpu_mirror = 0;
     u8 eth_mirror = 0;
     u8 c = 0;
-    u32 fwvlantsr1 = 0;
-    u32 fwvlantsr3 = 0;
-    seq_printf(m, "======================================MAC-TABLE==========================================\n");
-    seq_printf(m, "Line        MAC         Mode     Targets         Mirror   Src-Lock      Dst-Lock     IPV\n");
+
+    char portName[10];
+    int  portNumber = 10;
+    getPortNameString(portName, &portNumber);
+
+    seq_printf(m, "=========== MAC-TABLE ===================================================================\n");
+    seq_printf(m, "Line        MAC         Mode     Target-Ports    Mirror   Src-Valid     Dst-Valid    IPV\n");
     seq_printf(m, "=========================================================================================\n");
+
     for(entry = 0; entry <= 1023; entry++){
         iowrite32(entry, ioaddr + FWMACTR);
         for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
@@ -1953,9 +2143,10 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
                     fwmactrr2 = ioread32(ioaddr + FWMACTRR2);
                     fwmactrr3 = ioread32(ioaddr + FWMACTRR3);
                     fwmactrr4 = ioread32(ioaddr + FWMACTRR4);
-                    csdn = ioread32(ioaddr + FWMACTRR5);
+                    csdn      = ioread32(ioaddr + FWMACTRR5);
                     fwmactrr6 = ioread32(ioaddr + FWMACTRR6);
-                    aeging = (fwmactrr1 >> 11) & 0x01;
+
+                    ageing = (fwmactrr1 >> 11) & 0x01;
                     learn_disable = (fwmactrr1 >> 10) & 0x01;
                     dynamic = (fwmactrr1 >> 9) & 0x01;
                     security = (fwmactrr1 >> 8) & 0x01;
@@ -1975,12 +2166,12 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
 
                     seq_printf(m,"%-4d", entry);
                     seq_printf(m," %02x:%02x:%02x:%02x:%02x:%02x", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-                    seq_printf(m,"  %-7s", dynamic ? ((aeging) ? "Aged" : "Dynamic") : "Static");
-                    
+                    seq_printf(m,"  %-7s", dynamic ? ((ageing) ? "Aged" : "Dynamic") : "Static");
+
                     seq_printf(m, " ");
-                    for (c = 0; c < board_config.eth_ports; c++) {
+                    for (c = 0; c < portNumber; c++) {
                         if(((dpv >> c) & 0x01) == 1) {
-                            seq_printf(m, " %d", c);
+                            seq_printf(m, " %c", portName[c]);
                         } else {
                             seq_printf(m, "  ");
                         }
@@ -1993,11 +2184,11 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
 
                     seq_printf(m," %-3s", eth_mirror ? "Eth" : "No");
                     seq_printf(m," %-3s", cpu_mirror ? "CPU" : "No");
-                    
+
                     seq_printf(m, " ");
-                    for (c = 0; c < board_config.eth_ports; c++) {
+                    for (c = 0; c < portNumber; c++) {
                         if(((srclockdpv >> c) & 0x01) == 1) {
-                            seq_printf(m, " %d", c);
+                            seq_printf(m, " %c", portName[c]);
                         } else {
                             seq_printf(m, "  ");
                         }
@@ -2009,9 +2200,9 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
                     }
 
                     seq_printf(m, "  ");
-                    for (c = 0; c < board_config.eth_ports; c++) {
+                    for (c = 0; c < portNumber; c++) {
                         if(((destlockdpv >> c) & 0x01) == 1) {
-                            seq_printf(m, " %d", c);
+                            seq_printf(m, " %c", portName[c]);
                         } else {
                             seq_printf(m, "  ");
                         }
@@ -2023,13 +2214,16 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
                     }
 
                     if(ipv_enable) {
-                        seq_printf(m, "  %d ", ipv_value);
+                        seq_printf(m, "  %d", ipv_value);
                     } else {
                         seq_printf(m, "  -");
                     }
 
-                    //seq_printf(m,"%12s", security ? "Yes" : "No");
-                    //seq_printf(m,"%17s", learn_disable ? "Yes" : "No");
+                    //default values are not printed
+                    if (security)
+                        seq_printf(m, "   SecurityLevel=%d", security);
+                    if (learn_disable)
+                        seq_printf(m, "   HwLearnDisable=%d", learn_disable);
 
                     seq_printf(m, "\n");
                 }
@@ -2037,12 +2231,45 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
             }
             mdelay(1);
         }
-        
     }
-    first_print = 0;
-    seq_printf(m, "\n======================================VLAN-TABLE====================================================================\n");
-    seq_printf(m, "VID    Learn-Disable    Security    Src-Lock        Src-Lock-CPU    Eth-Mirror    CPU-Mirror    IPV-Update \n");
-    seq_printf(m, "===================================================================================================================\n");
+    return 0;
+}
+
+/**
+    @brief VLAN Show Show Proc Function
+
+    @param  seq_file *
+
+    @param  void *
+
+    @return int
+
+*/
+static int rswitch2_fwd_vlan_show(struct seq_file * m, void * v)
+{
+    u32 entry = 0;
+    u32 value = 0;
+    u8 i = 0;
+    u32 csdn = 0;
+    u8 learn_disable = 0;
+    u8 security = 0;
+    u32 srclockdpv = 0;
+    u32 dpv = 0;
+    u32 ipv_value = 0;
+    u8 ipv_enable = 0;
+    u8 cpu_mirror = 0;
+    u8 eth_mirror = 0;
+    u8 c = 0;
+    u32 fwvlantsr1 = 0;
+    u32 fwvlantsr3 = 0;
+
+    char portName[10];
+    int  portNumber = 10;
+    getPortNameString(portName, &portNumber);
+
+    seq_printf(m, "=========== VLAN-TABLE ============================\n");
+    seq_printf(m, "VID   Mirror    Src-Valid     Dst-Valid        IPV\n");
+    seq_printf(m, "===================================================\n");
     for(entry = 0; entry <= 0xFFF; entry++){
         iowrite32(entry, ioaddr + FWVLANTS);
         for (i = 0; i < RSWITCH2_PORT_CONFIG_TIMEOUT_MS; i++) {
@@ -2050,8 +2277,9 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
             if (((value >> 31) & 0x01) == 0x0) {
                 if((((value >> 1) & 0x01) == 0x00) && (((value >> 0) & 0x01) == 0x0) ) {
                     fwvlantsr1 = ioread32(ioaddr + FWVLANTSR1);
-                    csdn = ioread32(ioaddr + FWVLANTSR2);
+                    csdn       = ioread32(ioaddr + FWVLANTSR2);
                     fwvlantsr3 = ioread32(ioaddr + FWVLANTSR3);
+
                     learn_disable = (value >> 10) & 0x01;
                     security = (value >> 8) & 0x01;
                     srclockdpv = (fwvlantsr1 >> 0) & 0xFF;
@@ -2060,59 +2288,60 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
                     ipv_enable = (fwvlantsr3 >> 19) & 0x01;
                     ipv_value = (fwvlantsr3 >> 16) & 0xFF;
                     dpv = (fwvlantsr3 >> 0) & 0xFF;
-                    seq_printf(m,"%-4d", entry);
-                    seq_printf(m,"%16s", learn_disable ? "Yes" : "No");
-                    seq_printf(m,"%12s", security ? "Yes" : "No");
-                    seq_printf(m, "%s", " ");
-                    for (c = 0; c < board_config.eth_ports; c++) {
+
+                    seq_printf(m,"%4d ", entry);
+
+                    seq_printf(m," %-3s", eth_mirror ? "Eth" : "No");
+                    seq_printf(m," %-3s", cpu_mirror ? "CPU" : "No");
+
+                    seq_printf(m, "  ");
+                    for (c = 0; c < portNumber; c++) {
                         if(((srclockdpv >> c) & 0x01) == 1) {
-                            seq_printf(m, "%4d", c);
+                            seq_printf(m, " %c", portName[c]);
                         } else {
                             seq_printf(m, "  ");
                         }
                     }
                     if(((srclockdpv >> board_config.eth_ports) & 0x01) == 0x01) {
-                        seq_printf(m, " %22s  ","Yes");
+                        seq_printf(m, " CPU");
                     }else {
-                        seq_printf(m, " %22s  ","No");
+                        seq_printf(m, "    ");
                     }
-                
-                    seq_printf(m,"%12s", eth_mirror ? "Yes" : "No");
-                    seq_printf(m,"%14s", cpu_mirror ? "Yes" : "No");
-                    if(ipv_enable) {
-                        seq_printf(m, "%15d\n", ipv_value);
-                    } else {
-                        seq_printf(m, "%15s", "No\n");
-                    }
-                    if(!first_print) {
-                        seq_printf(m, "Dest-Ports       Dest-CPU \n");
-                    }
-                    //printk("dpv=%x \n", dpv);
-                    for (c = 0; c < board_config.eth_ports; c++) {
+
+                    seq_printf(m, "  ");
+                    for (c = 0; c < portNumber; c++) {
                         if(((dpv >> c) & 0x01) == 1) {
-                            seq_printf(m, "%-4d ", c);
+                            seq_printf(m, " %c", portName[c]);
                         } else {
                             seq_printf(m, "  ");
                         }
                     }
-                    if((dpv >> board_config.eth_ports) == 0x01) {
-                        seq_printf(m, "  %15d    ",csdn);
+                    if (((dpv >> board_config.eth_ports) & 0x01) == 0x01) {
+                        seq_printf(m, " CPU:%-3d", csdn);
+                    } else {
+                        seq_printf(m, "        ");
                     }
-                    else {
-                        seq_printf(m, " %15s  ","No");
+
+                    if(ipv_enable) {
+                        seq_printf(m, "  %d", ipv_value);
+                    } else {
+                        seq_printf(m, "  -");
                     }
-                    
+
+                    //default values are not printed
+                    if (security)
+                        seq_printf(m, "   SecurityLevel=%d", security);
+                    if (learn_disable)
+                        seq_printf(m, "   HwLearnDisable=%d", learn_disable);
+
                     seq_printf(m, "\n");
-                    seq_printf(m, "===================================================================================================================\n");
                 }
                 break;
             }
             mdelay(1);
         }
-        
     }
     return 0;
- 
 }
 
 /**
@@ -2127,7 +2356,7 @@ static int rswitch2_fwd_l2_show(struct seq_file * m, void * v)
 */
 static int rswitch2_fwd_l3_show(struct seq_file * m, void * v)
 {
-    char frame_fmt_code[30]; 
+    char frame_fmt_code[30];
     u8 first_print = 0;
     char security[5];
     u32 srcipaddr[4];
@@ -2146,7 +2375,7 @@ static int rswitch2_fwd_l3_show(struct seq_file * m, void * v)
     u32 routingvalid = 0;
     u32 ctag = 0;
     u32 stag = 0;
-    u32 destipport = 0; 
+    u32 destipport = 0;
     u32 hash = 0;
     u32 csdn = 0;
     u32 cpu_mirror = 0;
@@ -2159,7 +2388,7 @@ static int rswitch2_fwd_l3_show(struct seq_file * m, void * v)
     u32 dpv = 0;
     u8 i = 0;
     seq_printf(m, "Line     Secure            Frame-Fmt          CTAG       STAG       Dest-IPPort   Hash \n");
-    
+
     seq_printf(m, "====================================================================================================\n");
     for(entry = 0; entry <= 1023; entry++){
         iowrite32(entry, ioaddr + FWLTHTR);
@@ -2210,7 +2439,7 @@ static int rswitch2_fwd_l3_show(struct seq_file * m, void * v)
                     } else {
                         strcpy(cpu_mirror_string,"No");
                     }
-              
+
                     eth_mirror = (fwlthtrr10 >> 20) & 0x01;
                     if(eth_mirror) {
                         strcpy(eth_mirror_string,"Yes");
@@ -2218,13 +2447,13 @@ static int rswitch2_fwd_l3_show(struct seq_file * m, void * v)
                         strcpy(eth_mirror_string,"No");
                     }
                     ipv_update = (fwlthtrr10 >> 19) & 0x01;
-                    
+
                     ipv_value = (fwlthtrr10 >> 15) & 0xFF;
                     dpv = (fwlthtrr10 >> 0) & 0xFF;
                     seq_printf(m, "%4d   %8s     %12s     %7d      %6d     %12d       %d\n",
-                    entry,security, frame_fmt_code, ctag, stag,  destipport, hash); 
+                    entry,security, frame_fmt_code, ctag, stag,  destipport, hash);
                     if(!first_print) {
-                        seq_printf(m, "Dest-IP           Src-IP     Source-Lock-Ports       Source-Lock-CPU  Routing-Number\n");
+                        seq_printf(m, "Dest-IP           Src-IP     Source-Unlock-Ports       Source-Unlock-CPU  Routing-Number\n");
                     }
                     seq_printf(m, "%d.%d.%d.%d   %2d.%d.%d.%d ",destipaddr[0],destipaddr[1],destipaddr[2],destipaddr[3],srcipaddr[0],srcipaddr[2],srcipaddr[2], srcipaddr[3]);
                     for (c = 0; c < board_config.eth_ports; c++) {
@@ -2269,10 +2498,10 @@ static int rswitch2_fwd_l3_show(struct seq_file * m, void * v)
             }
             mdelay(1);
         }
-           
+
     }
-    
-   
+
+
     return 0;
 
 }
@@ -2290,7 +2519,7 @@ static int rswitch2_fwd_l3_show(struct seq_file * m, void * v)
 
 */
 static int rswitch2_fwd_errors_show(struct seq_file * m, void * v)
-{ 
+{
     u8 i = 0;
     seq_printf(m, "          ");
     for(i = 0; i < board_config.eth_ports; i++) {
@@ -2474,7 +2703,7 @@ static int rswitch2_fwd_errors_show(struct seq_file * m, void * v)
     seq_printf(m, "MACTFS:%d  \n",(ioread32(ioaddr + FWMIS0) >> 2) & 0x01 );
     seq_printf(m, "IPTFS:%d  \n",(ioread32(ioaddr + FWMIS0) >> 1) & 0x01 );
     seq_printf(m, "LTHTFS:%d  \n",(ioread32(ioaddr + FWMIS0) >> 0) & 0x01 );
-#endif    
+#endif
 return 0;
 }
 
@@ -2504,14 +2733,14 @@ static int rswitch2_fwd_counters_show(struct seq_file * m, void * v)
     seq_printf(m,"%-8s", "DDFDN");
     for(i = 0; i < board_config.eth_ports; i++) {
         seq_printf(m, "%8s","-");
-    }    
+    }
     seq_printf(m, "%8d", ioread32(ioaddr + FWCTFDCN0 + (board_config.eth_ports *20)));
-    
+
     seq_printf(m, "\n");
     seq_printf(m, "%-8s","LTHFDN");
     for(i = 0; i <= board_config.eth_ports; i++) {
         seq_printf(m, "%8d", (ioread32(ioaddr + FWLTHFDCN0 + (i *20)))) ;
-        
+
     }
     seq_printf(m, "\n");
     seq_printf(m, "%-8s","IPFDN");
@@ -2522,13 +2751,13 @@ static int rswitch2_fwd_counters_show(struct seq_file * m, void * v)
     seq_printf(m, "%-8s","LTWFDN");
     for(i = 0; i <= board_config.eth_ports; i++) {
         seq_printf(m, "%8d", (ioread32(ioaddr + FWLTWFDCN0 + (i *20)))) ;
-        
+
     }
     seq_printf(m, "\n");
     seq_printf(m, "%-8s","PBFDN");
     for(i = 0; i <= board_config.eth_ports; i++) {
         seq_printf(m, "%8d", (ioread32(ioaddr + FWPBFDCN0 + (i *20)))) ;
-        
+
     }
     seq_printf(m, "\n");
     seq_printf(m, "%-8s","MHLN");
@@ -2559,10 +2788,10 @@ static int rswitch2_fwd_counters_show(struct seq_file * m, void * v)
     seq_printf(m, "%-8s","DDRDN");
     for(i = 0; i < board_config.eth_ports; i++) {
         seq_printf(m, "%8s","-");
-    }   
+    }
     seq_printf(m, "%8d", ioread32(ioaddr + FWCTRDCN0 + (board_config.eth_ports *20)));
-    
-    
+
+
     seq_printf(m, "\n");
     seq_printf(m, "%-8s","LTHRDN");
     for(i = 0; i <= board_config.eth_ports; i++) {
@@ -2584,6 +2813,70 @@ static int rswitch2_fwd_counters_show(struct seq_file * m, void * v)
         seq_printf(m, "%8d", (ioread32(ioaddr +  FWPBRDCN0 + (i *20)))) ;
     }
     seq_printf(m, "\n");
+    return 0;
+}
+
+/**
+    @brief L2 L3 Update Show Proc Function
+
+    @param  seq_file *
+
+    @param  void *
+
+    @return int
+
+*/
+static int rswitch2_fwd_buffer_show(struct seq_file * m, void * v)
+{
+	int i, j;
+	u32 r, rl, rh;
+	u32 total;
+	const u32 ports = 5;
+	int sum=0;
+
+    r = ioread32(ioaddr + CABPPCM);
+    rh = (r >> 16);
+    rl = (r & 0xffff);
+    total = rh;
+    sum = total - rl;
+    seq_printf(m, "Total existing      %04x\n", total);
+    seq_printf(m, "Remaining current   %04x  %d%%\n", rl, rl*100/total);
+    r = ioread32(ioaddr + CABPLCM);
+    seq_printf(m, "Remaining minimum   %04x  %d%%\n\n", r, r*100/total);
+
+    seq_printf(m, "               tsn6   tsn7   tsn5   tsn4  tsngw  --  reject\n");
+    seq_printf(m, "Used current");
+    for (i = 0; i < ports; i++) {
+        r = ioread32(ioaddr + CABPCPM+(i*4));
+        sum -= r;
+        seq_printf(m, "   %04x", r);
+    }
+    r = ioread32(ioaddr + CARDNM);
+    seq_printf(m, "  --  %04x\n", r);
+    seq_printf(m, "Used maximum");
+    for (i = 0; i < ports; i++) {
+        r = ioread32(ioaddr + CABPMCPM+(i*4));
+        seq_printf(m, "   %04x", r);
+    }
+    r = ioread32(ioaddr + CARDMNM);
+    seq_printf(m, "  --  %04x\n", r);
+
+    r = ioread32(ioaddr + CARDCN);
+    seq_printf(m, "Reject total   %08x  %d\n", r, r);
+
+    if (sum != 0)
+        seq_printf(m, "Lost buffers %d (small differences normal in case of ongoing traffic)\n", sum);
+
+    seq_printf(m, "\n                        tsn6   tsn7   tsn5   tsn4  tsngw\n");
+    for (j = 0; j < 8; j++) {
+        seq_printf(m, "Pending frames in Q#%d", j);
+    	for (i = 0; i < ports; i++) {
+    		r = ioread32(ioaddr + EATDQM0+(i*4) + 0xA000 + j*0x2000);
+    		seq_printf(m, " %6d", r);
+    	}
+    	seq_printf(m, "\n");
+     }
+
     return 0;
 }
 
@@ -2618,6 +2911,21 @@ static int rswitch2_fwd_l2_open(struct inode * inode, struct  file * file)
     return single_open(file, rswitch2_fwd_l2_show, NULL);
 }
 
+
+/**
+    @brief Open L2 Proc Directory
+
+    @param  inode *
+
+    @param  file *
+
+    @return int
+
+*/
+static int rswitch2_fwd_vlan_open(struct inode * inode, struct  file * file)
+{
+    return single_open(file, rswitch2_fwd_vlan_show, NULL);
+}
 
 
 /**
@@ -2668,6 +2976,21 @@ static int rswitch2_fwd_l2_l3_update_open(struct inode * inode, struct  file * f
 }
 
 
+/**
+    @brief Open buffer status Proc Directory
+
+    @param  inode *
+
+    @param  file *
+
+    @return int
+
+*/
+static int rswitch2_fwd_buffer_open(struct inode * inode, struct  file * file)
+{
+    return single_open(file, rswitch2_fwd_buffer_show, NULL);
+}
+
 
 /**
     @brief  Proc File Operation
@@ -2675,6 +2998,7 @@ static int rswitch2_fwd_l2_l3_update_open(struct inode * inode, struct  file * f
 */
 static const struct file_operations     rswitch2_fwd_l3_fops = {
     .owner   = THIS_MODULE,
+    .write   = rswitch2_fwd_l3_clear,
     .open    = rswitch2_fwd_l3_open,
     .read    = seq_read,
     .llseek  = seq_lseek,
@@ -2714,11 +3038,11 @@ static const struct file_operations     rswitch2_fwd_counters_fops = {
 static const struct file_operations     rswitch2_fwd_l2_l3_update_fops = {
     .owner   = THIS_MODULE,
     .open    = rswitch2_fwd_l2_l3_update_open,
+    .write   = rswitch2_fwd_l2_l3_update_clear,
     .read    = seq_read,
     .llseek  = seq_lseek,
     .release = single_release,
 };
-
 
 /**
     @brief  Proc File Operation
@@ -2727,6 +3051,32 @@ static const struct file_operations     rswitch2_fwd_l2_l3_update_fops = {
 static const struct file_operations     rswitch2_fwd_l2_fops = {
     .owner   = THIS_MODULE,
     .open    = rswitch2_fwd_l2_open,
+    .write   = rswitch2_fwd_l2_clear,
+    .read    = seq_read,
+    .llseek  = seq_lseek,
+    .release = single_release,
+};
+
+/**
+    @brief  Proc File Operation
+
+*/
+static const struct file_operations     rswitch2_fwd_vlan_fops = {
+    .owner   = THIS_MODULE,
+    .open    = rswitch2_fwd_vlan_open,
+    //.write   = rswitch2_fwd_l2_clear,
+    .read    = seq_read,
+    .llseek  = seq_lseek,
+    .release = single_release,
+};
+
+/**
+    @brief  Proc File Operation
+
+*/
+static const struct file_operations     rswitch2_fwd_buffer_fops = {
+    .owner   = THIS_MODULE,
+    .open    = rswitch2_fwd_buffer_open,
     .read    = seq_read,
     .llseek  = seq_lseek,
     .release = single_release,
@@ -2742,16 +3092,16 @@ static const struct file_operations     rswitch2_fwd_l2_fops = {
 */
 static void rswitch2_fwd_create_proc_entry(void)
 {
-
     /*
         create root & sub-directories
     */
-    proc_create(RSWITCH2_FWD_PROC_FILE_ERRORS,0,root_dir, &rswitch2_fwd_errors_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_COUNTERS,0,root_dir, &rswitch2_fwd_counters_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_L3,0,root_dir, &rswitch2_fwd_l3_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE,0,root_dir, &rswitch2_fwd_l2_l3_update_fops);
-    proc_create(RSWITCH2_FWD_PROC_FILE_L2,0,root_dir, &rswitch2_fwd_l2_fops);
-
+    proc_create(RSWITCH2_FWD_PROC_FILE_ERRORS, 0, root_dir, &rswitch2_fwd_errors_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_COUNTERS, 0, root_dir, &rswitch2_fwd_counters_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_L3, 0, root_dir, &rswitch2_fwd_l3_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE, 0, root_dir, &rswitch2_fwd_l2_l3_update_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_L2, 0, root_dir, &rswitch2_fwd_l2_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_VLAN, 0, root_dir, &rswitch2_fwd_vlan_fops);
+    proc_create(RSWITCH2_FWD_PROC_FILE_BUFFER, 0, root_dir, &rswitch2_fwd_buffer_fops);
 }
 
 
@@ -2765,12 +3115,13 @@ static void rswitch2_fwd_create_proc_entry(void)
 */
 static void rswitch2_fwd_remove_proc_entry(void)
 {
-
     remove_proc_entry(RSWITCH2_FWD_PROC_FILE_ERRORS, root_dir);
     remove_proc_entry(RSWITCH2_FWD_PROC_FILE_COUNTERS, root_dir);
     remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L3, root_dir);
     remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L2_L3_UPDATE, root_dir);
     remove_proc_entry(RSWITCH2_FWD_PROC_FILE_L2, root_dir);
+    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_VLAN, root_dir);
+    remove_proc_entry(RSWITCH2_FWD_PROC_FILE_BUFFER, root_dir);
 }
 
 
@@ -2817,6 +3168,7 @@ int rswitch2_fwd_exit(void)
     2020-09-03    AK  Added Proc Statistics
     2020-09-07    AK  Updated for L2/L3 Update, Proc statistics L2/L3 Update
     2020-09-09    AK  Layer 2 Forwarding Support, Proc statistics
-    2020-10-07    AK  Updated for Port Forwarding, Proc root directory change
+    2020-10-07    AK  Updated for Aeging
+
 
 */

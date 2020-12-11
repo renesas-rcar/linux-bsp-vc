@@ -303,11 +303,12 @@
 	phy-handle = <&phyeth0>;
 	status = "okay";
 
-	phy-mode = "rgmii";
+        phy-mode = "rgmii-txid";
 
 	phyeth0: eth_phy0 {
 		compatible = "ethernet-phy-idFFFF.FFFE";
-		reg = <0x1f>;
+		rxc-skew-ps = <1500>;
+		reg = <0x5>;
 	};
 	phyeth1: eth_phy1 {
 		compatible = "ethernet-phy-idFFFF.FFFE";
@@ -545,6 +546,139 @@
 		compatible = "atmel,24c16";
 		reg = <0x50>;
 		pagesize = <16>;
+	};
+
+	cpld_led@4d {
+		compatible = "renesas,vc-cpld-led";
+		reg = <0x4d>;
+
+		led1_orange {
+			label = "led1:orange";
+			group = <0x00>;
+			reg = <0x40>;
+			linux,default-trigger = "e6800000.ethernet-ffffffff:00:100Mbps";
+			default-state = "off";
+		};
+
+		led1_green {
+			label = "led1:green";
+			group = <0x00>;
+			reg = <0x80>;
+			linux,default-trigger = "e6800000.ethernet-ffffffff:00:1Gbps";
+			default-state = "off";
+		};
+
+		led2_orange {
+			label = "led2:orange";
+			group = <0x00>;
+			reg = <0x10>;
+			linux,default-trigger = "e6800000.ethernet-ffffffff:01:100Mbps";
+			default-state = "off";
+		};
+
+		led2_green {
+			label = "led2:green";
+			group = <0x00>;
+			reg = <0x20>;
+			linux,default-trigger = "e6800000.ethernet-ffffffff:01:1Gbps";
+			default-state = "off";
+		};
+
+		led3_orange {
+			label = "led3:orange";
+			group = <0x00>;
+			reg = <0x04>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led3_green {
+			label = "led3:green";
+			group = <0x00>;
+			reg = <0x08>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led4_orange {
+			label = "led4:orange";
+			group = <0x00>;
+			reg = <0x01>;
+			linux,default-trigger = "e6800000.ethernet-ffffffff:03:100Mbps";
+			default-state = "off";
+		};
+
+		led4_green {
+			label = "led4:green";
+			group = <0x00>;
+			reg = <0x02>;
+			linux,default-trigger = "e6800000.ethernet-ffffffff:03:1Gbps";
+			default-state = "off";
+		};
+		
+		led5_orange {
+			label = "led5:orange";
+			group = <0x01>;
+			reg = <0x40>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led5_green {
+			label = "led5:green";
+			group = <0x01>;
+			reg = <0x80>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led6_orange {
+			label = "led6:orange";
+			group = <0x01>;
+			reg = <0x10>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led6_green {
+			label = "led6:green";
+			group = <0x01>;
+			reg = <0x20>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led7_orange {
+			label = "led7:orange";
+			group = <0x01>;
+			reg = <0x04>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led7_green {
+			label = "led7:green";
+			group = <0x01>;
+			reg = <0x08>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
+
+		led8_orange {
+			label = "led8:orange";
+			group = <0x01>;
+			reg = <0x01>;
+			linux,default-trigger = "none";
+			default-state = "keep";
+		};
+
+		led8_green {
+			label = "led8:green";
+			group = <0x01>;
+			reg = <0x02>;
+			linux,default-trigger = "none";
+			default-state = "off";
+		};
 	};
 };
 
@@ -891,6 +1025,12 @@
 };
 
 &gpio1 {
+	mii_mcu_clk_dir {
+		gpio-hog;
+		gpios = <4 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+
 	most_reset {
 		gpio-hog;
 		gpios = <17 GPIO_ACTIVE_LOW>;

@@ -22,17 +22,22 @@
 
 #ifndef __RSWITCH2_ETH_H__
 #define __RSWITCH2_ETH_H__
-
+#include "rswitch2_ptp.h"
+#include <linux/phy.h>
 
 #define RSWITCH2ETH_BASE_PORTNAME     "tsn"
 #define RSWITCH2_ETH_CLASS                 "rswitch2eth"
 #define RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT  0x00000002
 #define RSWITCH2_TSN_RXTSTAMP_TYPE          0x00000006
+#define RSWITCH2_TSN_TXTSTAMP_ENABLED       1
+#define RSWITCH2_TSN_RXTSTAMP_ENABLED       0x10
+#define RSWITCH2_RXTSTAMP_TYPE_ALL          0x06
 #define RENESAS_RSWITCH2_PHYS       4
 #define NUM_TX_QUEUE    2
 #define INTERNAL_GW     1
 #define RSWITCH2_RX_GW_QUEUE_NUM 0
 #define NUM_RX_QUEUE    2 + INTERNAL_GW
+#define NUM_TS_DESC     1
 #define RENESAS_RSWITCH2_BASE_PORT_MAC                  { 0x02, 0x00, 0x00, 0x88, 0x88, 0x00 }
 #define PORT_BITMASK (unsigned int)(GENMASK_ULL(RENESAS_RSWITCH2_MAX_ETHERNET_PORTS, 0))
 #define PORTGWCA_BITMASK (unsigned int)(GENMASK_ULL(RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1, 0))
@@ -43,6 +48,8 @@
 #define RX_QUEUE_OFFSET   (RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE) + INTERNAL_GW
 #define RSWITCH2_BE 0
 #define RSWITCH2_NC 1
+#define RSWITCH2_DESC_NC 2
+#define TS_RING_SIZE    32
 #define TX_RING_SIZE0   1024    /* TX ring size for Best Effort */
 #define TX_RING_SIZE1   1024    /* TX ring size for Network Control */
 #define RX_RING_SIZE0   1024    /* RX ring size for Best Effort */
@@ -55,7 +62,14 @@
 #define TIS_BITMASK   GENMASK(RX_QUEUE_OFFSET -1, 0)
 #define RSWITCH2_COM_BPIOG 0x01
 #define RSWITCH2_COM_BPR   0x02
-#define RSWITCH2_ETH_DRIVER_VERSION "0.0.3"
+#define RSWITCH2_VLAN_EGRESS_SCTAG_MODE  3<<16
+#define RSWITCH2_DEF_CTAG_VLAN_ID	1
+#define RSWITCH2_DEF_CTAG_PCP		0
+#define RSWITCH2_DEF_CTAG_DEI 		0
+#define RSWITCH2_DEF_STAG_VLAN_ID	1 
+#define RSWITCH2_DEF_STAG_PCP 		0
+#define RSWITCH2_DEF_STAG_DEI 		0
+#define RSWITCH2_DRIVER_VERSION "RSWITCH2-1.2.0"
 /* Use 2 Tx Descriptor per frame */
 #define NUM_TX_DESC     2
 #define RSWITCH2_DEF_MSG_ENABLE \
@@ -122,6 +136,12 @@ enum RX_DS_CC_BIT {
 enum TX_DS_TAGL_BIT {
     TX_DS       = 0x0fff, /* Data size */
     TX_TAGL     = 0xf000, /* Frame tag LSBs */
+};
+
+struct rswitch2_tstamp_skb {
+    struct list_head list;
+    struct sk_buff *skb;
+    u8 tag;
 };
 
 
@@ -228,6 +248,7 @@ struct port_private {
     struct                       list_head ts_skb_list;
 
     u32                          ts_skb_tsun;
+    struct                       ptp_rswitch2 ptp;
     u32                          num_rx_ring[NUM_RX_QUEUE];
     u32                          num_tx_ring[NUM_TX_QUEUE];
     struct rswitch2_ext_desc *tx_ring[NUM_TX_QUEUE];
@@ -270,5 +291,7 @@ struct port_private {
     2020-08-19    AK  Structure for port and Masks
     2020-09-18    AK  Changes for Internal GW port
     2020-10-07    AK  Changes for Internal GW port Descriptor chain movement
+    2020-11-19    AK  GPTP support Untested (WIP)
+    2020-11-25    AK  GPTP support Bug fixes while testing
 
 */

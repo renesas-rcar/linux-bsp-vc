@@ -14,6 +14,7 @@
 
 
 #define FWRO             0x0
+#define PTPRO            0x0
 #define CARO             0x9000
 #define GWRO             0x0000 // Handled as platform resources
 #define TARO             0x00000   // Care Taken in Platform resources
@@ -540,11 +541,8 @@ enum rswitch2_reg {
     MMPCFTCT0	=	RMRO + 0x0320, 
     MAPCFTCT0	=	RMRO + 0x0330, 
     MPCFRCT0	=	RMRO + 0x0340,
-    MHDCC	=	RMRO + 0x0350,
-    MROVFC	=	RMRO + 0x0354,
-    MRHCRCEC	=	RMRO + 0x0358,
-    MRXBCE	=	RMRO + 0x0400,
-    MRXBCP	=	RMRO + 0x0404,
+    MROVFC	=	RMRO + 0x0360,
+    MRHCRCEC	=	RMRO + 0x0364,
     MRGFCE	=	RMRO + 0x0408,
     MRGFCP	=	RMRO + 0x040C,
     MRBFC	=	RMRO + 0x0410,
@@ -557,17 +555,26 @@ enum rswitch2_reg {
     MRCFCEFC	=	RMRO + 0x042C,
     MRFCEFC	=	RMRO + 0x0430,
     MRRCFEFC	=	RMRO + 0x0434,
-    MRUEFC	=	RMRO + 0x043C,
-    MROEFC	=	RMRO + 0x0440,
-    MRBOEC	=	RMRO + 0x0444,
-    MTXBCE	=	RMRO + 0x0500,
-    MTXBCP	=	RMRO + 0x0504,
+    MRFC	=	RMRO + 0x0438,
+    MRGUEFC	=	RMRO + 0x043C,
+    MRBUEFC	=	RMRO + 0x0440,
+    MRGOEFC	=	RMRO + 0x0444,
+    MRBOEFC	=	RMRO + 0x0448,
+    MRXBCEU	=	RMRO + 0x044C,
+    MRXBCEL	=	RMRO + 0x0450,
+    MRXBCPU	=	RMRO + 0x0454,
+    MRXBCPL	=	RMRO + 0x0458,
     MTGFCE	=	RMRO + 0x0508,
     MTGFCP	=	RMRO + 0x050C,
     MTBFC	=	RMRO + 0x0510,
     MTMFC	=	RMRO + 0x0514,
     MTUFC	=	RMRO + 0x0518,
     MTEFC	=	RMRO + 0x051C,
+    MTXBCEU	=	RMRO + 0x0520,
+    MTXBCEL	=	RMRO + 0x0524,
+    MTXBCPU	=	RMRO + 0x0528,
+    MTXBCPL	=	RMRO + 0x052C,
+    
 
     		
 		
@@ -628,7 +635,12 @@ enum rswitch2_reg {
     GWRLULC0	=	GWRO + 0x0A84, 
     GWIDPC	=	GWRO + 0x0B00,
     GWIDC0	=	GWRO + 0x0C00,
-    GWDIS0	=	GWRO + 0x1100, 
+
+    GWRDCN	=	GWRO + 0x1000,
+    GWTDCN	=	GWRO + 0x1004,
+    GWTSCN	=	GWRO + 0x1008,
+
+    GWDIS0	=	GWRO + 0x1100,
     GWDIE0	=	GWRO + 0x1104, 
     GWDID0	=	GWRO + 0x1108, 
     GWTSDIS	=	GWRO + 0x1180,
@@ -655,7 +667,39 @@ enum rswitch2_reg {
     GWSCR0	=	GWRO + 0x1800, 
     GWSCR1	=	GWRO + 0x1804,
     GWSCR20	=	GWRO + 0x1900,
-		
+    PTPIPV	=	PTPRO + 0x0000,
+    PTPTMEC	=	PTPRO + 0x0010,
+    PTPTMDC	=	PTPRO + 0x0014,
+    PTPTIVC0	=	PTPRO + 0x0020,
+    PTPTOVC00	=	PTPRO + 0x0030,
+    PTPTOVC10	=	PTPRO + 0x0034,
+    PTPTOVC20	=	PTPRO + 0x0038,
+    PTPAVTPTM00	=	PTPRO + 0x0040,
+    PTPAVTPTM10	=	PTPRO + 0x0044,
+    PTPGPTPTM00	=	PTPRO + 0x0050,
+    PTPGPTPTM10	=	PTPRO + 0x0054,
+    PTPGPTPTM20	=	PTPRO + 0x0058,
+    PTPMCCC0	=	PTPRO + 0x0200,
+    PTPMCCM00	=	PTPRO + 0x0204,
+    PTPMCCM10	=	PTPRO + 0x0208,
+    PTPMCCM20	=	PTPRO + 0x020C,
+    PTPMCRC0	=	PTPRO + 0x0300,
+    PTPMCRTC00	=	PTPRO + 0x0304,
+    PTPMCRTC10	=	PTPRO + 0x0308,
+    PTPMCRTC20	=	PTPRO + 0x030C,
+    PTPMCPC0	=	PTPRO + 0x0400,
+    PTPCCC00	=	PTPRO + 0x0500,
+    PTPCCC10	=	PTPRO + 0x0504,
+    PTPIS0	=	PTPRO + 0x0700,
+    PTPIE0	=	PTPRO + 0x0704,
+    PTPID0	=	PTPRO + 0x0708,
+    PTPIS1	=	PTPRO + 0x0710,
+    PTPIE1	=	PTPRO + 0x0714,
+    PTPID1	=	PTPRO + 0x0718,
+    PTPSCR0	=	PTPRO + 0x0780,
+    PTPSCR1	=	PTPRO + 0x0784,
+    PTPSCR2	=	PTPRO + 0x0788,
+	
 		
 		
 
@@ -687,5 +731,6 @@ enum rswitch2_reg {
 /*
     Change History
     2020-09-03 0.0.1 Updated Address Map as per new specification
+    2020-11-19 0.0.2 Updated for GPTP 
   
 */

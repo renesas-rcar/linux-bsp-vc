@@ -72,9 +72,9 @@ obj-$(CONFIG_NET_VENDOR_QLOGIC) += qlogic/
 obj-$(CONFIG_NET_VENDOR_QUALCOMM) += qualcomm/
 obj-$(CONFIG_NET_VENDOR_REALTEK) += realtek/
 obj-$(CONFIG_NET_VENDOR_RENESAS) += renesas/
-# A.Kamal (RSWITCH2)
+obj-$(CONFIG_RENESAS_RSWITCH_ETH) += renesas/rswitch_eth/
+obj-$(CONFIG_RENESAS_RSWITCH_FWD) += renesas/rswitch_fwd/
 obj-$(CONFIG_RENESAS_RSWITCH2) += renesas/rswitch2/
-# A.Kamal (RSWITCH2)
 obj-$(CONFIG_NET_VENDOR_RDC) += rdc/
 obj-$(CONFIG_NET_VENDOR_ROCKER) += rocker/
 obj-$(CONFIG_NET_VENDOR_SAMSUNG) += samsung/

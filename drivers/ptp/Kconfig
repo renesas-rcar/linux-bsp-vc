@@ -118,4 +118,13 @@ config PTP_1588_CLOCK_KVM
 	  To compile this driver as a module, choose M here: the module
 	  will be called ptp_kvm.
 
+config RSWITCH_PTP_1588_CLOCK
+       tristate "Renesas R-Switch (RSWITCH). gPTP clock"
+        depends on PTP_1588_CLOCK
+        help
+	  This driver adds gPTP support to the Renesas R-Switch (RSWITCH)
+
+          To compile this driver as a module, choose M here: the module
+          will be called rswitch_ptp.
+
 endmenu
