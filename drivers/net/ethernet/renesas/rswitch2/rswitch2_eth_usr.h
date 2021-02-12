@@ -19,40 +19,27 @@
 *  the file called "COPYING".
 */
 
-
 #ifndef __RSWITCH2_ETH_USR_H__
 #define __RSWITCH2_ETH_USR_H__
 
-
-
 #define RSWITCH2_ETHERNET_DEVICE_NAME     "rswitch_ctrl"
-
 
 #define RSWITCH2_IOCTL_MAGIC            'E'
 #define RSWITCH2_IOCTL_START            24
 
 #define RSWITCH2_IOCTL_PORTSTART        30
 
-
-
 //
 // ---- IOCTLs
 //
-
-
-
-
 /**
     @brief  Set Static Port Configuration
 */
-#define RSWITCH2_SET_CONFIG         _IOW(RSWITCH2_IOCTL_MAGIC, RSWITCH2_IOCTL_START + 10,  struct rswitch2_eth_config *) 
+#define RSWITCH2_SET_CONFIG         _IOW(RSWITCH2_IOCTL_MAGIC, RSWITCH2_IOCTL_START + 10,  struct rswitch2_eth_config *)
 
 /**
     @brief  Query Port Configuration
 */
 #define RSWITCH2_GET_CONFIG         _IOW(RSWITCH2_IOCTL_MAGIC, RSWITCH2_IOCTL_START + 11, struct rswitch2_eth_config *)
 
-
-
 #endif
-

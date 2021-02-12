@@ -28,27 +28,17 @@
 #define RSWITCH2PTP_DRIVER_VERSION          "0.0.1"
 
 
-
-
-
-
-
 /**
     @brief  PTP definition
-
-    
 */
-
-struct ptp_rswitch2
-{
-    void __iomem          * addr_iomem_gptp;
-    spinlock_t              lock; /* protects regs */
-    struct ptp_clock      * clock;
-    struct ptp_clock_info   caps;
-    u32                     default_addend;
-    int                     irq;
+struct ptp_rswitch2 {
+	void __iomem          * addr_iomem_gptp;
+	spinlock_t              lock; /* protects regs */
+	struct ptp_clock      * clock;
+	struct ptp_clock_info   caps;
+	u32                     default_addend;
+	int                     irq;
 };
-
 
 
 #ifndef NOT
@@ -64,33 +54,12 @@ struct ptp_rswitch2
 #endif
 
 
-
-/* 
-    Bit definitions for the GPTI register 
+/*
+    Bit definitions for the GPTI register
 */
 #define TIV_MASK                (0xFFFFFFFF)
 #define TIV_MASK_OLD            (0x0FFFFFFF)
 #define GPTP_CLK_DEV            1000001
 
 
-
-
-
-
-
-
-
-
-
-
 #endif /* __RSWITCH2_PTP_H__ */
-
-/*
-* Local variables:
-* Mode: C
-* tab-width: 4
-* indent-tabs-mode: nil
-* c-basic-offset: 4
-* End:
-* vim: ts=4 expandtab sw=4
-*/

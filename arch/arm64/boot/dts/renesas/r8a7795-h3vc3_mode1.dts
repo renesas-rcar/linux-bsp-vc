@@ -312,6 +312,7 @@
 	};
 	phyeth1: eth_phy1 {
 		compatible = "ethernet-phy-idFFFF.FFFE";
+		max-speed = <100>;
 		reg = <0x4>;
 	};
 	phytsn4: tsn_phy4 {

@@ -26,12 +26,12 @@
     @brief  Set a single 32-bit word
 */
 struct vc2_fpga_pltfrm_memory {
-    uint32_t        address;            ///< @brief address relative to 0x0000
-    uint32_t        value;              ///< @brief Ne value
-    uint32_t        raw;
-    char * bitfile;
-    uint32_t file_write_enable;
-    uint32_t file_size;
+	uint32_t        address;            ///< @brief address relative to 0x0000
+	uint32_t        value;              ///< @brief Ne value
+	uint32_t        raw;
+	char * bitfile;
+	uint32_t file_write_enable;
+	uint32_t file_size;
 };
 
 /* RSWITCH2 SPECIFIC DEFINES START*/
@@ -46,7 +46,7 @@ struct vc2_fpga_pltfrm_memory {
 #define VC2_FPGA_PLTFRM_IOCTL_MAGIC         'F'
 #define VC2_FPGA_PLTFRM_IOCTL_START         0
 
-#define DRV_NAME	                     "vcfpga"
+#define DRV_NAME                             "vcfpga"
 
 
 #define VC2_FPGA_PLTFRM_CLASS                "fpgaupdate"
@@ -61,11 +61,3 @@ struct vc2_fpga_pltfrm_memory {
 #define VC2_FPGA_PLTFRM_IOCTL_WRITEBITFILE  _IOW(VC2_FPGA_PLTFRM_IOCTL_MAGIC, VC2_FPGA_PLTFRM_IOCTL_START + 53, struct vc2_fpga_pltfrm_memory *)
 
 #endif
-
-
-/*
-    Change History
-    2020-08-10    AK  Initial Version
-    2020-08-10    AK  Raw Read support
-
-*/

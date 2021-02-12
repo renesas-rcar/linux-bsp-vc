@@ -35,24 +35,15 @@ extern struct pci_dev        *pcidev;
 
 
 enum vc2_bfile_op_type {
-    VC2_IOCTL_BFILE_OP,
-    VC2_FILEWR_BFILE_OP,
+	VC2_IOCTL_BFILE_OP,
+	VC2_FILEWR_BFILE_OP,
 
 };
 
 struct vc2_file_op {
-    enum vc2_bfile_op_type bfile_op;
-    u32 file_offset;
-    u32 file_end;
+	enum vc2_bfile_op_type bfile_op;
+	u32 file_offset;
+	u32 file_end;
 };
 
 #endif
-
-
-/*
-    Change History
-    2020-08-10    AK  Initial Version
-    2020-09-03    AK  Changed Platform driver name, export pci id
-
-
-*/

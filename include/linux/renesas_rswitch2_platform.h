@@ -56,10 +56,3 @@
 
 
 #endif
-
-/*
-    Change History
-    2020-08-10    AK  Initial Version
-
-
-*/

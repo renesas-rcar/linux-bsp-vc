@@ -30,6 +30,13 @@
 #define RSWITCH2FWD_IOCTL_START              10
 
 #include"../../../../../include/linux/renesas_rswitch2.h"
+
+struct rswitch2_fwd_filter_src_valid {
+	char agent_name[5];
+	uint32_t set_any;
+	char stream_str[5];
+
+};
 /**
     @brief  Get the complete static forwarding engine table
 */
@@ -42,11 +49,3 @@
 
 
 #endif
-
-
-/*
-    Change History
-    2020-08-10    AK  Initial Version
-
-
-*/
