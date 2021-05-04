@@ -97,6 +97,9 @@
 #define RSWITCH2_MAX_RANGE		15
 #define RSWITCH2_MAX_NEXT_ENTRIES	8
 #define RSWITCH2_MAX_MCAST_CHAINS	128
+#define RENESAS_RSWITCH2_TX_QUEUES	8
+#define RENESAS_RSWITCH2_TX_CBS		RENESAS_RSWITCH2_TX_QUEUES
+
 typedef  __uint128_t uint128_t;
 extern struct proc_dir_entry *root_dir;
 enum rswitch2_gwca_mode {
@@ -385,6 +388,7 @@ struct rswitch2_ipv_fwd_config_entry {
 	struct  rswitch2_source_lock_config destination_source;
 	struct  rswitch2_source_lock_config source_source;
 	uint32_t routing_number;
+	uint32_t routing_valid;
 	uint32_t csdn;
 	struct rswitch2_mirroring_config mirroring_config;
 	struct rswitch2_destination_vector_config    destination_vector_config;
@@ -419,12 +423,12 @@ struct rswitch2_l2_fwd_config {
 
 
 struct rswitch2_ipv_fwd_config {
-
+	uint32_t bEnable;
 	uint32_t max_unsecure_hash_entry;
 	uint32_t max_hash_collision;
 	uint32_t ipv_hash_eqn;
 	uint32_t ipv_fwd_config_entries;
-	struct rswitch2_ipv_fwd_config_entry ipv_fwd_config_entry[RSWITCH2_MAX_IP_FWD_ENTRIES];
+	struct rswitch2_ipv_fwd_config_entry entry[RSWITCH2_MAX_IP_FWD_ENTRIES];
 
 
 };
@@ -755,14 +759,41 @@ struct rswitch2_eth_vlan_config {
 	struct rswitch2_eth_vlan_filtering vlan_filtering;
 };
 
+struct rswitch2_config_port_tx_queue
+{
+    uint32_t	queuenumber;            
+    uint32_t	preempt_mac;           
+    int		max_frame_sz;
+};
+
+struct rswitch2_config_port_tx_stream {
+	uint32_t	queuenum;            
+    	uint32_t	bwf;      
+    	uint32_t	porttransmitrate;
+    	uint32_t	civman;
+    	uint32_t	civexp;
+    	uint32_t	cul;
+};
+
+struct rswitch2_config_port_tx {
+	uint32_t	txqueues;   
+    	struct rswitch2_config_port_tx_queue	txqueue[RENESAS_RSWITCH2_TX_QUEUES];
+    	uint32_t	txstreams;  
+    	struct rswitch2_config_port_tx_stream	txstream[RENESAS_RSWITCH2_TX_CBS];
+
+};
+
 struct rswitch2_eth_port_config {
 	uint32_t port_number;
         uint32_t cpu;
+	uint32_t pminsize;
 	struct rswitch2_eth_vlan_config eth_vlan_tag_config;
+	struct rswitch2_config_port_tx	txparam;
 
 };
 
 struct rswitch2_eth_config {
+	uint32_t sysfreqkhz;
 	uint32_t ports;
 	struct rswitch2_eth_port_config eth_port_config[RENESAS_RSWITCH2_MAX_PORT_AGENT];
 

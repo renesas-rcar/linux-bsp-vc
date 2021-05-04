@@ -304,8 +304,7 @@
         phy-mode = "rgmii-txid";
 
 	phyeth0: eth_phy0 {
-		compatible = "ethernet-phy-idFFFF.FFFE";
-		rxc-skew-ps = <1500>;
+		rxc-skew-ps = <0>;
 		reg = <0x5>;
 	};
 	phyeth1: eth_phy1 {
