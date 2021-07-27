@@ -37,6 +37,7 @@
 #include <linux/bitmap.h>
 #include <linux/bitops.h>
 #include <linux/iopoll.h>
+#include <linux/reset.h>
 
 #define RCANFD_DRV_NAME			"rcar_canfd"
 
@@ -575,6 +576,7 @@ struct rcar_canfd_channel {
 enum rcar_canfd_chip_id {
 	R8A779G0,
 	R8A779A0,
+	RZG2L,
 	GEN3,
 };
 
@@ -593,6 +595,8 @@ struct rcar_canfd_global {
 	enum rcar_canfd_fcanclk fcan;	/* CANFD or Ext clock */
 	unsigned long channels_mask;	/* Enabled channels mask */
 	bool fdmode;			/* CAN FD or Classical CAN only mode */
+	struct reset_control *rstc1;
+	struct reset_control *rstc2;
 	enum rcar_canfd_chip_id chip_id;
 	unsigned long max_channels;
 };
@@ -1209,49 +1213,82 @@ static void rcar_canfd_tx_done(struct net_device *ndev)
 	can_led_event(ndev, CAN_LED_EVENT_TX);
 }
 
+static void rcar_canfd_handle_global_err(struct rcar_canfd_global *gpriv, u32 ch)
+{
+	struct rcar_canfd_channel *priv = gpriv->ch[ch];
+	struct net_device *ndev = priv->ndev;
+	u32 gerfl;
+
+	/* Handle global error interrupts */
+	gerfl = rcar_canfd_read(priv->base, RCANFD_GERFL);
+	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+		if (unlikely(RCANFD_V3U_GERFL_ERR(gpriv, gerfl)))
+			rcar_canfd_global_error(ndev);
+	} else {
+		if (unlikely(RCANFD_GERFL_ERR(gpriv, gerfl)))
+			rcar_canfd_global_error(ndev);
+	}
+}
+
+static irqreturn_t rcar_canfd_global_err_interrupt(int irq, void *dev_id)
+{
+	struct rcar_canfd_global *gpriv = dev_id;
+	u32 ch;
+
+	for_each_set_bit(ch, &gpriv->channels_mask, gpriv->max_channels)
+		rcar_canfd_handle_global_err(gpriv, ch);
+
+	return IRQ_HANDLED;
+}
+
+static void rcar_canfd_handle_global_receive(struct rcar_canfd_global *gpriv, u32 ch)
+{
+	struct rcar_canfd_channel *priv = gpriv->ch[ch];
+	u32 ridx = ch + RCANFD_RFFIFO_IDX;
+	u32 stsreg, ccreg;
+	u32 sts;
+
+	/* Handle Rx interrupts */
+	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+		stsreg = RCANFD_V3U_RFSTS(ridx);
+		ccreg = RCANFD_V3U_RFCC(ridx);
+	} else {
+		stsreg = RCANFD_RFSTS(ridx);
+		ccreg = RCANFD_RFCC(ridx);
+	}
+	sts = rcar_canfd_read(priv->base, stsreg);
+	if (likely(sts & RCANFD_RFSTS_RFIF)) {
+		if (napi_schedule_prep(&priv->napi)) {
+			/* Disable Rx FIFO interrupts */
+			rcar_canfd_clear_bit(priv->base, ccreg,
+					     RCANFD_RFCC_RFIE);
+			__napi_schedule(&priv->napi);
+		}
+	}
+}
+
+static irqreturn_t rcar_canfd_global_receive_fifo_interrupt(int irq, void *dev_id)
+{
+	struct rcar_canfd_global *gpriv = dev_id;
+	u32 ch;
+
+	for_each_set_bit(ch, &gpriv->channels_mask, gpriv->max_channels)
+		rcar_canfd_handle_global_receive(gpriv, ch);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t rcar_canfd_global_interrupt(int irq, void *dev_id)
 {
 	struct rcar_canfd_global *gpriv = dev_id;
-	struct net_device *ndev;
-	struct rcar_canfd_channel *priv;
-	u32 sts, gerfl;
-	u32 ch, ridx, addr1, addr2;
+	u32 ch;
 
 	/* Global error interrupts still indicate a condition specific
 	 * to a channel. RxFIFO interrupt is a global interrupt.
 	 */
 	for_each_set_bit(ch, &gpriv->channels_mask, gpriv->max_channels) {
-		priv = gpriv->ch[ch];
-		ndev = priv->ndev;
-		ridx = ch + RCANFD_RFFIFO_IDX;
-
-		/* Global error interrupts */
-		gerfl = rcar_canfd_read(priv->base, RCANFD_GERFL);
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
-			if (unlikely(RCANFD_V3U_GERFL_ERR(gpriv, gerfl)))
-				rcar_canfd_global_error(ndev);
-		} else {
-			if (unlikely(RCANFD_GERFL_ERR(gpriv, gerfl)))
-				rcar_canfd_global_error(ndev);
-		}
-		/* Handle Rx interrupts */
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
-			addr1 = RCANFD_V3U_RFSTS(ridx);
-			addr2 = RCANFD_V3U_RFCC(ridx);
-		} else {
-			addr1 = RCANFD_RFSTS(ridx);
-			addr2 = RCANFD_RFCC(ridx);
-		}
-		sts = rcar_canfd_read(priv->base, addr1);
-		if (likely(sts & RCANFD_RFSTS_RFIF)) {
-			if (napi_schedule_prep(&priv->napi)) {
-				/* Disable Rx FIFO interrupts */
-				rcar_canfd_clear_bit(priv->base, addr2,
-						     RCANFD_RFCC_RFIE);
-
-				__napi_schedule(&priv->napi);
-			}
-		}
+		rcar_canfd_handle_global_err(gpriv, ch);
+		rcar_canfd_handle_global_receive(gpriv, ch);
 	}
 	return IRQ_HANDLED;
 }
@@ -1289,43 +1326,79 @@ static void rcar_canfd_state_change(struct net_device *ndev,
 	}
 }
 
+static void rcar_canfd_handle_channel_tx(struct rcar_canfd_global *gpriv, u32 ch)
+{
+	struct rcar_canfd_channel *priv = priv = gpriv->ch[ch];
+	struct net_device *ndev = priv->ndev;
+	u32 stsreg;
+	u32 sts;
+
+	/* Handle Tx interrupts */
+	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+		stsreg = RCANFD_V3U_CFSTS(ch, RCANFD_CFFIFO_IDX);
+	else
+		sts = RCANFD_CFSTS(ch, RCANFD_CFFIFO_IDX);
+
+	sts = rcar_canfd_read(priv->base, stsreg);
+
+	if (likely(sts & RCANFD_CFSTS_CFTXIF))
+		rcar_canfd_tx_done(ndev);
+}
+
+static irqreturn_t rcar_canfd_channel_tx_interrupt(int irq, void *dev_id)
+{
+	struct rcar_canfd_global *gpriv = dev_id;
+	u32 ch;
+
+	for_each_set_bit(ch, &gpriv->channels_mask, gpriv->max_channels)
+		rcar_canfd_handle_channel_tx(gpriv, ch);
+
+	return IRQ_HANDLED;
+}
+
+static void rcar_canfd_handle_channel_err(struct rcar_canfd_global *gpriv, u32 ch)
+{
+	struct rcar_canfd_channel *priv = gpriv->ch[ch];
+	struct net_device *ndev = priv->ndev;
+	u16 txerr, rxerr;
+	u32 sts, cerfl;
+
+	/* Handle channel error interrupts */
+	cerfl = rcar_canfd_read(priv->base, RCANFD_CERFL(ch));
+	sts = rcar_canfd_read(priv->base, RCANFD_CSTS(ch));
+	txerr = RCANFD_CSTS_TECCNT(sts);
+	rxerr = RCANFD_CSTS_RECCNT(sts);
+	if (unlikely(RCANFD_CERFL_ERR(cerfl)))
+		rcar_canfd_error(ndev, cerfl, txerr, rxerr);
+
+	/* Handle state change to lower states */
+	if (unlikely(priv->can.state != CAN_STATE_ERROR_ACTIVE &&
+		     priv->can.state != CAN_STATE_BUS_OFF))
+		rcar_canfd_state_change(ndev, txerr, rxerr);
+}
+
+static irqreturn_t rcar_canfd_channel_err_interrupt(int irq, void *dev_id)
+{
+	struct rcar_canfd_global *gpriv = dev_id;
+	u32 ch;
+
+	for_each_set_bit(ch, &gpriv->channels_mask, gpriv->max_channels)
+		rcar_canfd_handle_channel_err(gpriv, ch);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t rcar_canfd_channel_interrupt(int irq, void *dev_id)
 {
 	struct rcar_canfd_global *gpriv = dev_id;
-	struct net_device *ndev;
-	struct rcar_canfd_channel *priv;
-	u32 sts, ch, cerfl, addr;
-	u16 txerr, rxerr;
+	u32 ch;
 
 	/* Common FIFO is a per channel resource */
 	for_each_set_bit(ch, &gpriv->channels_mask, gpriv->max_channels) {
-		priv = gpriv->ch[ch];
-		ndev = priv->ndev;
-
-		/* Channel error interrupts */
-		cerfl = rcar_canfd_read(priv->base, RCANFD_CERFL(ch));
-		sts = rcar_canfd_read(priv->base, RCANFD_CSTS(ch));
-		txerr = RCANFD_CSTS_TECCNT(sts);
-		rxerr = RCANFD_CSTS_RECCNT(sts);
-		if (unlikely(RCANFD_CERFL_ERR(cerfl)))
-			rcar_canfd_error(ndev, cerfl, txerr, rxerr);
-
-		/* Handle state change to lower states */
-		if (unlikely((priv->can.state != CAN_STATE_ERROR_ACTIVE) &&
-			     (priv->can.state != CAN_STATE_BUS_OFF)))
-			rcar_canfd_state_change(ndev, txerr, rxerr);
-
-		/* Handle Tx interrupts */
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
-			addr = RCANFD_V3U_CFSTS(ch, RCANFD_CFFIFO_IDX);
-		else
-			addr = RCANFD_CFSTS(ch, RCANFD_CFFIFO_IDX);
-
-		sts = rcar_canfd_read(priv->base, addr);
-
-		if (likely(sts & RCANFD_CFSTS_CFTXIF))
-			rcar_canfd_tx_done(ndev);
+		rcar_canfd_handle_channel_err(gpriv, ch);
+		rcar_canfd_handle_channel_tx(gpriv, ch);
 	}
+
 	return IRQ_HANDLED;
 }
 
@@ -1846,6 +1919,53 @@ static int rcar_canfd_channel_probe(struct rcar_canfd_global *gpriv, u32 ch,
 	priv->can.clock.freq = fcan_freq;
 	dev_info(&pdev->dev, "can_clk rate is %u\n", priv->can.clock.freq);
 
+	if (gpriv->chip_id == RZG2L) {
+		char *irq_name;
+		int err_irq;
+		int tx_irq;
+
+		err_irq = platform_get_irq_byname(pdev, ch == 0 ? "ch0_err" : "ch1_err");
+		if (err_irq < 0) {
+			err = err_irq;
+			goto fail;
+		}
+
+		tx_irq = platform_get_irq_byname(pdev, ch == 0 ? "ch0_trx" : "ch1_trx");
+		if (tx_irq < 0) {
+			err = tx_irq;
+			goto fail;
+		}
+
+		irq_name = devm_kasprintf(&pdev->dev, GFP_KERNEL,
+					  "canfd.ch%d_err", ch);
+		if (!irq_name) {
+			err = -ENOMEM;
+			goto fail;
+		}
+		err = devm_request_irq(&pdev->dev, err_irq,
+				       rcar_canfd_channel_err_interrupt, 0,
+				       irq_name, gpriv);
+		if (err) {
+			dev_err(&pdev->dev, "devm_request_irq CH Err(%d) failed, error %d\n",
+				err_irq, err);
+			goto fail;
+		}
+		irq_name = devm_kasprintf(&pdev->dev, GFP_KERNEL,
+					  "canfd.ch%d_trx", ch);
+		if (!irq_name) {
+			err = -ENOMEM;
+			goto fail;
+		}
+		err = devm_request_irq(&pdev->dev, tx_irq,
+				       rcar_canfd_channel_tx_interrupt, 0,
+				       irq_name, gpriv);
+		if (err) {
+			dev_err(&pdev->dev, "devm_request_irq Tx (%d) failed, error %d\n",
+				tx_irq, err);
+			goto fail;
+		}
+	}
+
 	if (gpriv->fdmode) {
 		priv->can.bittiming_const = &rcar_canfd_nom_bittiming_const;
 		priv->can.data_bittiming_const =
@@ -1911,6 +2031,7 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 		"channel0", "channel1", "channel2", "channel3",
 		"channel4", "channel5", "channel6", "channel7",
 		};
+	int g_err_irq, g_recc_irq;
 
 	if (of_property_read_bool(pdev->dev.of_node, "renesas,no-can-fd"))
 		fdmode = false;			/* Classical CAN only mode */
@@ -1925,16 +2046,30 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 			channels_mask |= BIT(i);	/* Channel i */
 	}
 
-	ch_irq = platform_get_irq(pdev, 0);
-	if (ch_irq < 0) {
-		err = ch_irq;
-		goto fail_dev;
-	}
+	if (of_data->chip_id != RZG2L) {
+		ch_irq = platform_get_irq_byname_optional(pdev, "ch_int");
+		if (ch_irq < 0) {
+			/* For backward compatibility get irq by index */
+			ch_irq = platform_get_irq(pdev, 0);
+			if (ch_irq < 0)
+				return ch_irq;
+		}
 
-	g_irq = platform_get_irq(pdev, 1);
-	if (g_irq < 0) {
-		err = g_irq;
-		goto fail_dev;
+		g_irq = platform_get_irq_byname_optional(pdev, "g_int");
+		if (g_irq < 0) {
+			/* For backward compatibility get irq by index */
+			g_irq = platform_get_irq(pdev, 1);
+			if (g_irq < 0)
+				return g_irq;
+		}
+	} else {
+		g_err_irq = platform_get_irq_byname(pdev, "g_err");
+		if (g_err_irq < 0)
+			return g_err_irq;
+
+		g_recc_irq = platform_get_irq_byname(pdev, "g_recc");
+		if (g_recc_irq < 0)
+			return g_recc_irq;
 	}
 
 	/* Global controller context */
@@ -1948,6 +2083,22 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 	gpriv->fdmode = fdmode;
 	gpriv->chip_id = of_data->chip_id;
 	gpriv->max_channels = of_data->max_channels;
+
+	if (gpriv->chip_id == RZG2L) {
+		gpriv->rstc1 = devm_reset_control_get_exclusive(&pdev->dev, "rstp_n");
+		if (IS_ERR(gpriv->rstc1)) {
+			err = PTR_ERR(gpriv->rstc1);
+			dev_err(&pdev->dev, "failed to get rstp_n\n");
+			goto fail_dev;
+		}
+
+		gpriv->rstc2 = devm_reset_control_get_exclusive(&pdev->dev, "rstc_n");
+		if (IS_ERR(gpriv->rstc2)) {
+			err = PTR_ERR(gpriv->rstc2);
+			dev_err(&pdev->dev, "failed to get rstc_n\n");
+			goto fail_dev;
+		}
+	}
 
 	/* Peripheral clock */
 	gpriv->clkp = devm_clk_get(&pdev->dev, "fck");
@@ -1977,7 +2128,7 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 	}
 	fcan_freq = clk_get_rate(gpriv->can_clk);
 
-	if (gpriv->fcan == RCANFD_CANFDCLK)
+	if (gpriv->fcan == RCANFD_CANFDCLK && gpriv->chip_id != RZG2L)
 		/* CANFD clock is further divided by (1/2) within the IP */
 		fcan_freq /= 2;
 
@@ -1989,20 +2140,51 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 	gpriv->base = addr;
 
 	/* Request IRQ that's common for both channels */
-	err = devm_request_irq(&pdev->dev, ch_irq,
-			       rcar_canfd_channel_interrupt, 0,
-			       "canfd.chn", gpriv);
-	if (err) {
-		dev_err(&pdev->dev, "devm_request_irq(%d) failed, error %d\n",
-			ch_irq, err);
-		goto fail_dev;
+	if (gpriv->chip_id != RZG2L) {
+		err = devm_request_irq(&pdev->dev, ch_irq,
+				       rcar_canfd_channel_interrupt, 0,
+				       "canfd.chn", gpriv);
+		if (err) {
+			dev_err(&pdev->dev, "devm_request_irq(%d) failed, error %d\n",
+				ch_irq, err);
+			goto fail_dev;
+		}
+
+		err = devm_request_irq(&pdev->dev, g_irq,
+				       rcar_canfd_global_interrupt, 0,
+				       "canfd.gbl", gpriv);
+		if (err) {
+			dev_err(&pdev->dev, "devm_request_irq(%d) failed, error %d\n",
+				g_irq, err);
+			goto fail_dev;
+		}
+	} else {
+		err = devm_request_irq(&pdev->dev, g_recc_irq,
+				       rcar_canfd_global_receive_fifo_interrupt, 0,
+				       "canfd.g_recc", gpriv);
+
+		if (err) {
+			dev_err(&pdev->dev, "devm_request_irq(%d) failed, error %d\n",
+				g_recc_irq, err);
+			goto fail_dev;
+		}
+
+		err = devm_request_irq(&pdev->dev, g_err_irq,
+				       rcar_canfd_global_err_interrupt, 0,
+				       "canfd.g_err", gpriv);
+		if (err) {
+			dev_err(&pdev->dev, "devm_request_irq(%d) failed, error %d\n",
+				g_err_irq, err);
+			goto fail_dev;
+		}
 	}
-	err = devm_request_irq(&pdev->dev, g_irq,
-			       rcar_canfd_global_interrupt, 0,
-			       "canfd.gbl", gpriv);
+
+	err = reset_control_reset(gpriv->rstc1);
+	if (err)
+		goto fail_dev;
+	err = reset_control_reset(gpriv->rstc2);
 	if (err) {
-		dev_err(&pdev->dev, "devm_request_irq(%d) failed, error %d\n",
-			g_irq, err);
+		reset_control_assert(gpriv->rstc1);
 		goto fail_dev;
 	}
 
@@ -2011,7 +2193,7 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 	if (err) {
 		dev_err(&pdev->dev,
 			"failed to enable peripheral clock, error %d\n", err);
-		goto fail_dev;
+		goto fail_reset;
 	}
 
 	err = rcar_canfd_reset_controller(gpriv);
@@ -2068,6 +2250,9 @@ fail_mode:
 	rcar_canfd_disable_global_interrupts(gpriv);
 fail_clk:
 	clk_disable_unprepare(gpriv->clkp);
+fail_reset:
+	reset_control_assert(gpriv->rstc1);
+	reset_control_assert(gpriv->rstc2);
 fail_dev:
 	return err;
 }
@@ -2088,6 +2273,9 @@ static int rcar_canfd_remove(struct platform_device *pdev)
 	/* Enter global sleep mode */
 	rcar_canfd_set_bit(gpriv->base, RCANFD_GCTR, RCANFD_GCTR_GSLPR);
 	clk_disable_unprepare(gpriv->clkp);
+	reset_control_assert(gpriv->rstc1);
+	reset_control_assert(gpriv->rstc2);
+
 	return 0;
 }
 
@@ -2114,6 +2302,11 @@ static const struct rcar_canfd_of_data of_rcanfd_v3u_compatible = {
 	.max_channels = 8,
 };
 
+static const struct rcar_canfd_of_data of_rcanfd_rzg2l_compatible = {
+	.chip_id = RZG2L,
+	.max_channels = 2,
+};
+
 static const struct rcar_canfd_of_data of_rcanfd_gen3_compatible = {
 	.chip_id = GEN3,
 	.max_channels = 2,
@@ -2127,6 +2320,10 @@ static const struct of_device_id rcar_canfd_of_table[] = {
 	{
 		.compatible = "renesas,r8a779a0-canfd",
 		.data = &of_rcanfd_v3u_compatible,
+	},
+	{
+		.compatible = "renesas,rzg2l-canfd",
+		.data = &of_rcanfd_rzg2l_compatible,
 	},
 	{
 		.compatible = "renesas,rcar-gen3-canfd",
