@@ -1328,7 +1328,7 @@ static void rcar_canfd_state_change(struct net_device *ndev,
 
 static void rcar_canfd_handle_channel_tx(struct rcar_canfd_global *gpriv, u32 ch)
 {
-	struct rcar_canfd_channel *priv = priv = gpriv->ch[ch];
+	struct rcar_canfd_channel *priv = gpriv->ch[ch];
 	struct net_device *ndev = priv->ndev;
 	u32 stsreg;
 	u32 sts;
