@@ -33,6 +33,7 @@ properties:
       - const: renesas,rcar-gen3-rpc-if   # a generic R-Car gen3 device
     items:
       - enum:
+          - renesas,r8a779f0-rpc-if       # R-Car S4
           - renesas,r8a779g0-rpc-if       # R-Car V4H
       - const: renesas,rcar-gen4-rpc-if   # a generic R-Car gen4 device
 
