@@ -158,6 +158,11 @@
 		label = "board-data";
 		pagesize = <8>;
 	};
+
+	fpga4000@71 {
+		compatible = "renesas,vc4-fpga4000";
+		reg = <0x71>;
+	};
 };
 
 &hscif0 {
