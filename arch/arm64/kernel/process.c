@@ -136,6 +136,26 @@ void arch_cpu_idle_dead(void)
 }
 #endif
 
+static int arm64_restart_handler(struct notifier_block *nb,
+		unsigned long mode, void *cmd)
+{
+	if (arm_pm_restart)
+		arm_pm_restart(reboot_mode, cmd);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block arm64_restart_nb = {
+	.notifier_call = arm64_restart_handler,
+	.priority = 130,
+};
+
+static int register_arm64_restart_handler(void)
+{
+	return register_restart_handler(&arm64_restart_nb);
+}
+core_initcall(register_arm64_restart_handler);
+
 /*
  * Called by kexec, immediately prior to machine_kexec().
  *
@@ -198,11 +218,8 @@ void machine_restart(char *cmd)
 	if (efi_enabled(EFI_RUNTIME_SERVICES))
 		efi_reboot(reboot_mode, NULL);
 
-	/* Now call the architecture specific reboot code. */
-	if (arm_pm_restart)
-		arm_pm_restart(reboot_mode, cmd);
-	else
-		do_kernel_restart(cmd);
+	/* Now call the architecture registered restart handlers */
+	do_kernel_restart(cmd);
 
 	/*
 	 * Whoops - the architecture was unable to reboot.
