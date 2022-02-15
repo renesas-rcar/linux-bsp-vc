@@ -58,6 +58,8 @@ config RENESAS_ETHER_SWITCH
 	  This driver supports the following SoCs:
 		- R8A779Fx.
 
+source "drivers/net/ethernet/renesas/rswitch2/Kconfig"
+
 config RTSN
         tristate "Renesas Ethernet-TSN support"
         depends on ARCH_RENESAS || COMPILE_TEST
