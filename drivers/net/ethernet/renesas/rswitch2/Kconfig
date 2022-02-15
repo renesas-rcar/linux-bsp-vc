@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Makefile for the Renesas RSwitch2 device drivers.
+#
+
+config RENESAS_RSWITCH2
+	tristate "Renesas RSwitch2 TSN switch"
+	default n
+	help
+		Device driver for Renesas RSwitch2 TSN switch.
+
+if RENESAS_RSWITCH2
+
+config RENESAS_RSWITCH2_PLATF
+	bool "Platform driver for Renesas RSwitch2 TSN switch"
+	default n
+	depends on RENESAS_RSWITCH2
+	help
+		Enable access to Renesas RSwitch2 device platform bus (SoC).
+		Select if RSwitch2 is part of your SoC.
+
+config RENESAS_RSWITCH2_GWCA
+	bool "RSwitch2 TSN ethernet device (GWCA)"
+	default n
+	help
+		Driver for RSwitch2 Gateway Common Agent. This enables an internal ethernet device,
+		directly connected to the switch.
+
+endif # RENESAS_RSWITCH2
