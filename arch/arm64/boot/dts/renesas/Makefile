@@ -96,7 +96,7 @@ dtb-$(CONFIG_ARCH_R8A77980) += r8a77980-es2-condor.dtb
 dtb-$(CONFIG_ARCH_R8A77980) += r8a77980-es2-v3hsk.dtb
 
 # overlays
-# DTC_FLAGS += -@
+DTC_FLAGS += -@
 # ulcb-kf-dtbo := ulcb-kf-cn11.dtbo ulcb-kf-most.dtbo ulcb-kf-sd3.dtbo \
 #		ulcb-kf-cn10-pca.dtbo ulcb-kf-cn11-pca.dtbo \
 #		ulcb-kf-cn10-gmsl2.dtbo ulcb-kf-cn11-gmsl2.dtbo \
@@ -112,3 +112,20 @@ dtb-$(CONFIG_ARCH_R8A77980) += r8a77980-es2-v3hsk.dtb
 # dtb-$(CONFIG_ARCH_R8A77965) += $(ulcb-kf-dtbo)
 # dtb-$(CONFIG_ARCH_R8A77970) += $(vb-dtbo)
 # dtb-$(CONFIG_ARCH_R8A77980) += $(vb-dtbo)
+
+r8a779f0-vc4-dtbo :=	r8a779f0-vc4-tsn0-phy-1g.dtbo \
+			r8a779f0-vc4-tsn0-phy-2g5.dtbo \
+			r8a779f0-vc4-tsn1-phy-1g.dtbo \
+			r8a779f0-vc4-tsn1-phy-2g5.dtbo \
+			r8a779f0-vc4-tsn2-phy-1g.dtbo \
+			r8a779f0-vc4-tsn2-phy-1g-rh.dtbo
+dtb-$(CONFIG_ARCH_R8A779F0) += $(r8a779f0-vc4-dtbo)
+
+r8a779f0-vc4V1-dtbo :=	r8a779f0-vc4V1-tsn0-phy-1g.dtbo \
+			r8a779f0-vc4V1-tsn0-phy-2g5.dtbo \
+			r8a779f0-vc4V1-tsn1-phy-1g.dtbo \
+			r8a779f0-vc4V1-tsn1-phy-2g5.dtbo \
+			r8a779f0-vc4V1-tsn2-phy-1g.dtbo \
+			r8a779f0-vc4V1-tsn2-phy-1g-rh.dtbo
+dtb-$(CONFIG_ARCH_R8A779F0) += $(r8a779f0-vc4V1-dtbo)
+

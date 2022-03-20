@@ -1,0 +1,16 @@
+#include "r8a779f0-vc4-tsn1-phy-1g.dtso"
+
+/* TSN1_SEL_1_25 is at GPIO4_07 */
+
+&gpio3 {
+	/delete-node/ tsn1-mux;
+};
+
+&gpio4 {
+	tsn1-mux {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN1-MUX";
+	};
+};
