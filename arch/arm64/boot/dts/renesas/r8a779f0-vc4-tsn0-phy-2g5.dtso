@@ -1,0 +1,34 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+&gpio3 {
+	tsn0-pre-mux {
+		gpio-hog;
+		gpios = <8 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN0-PRE-MUX";
+	};
+
+	tsn0-mux {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "TSN0-MUX";
+	};
+};
+
+&tsn0 {
+	phy-mode = "usxgmii";
+	phy-handle = <&tsn0_phy_2g5>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	tsn0_phy_2g5: ethernet-phy@0 {
+		reg = <0>;
+		compatible = "ethernet-phy-ieee802.3-c45";
+		status = "okay";
+	};
+};

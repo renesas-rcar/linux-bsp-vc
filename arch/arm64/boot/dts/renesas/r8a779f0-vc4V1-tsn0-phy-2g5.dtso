@@ -1,0 +1,38 @@
+#include "r8a779f0-vc4-tsn0-phy-2g5.dtso"
+
+/* TSN0_SEL_1_25 is at GPIO4_06 */
+
+&gpio3 {
+	/delete-node/ tsn0-mux;
+};
+
+&gpio4 {
+	tsn0-mux {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "TSN0-MUX";
+	};
+};
+
+/* TSN0_SLEEP is at GPIO3_15. When using tsn0_phy_2g5, keep high */
+
+&gpio3 {
+	tsn0-no-sleep {
+		gpio-hog;
+		gpios = <15 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN0-NO-SLEEP";
+	};
+};
+
+/* TSN0_WAKE is at GPIO6_22. When using tsn0_phy_2g5, keep high */
+
+&gpio6 {
+	tsn0-no-wake {
+		gpio-hog;
+		gpios = <22 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN0-NO-WAKE";
+	};
+};

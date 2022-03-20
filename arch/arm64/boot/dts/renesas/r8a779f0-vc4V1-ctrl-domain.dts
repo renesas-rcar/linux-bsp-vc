@@ -24,56 +24,6 @@
 	vqmcc-supply = <&vccq_sdhi>;
 };
 
-/* TSN0_SEL_1_25 is at GPIO4_06 */
-
-&gpio4 {
-	tsn0-mux {
-		gpio-hog;
-		gpios = <6 GPIO_ACTIVE_HIGH>;
-		/* For tsn0_phy_2g5 */
-		/* output-low; */
-		/* For tsn0_phy_1g */
-		output-high;
-		line-name = "TSN0-MUX";
-	};
-};
-
-/* TSN1_SEL_1_25 is at GPIO4_07 */
-
-&gpio4 {
-	tsn1-mux {
-		gpio-hog;
-		gpios = <7 GPIO_ACTIVE_HIGH>;
-		/* For tsn1_phy_2g5 */
-		/* output-low; */
-		/* For tsn1_phy_1g */
-		output-high;
-		line-name = "TSN1-MUX";
-	};
-};
-
-/* TSN0_WAKE is at GPIO6_22. When using tsn0_phy_2g5, keep high */
-
-&gpio6 {
-	/* tsn0-no-wake {
-		gpio-hog;
-		gpios = <22 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "TSN0-NO-WAKE";
-	}; */
-};
-
-/* TSN1_WAKE is at GPIO6_21. When using tsn1_phy_2g5, keep high */
-
-&gpio6 {
-	/* tsn1-no-wake {
-		gpio-hog;
-		gpios = <21 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "TSN1-NO-WAKE";
-	}; */
-};
-
 /* SEL_CAN_SENT is at GPIO3_06 */
 
 &gpio6 {
