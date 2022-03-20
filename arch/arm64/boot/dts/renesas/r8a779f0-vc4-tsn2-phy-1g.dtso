@@ -1,0 +1,27 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+&gpio3 {
+	tsn2-mux {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN2-MUX";
+	};
+};
+
+&tsn2 {
+	phy-mode = "sgmii";
+	phy-handle = <&tsn2_phy_1g>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	tsn2_phy_1g: ethernet-phy@3 {
+		reg = <3>;
+		compatible = "ethernet-phy-id002B.0218";
+		status = "okay";
+	};
+};

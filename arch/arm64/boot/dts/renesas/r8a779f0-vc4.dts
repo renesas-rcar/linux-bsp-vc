@@ -89,45 +89,6 @@
 	clock-frequency = <32768>;
 };
 
-&gpio3 {
-	tsn0-pre-mux {
-		gpio-hog;
-		gpios = <8 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "TSN0-PRE-MUX";
-	};
-
-	tsn0_mux: tsn0-mux {
-		gpio-hog;
-		gpios = <6 GPIO_ACTIVE_HIGH>;
-		/* For tsn0_phy_2g5 */
-		/* output-low; */
-		/* For tsn0_phy_1g */
-		output-high;
-		line-name = "TSN0-MUX";
-	};
-
-	tsn1_mux: tsn1-mux {
-		gpio-hog;
-		gpios = <14 GPIO_ACTIVE_HIGH>;
-		/* For tsn1_phy_2g5 */
-		/* output-low; */
-		/* For tsn1_phy_1g */
-		output-high;
-		line-name = "TSN0-MUX";
-	};
-
-	tsn2-mux {
-		gpio-hog;
-		gpios = <7 GPIO_ACTIVE_HIGH>;
-		/* For tsn2_phy_1g_rh */
-		/* output-low; */
-		/* For tsn2_phy_1g */
-		output-high;
-		line-name = "TSN2-MUX";
-	};
-};
-
 &i2c1 {
 	status = "okay";
 
@@ -403,7 +364,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		port@0 {
+		tsn0: port@0 {
 			reg = <0>;
 
 			/* normally port MAC address comes from EEPROM ... */
@@ -412,25 +373,10 @@
 			/* ... but EEPROM setting could be overridden */
 			mac-address = [00 00 00 00 00 00];
 
-			/* phy-mode = "usxgmii"; */
-			/* phy-handle = <&tsn0_phy_2g5>; */
-			phy-mode = "sgmii";
-			phy-handle = <&tsn0_phy_1g>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-			tsn0_phy_2g5: ethernet-phy@0 {
-				reg = <0>;
-				compatible = "ethernet-phy-id0000.0000";
-				status = "disabled";
-			};
-			tsn0_phy_1g: ethernet-phy@3 {
-				reg = <3>;
-				compatible = "ethernet-phy-id002B.0218";
-				status = "okay";
-			};
+			/* phy settings moved to overlays */
 		};
 
-		port@1 {
+		tsn1: port@1 {
 			reg = <1>;
 
 			/* normally port MAC address comes from EEPROM ... */
@@ -439,25 +385,10 @@
 			/* ... but EEPROM setting could be overridden */
 			mac-address = [00 00 00 00 00 00];
 
-			/* phy-mode = "usxgmii"; */
-			/* phy-handle = <&tsn1_phy_2g5>; */
-			phy-mode = "sgmii";
-			phy-handle = <&tsn1_phy_1g>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-			tsn1_phy_2g5: ethernet-phy@0 {
-				reg = <0>;
-				compatible = "ethernet-phy-id0000.0000";
-				status = "disabled";
-			};
-			tsn1_phy_1g: ethernet-phy@3 {
-				reg = <3>;
-				compatible = "ethernet-phy-id002B.0218";
-				status = "okay";
-			};
+			/* phy settings moved to overlays */
 		};
 
-		port@2 {
+		tsn2: port@2 {
 			reg = <2>;
 
 			/* normally port MAC address comes from EEPROM ... */
@@ -466,21 +397,7 @@
 			/* ... but EEPROM setting could be overridden */
 			mac-address = [00 00 00 00 00 00];
 
-			phy-mode = "sgmii";
-			/* phy-handle = <&tsn2_phy_1g_rh>; */
-			phy-handle = <&tsn2_phy_1g>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-			tsn2_phy_1g_rh: ethernet-phy@1 {
-				reg = <1>;
-				compatible = "ethernet-phy-ieee802.3-c45";
-				status = "disabled";
-			};
-			tsn2_phy_1g: ethernet-phy@3 {
-				reg = <3>;
-				compatible = "ethernet-phy-id002B.0218";
-				status = "okay";
-			};
+			/* phy settings moved to overlays */
 		};
 	};
 };
