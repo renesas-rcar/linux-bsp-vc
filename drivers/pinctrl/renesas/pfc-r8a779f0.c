@@ -2038,6 +2038,78 @@ static const unsigned int taud1_pwm7_mux[] = {
 	TAUD1O15_MARK,
 };
 
+/* - EtherAVB ----------------------------------------------------------------*/
+static const unsigned int etnb0_mii_pins[] = {
+	RCAR_GP_PIN(5, 15),		/* AVB_TX_CLK	- ETNB0TXCLK */
+	RCAR_GP_PIN(5, 18),		/* AVB_TX_EN	- ETNB0TXEN */
+	RCAR_GP_PIN(5, 19),		/* AVB_TXD[0]	- ETNB0TXD0 */
+	RCAR_GP_PIN(5, 16),		/* AVB_TXD[1]	- ETNB0TXD1 */
+	RCAR_GP_PIN(5, 17),		/* AVB_TXD[2]	- ETNB0TXD2 */
+	RCAR_GP_PIN(5, 14),		/* AVB_TXD[3]	- ETNB0TXD3 */
+	RCAR_GP_PIN(5, 13),		/* AVB_TX_ER	- ETNB0TXER */
+	RCAR_GP_PIN(5, 12),		/* AVB_RX_CLK	- ETNB0RXCLK */
+	RCAR_GP_PIN(5, 12),		/* AVB_RX_DV	- ETNB0RXDV */
+	RCAR_GP_PIN(5, 11),		/* AVB_RXD[0]	- ETNB0RXD0 */
+	RCAR_GP_PIN(5,  8),		/* AVB_RXD[1]	- ETNB0RXD1 */
+	RCAR_GP_PIN(5,  9),		/* AVB_RXD[2]	- ETNB0RXD2 */
+	RCAR_GP_PIN(5,  7),		/* AVB_RXD[3]	- ETNB0RXD3 */
+	RCAR_GP_PIN(5,  6),		/* AVB_TX_ER	- ETNB0RXER */
+};
+static const unsigned int etnb0_mii_mux[] = {
+	ETNB0TXCLK_MARK,
+	ETNB0TXEN_MARK,
+	ETNB0TXD0_MARK,
+	ETNB0TXD1_MARK,
+	ETNB0TXD2_MARK,
+	ETNB0TXD3_MARK,
+	ETNB0TXER_MARK,
+	ETNB0RXCLK_MARK,
+	ETNB0RXDV_MARK,
+	ETNB0RXD0_MARK,
+	ETNB0RXD1_MARK,
+	ETNB0RXD2_MARK,
+	ETNB0RXD3_MARK,
+	ETNB0RXER_MARK,
+};
+static const unsigned int etnb0_rmii_pins[] = {
+	RCAR_GP_PIN(5, 18),		/* AVB_TX_EN	- ETNB0TXEN */
+	RCAR_GP_PIN(5, 19),		/* AVB_TXD[0]	- ETNB0TXD0 */
+	RCAR_GP_PIN(5, 16),		/* AVB_TXD[1]	- ETNB0TXD1 */
+	RCAR_GP_PIN(5, 11),		/* AVB_RXD[0]	- ETNB0RXD0 */
+	RCAR_GP_PIN(5,  8),		/* AVB_RXD[1]	- ETNB0RXD1 */
+	RCAR_GP_PIN(5, 15),		/* RMII_REF50CK	- ETNB0REFCLK */
+	RCAR_GP_PIN(5, 12),		/* RMII_CRS_DV	- ETNB0CRS_DV */
+};
+static const unsigned int etnb0_rmii_mux[] = {
+	ETNB0TXEN_MARK,
+	ETNB0TXD0_MARK,
+	ETNB0TXD1_MARK,
+	ETNB0RXD0_MARK,
+	ETNB0RXD1_MARK,
+	ETNB0REFCLK_MARK,
+	ETNB0CRS_DV_MARK,
+};
+static const unsigned int etnb0_mdio_pins[] = {
+	RCAR_GP_PIN(5,  5),		/* AVB_MDC	- ETNB0MDC */
+	RCAR_GP_PIN(5,  2),		/* AVB_MDIO	- ETNB0MD */
+};
+static const unsigned int etnb0_mdio_mux[] = {
+	ETNB0MDC_MARK,
+	ETNB0MD_MARK,
+};
+static const unsigned int etnb0_link_pins[] = {
+	RCAR_GP_PIN(5,  4),		/* AVB_LINK	- ETNB0LINKSTA */
+};
+static const unsigned int etnb0_link_mux[] = {
+	ETNB0LINKSTA_MARK,
+};
+static const unsigned int etnb0_magic_pins[] = {
+	RCAR_GP_PIN(5,  3),		/* AVB_MAGIC	- ETNB0WOL */
+};
+static const unsigned int etnb0_magic_mux[] = {
+	ETNB0WOL_MARK,
+};
+
 static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(tsn0_link),
 	SH_PFC_PIN_GROUP(tsn0_magic),
@@ -2180,6 +2252,12 @@ static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(taud1_pwm5),
 	SH_PFC_PIN_GROUP(taud1_pwm6),
 	SH_PFC_PIN_GROUP(taud1_pwm7),
+
+	SH_PFC_PIN_GROUP(etnb0_mii),
+	SH_PFC_PIN_GROUP(etnb0_rmii),
+	SH_PFC_PIN_GROUP(etnb0_mdio),
+	SH_PFC_PIN_GROUP(etnb0_link),
+	SH_PFC_PIN_GROUP(etnb0_magic),
 };
 
 static const char * const tsn0_groups[] = {
@@ -2382,6 +2460,14 @@ static const char * const taud1_pwm_groups[] = {
 	"taud1_pwm7",
 };
 
+static const char * const etnb0_groups[] = {
+	"etnb0_mii",
+	"etnb0_rmii",
+	"etnb0_mdio",
+	"etnb0_link",
+	"etnb0_magic",
+};
+
 static const struct sh_pfc_function pinmux_functions[] = {
 	SH_PFC_FUNCTION(tsn0),
 	SH_PFC_FUNCTION(tsn1),
@@ -2419,6 +2505,8 @@ static const struct sh_pfc_function pinmux_functions[] = {
 
 	SH_PFC_FUNCTION(taud0_pwm),
 	SH_PFC_FUNCTION(taud1_pwm),
+
+	SH_PFC_FUNCTION(etnb0),
 };
 
 static const struct pinmux_cfg_reg pinmux_config_regs[] = {
