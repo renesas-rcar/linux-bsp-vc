@@ -230,6 +230,14 @@ config RENESAS_INTC_IRQPIN
 	  Enable support for the Renesas Interrupt Controller for external
 	  interrupt pins, as found on SH/R-Mobile and R-Car Gen1 SoCs.
 
+config RENESAS_INTSWCD
+	bool "Renesas SoC Control Domain Interrupts support"
+	depends on ARCH_R8A779F0 || COMPILE_TEST
+	select IRQ_DOMAIN
+	help
+	  Enable support for the Renesas INTSWCD controller that forwards
+	  interrupts from SoC control domain to SoC application domain.
+
 config RENESAS_IRQC
 	bool "Renesas R-Mobile APE6, R-Car Gen{2,3} and RZ/G{1,2} IRQC support" if COMPILE_TEST
 	select GENERIC_IRQ_CHIP
@@ -237,6 +245,9 @@ config RENESAS_IRQC
 	help
 	  Enable support for the Renesas Interrupt Controller for external
 	  devices, as found on R-Mobile APE6, R-Car Gen{2,3} and RZ/G{1,2} SoCs.
+
+	  This can be used under Linux if software running in SoC control domain
+	  delegates hardware access to application domain.
 
 config RENESAS_RZA1_IRQC
 	bool "Renesas RZ/A1 IRQC support" if COMPILE_TEST
