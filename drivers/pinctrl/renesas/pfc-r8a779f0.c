@@ -1389,7 +1389,6 @@ static const unsigned int i2c5_mux[] = {
 	SDA5_MARK, SCL5_MARK,
 };
 
-
 /* - INTC-EX ---------------------------------------------------------------- */
 static const unsigned int intc_ex_irq0_pins[] = {
 	/* IRQ0 */
@@ -1527,6 +1526,15 @@ static const unsigned int qspi1_data4_pins[] = {
 static const unsigned int qspi1_data4_mux[] = {
 	QSPI1_MOSI_IO0_MARK, QSPI1_MISO_IO1_MARK,
 	QSPI1_IO2_MARK, QSPI1_IO3_MARK
+};
+
+/* - RIIC0 ------------------------------------------------------------------ */
+static const unsigned int riic0_pins[] = {
+	/* RIIC0SDA, RIIC0SCL */
+	RCAR_GP_PIN(5, 1), RCAR_GP_PIN(5, 0),
+};
+static const unsigned int riic0_mux[] = {
+	RIIC0SDA_MARK, RIIC0SCL_MARK,
 };
 
 /* - SCIF0 ------------------------------------------------------------------ */
@@ -1848,6 +1856,8 @@ static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(qspi1_data2),
 	SH_PFC_PIN_GROUP(qspi1_data4),
 
+	SH_PFC_PIN_GROUP(riic0),
+
 	SH_PFC_PIN_GROUP(scif0_data),
 	SH_PFC_PIN_GROUP(scif0_clk),
 	SH_PFC_PIN_GROUP(scif0_ctrl),
@@ -1985,6 +1995,10 @@ static const char * const qspi1_groups[] = {
 	"qspi1_data4",
 };
 
+static const char * const riic0_groups[] = {
+	"riic0",
+};
+
 static const char * const scif0_groups[] = {
 	"scif0_data",
 	"scif0_clk",
@@ -2070,6 +2084,8 @@ static const struct sh_pfc_function pinmux_functions[] = {
 
 	SH_PFC_FUNCTION(qspi0),
 	SH_PFC_FUNCTION(qspi1),
+
+	SH_PFC_FUNCTION(riic0),
 
 	SH_PFC_FUNCTION(scif0),
 	SH_PFC_FUNCTION(scif1),
