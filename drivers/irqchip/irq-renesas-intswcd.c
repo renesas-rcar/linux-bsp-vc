@@ -6,34 +6,8 @@
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
 
+#include "irq-renesas-intswcd.h"
 #include <dt-bindings/interrupt-controller/arm-gic.h>
-#include <dt-bindings/interrupt-controller/renesas-intswcd-r8a779f0.h>
-
-enum {
-	INTSWCD_LEVEL = 1,
-	INTSWCD_EDGE
-};
-
-struct intswcd_hwirq_info {
-	unsigned int type;
-	unsigned int parent_irq_offset;
-	unsigned int reg;
-	u32 mask;
-};
-
-struct intswcd_info {
-	const struct intswcd_hwirq_info *ihi;
-	unsigned int ihi_nr;
-	unsigned int level_parent_irqs_nr;
-	unsigned int edge_parent_irqs_nr;
-	unsigned int level_sts_regs_base;
-	unsigned int level_msk_regs_base;
-	unsigned int level_regs_nr;
-	unsigned int edge_sts_regs_base;
-	unsigned int edge_msk_regs_base;
-	unsigned int edge_clr_regs_base;
-	unsigned int edge_regs_nr;
-};
 
 struct intswcd_handler_data;
 
@@ -375,43 +349,13 @@ map_err:
 	return ret;
 }
 
-static const struct intswcd_hwirq_info r8a779f0_ihi[] = {
-#define ENTRY(_name, _type, _irq_offset, _reg, _bit)	\
-	[R8A779F0_INTSWCD_##_name] = {			\
-		.type = INTSWCD_##_type,		\
-		.parent_irq_offset = _irq_offset,	\
-		.reg = _reg,				\
-		.mask = BIT(_bit),			\
-	},
-
-	ENTRY(INTRIIC0EE,  LEVEL, 33,  9, 0)
-	ENTRY(INTRIIC0TEI, LEVEL, 33,  9, 1)
-	ENTRY(INTRIIC0RI,   EDGE, 24, 13, 0)
-	ENTRY(INTRIIC0TI,   EDGE, 24, 13, 1)
-	ENTRY(INTOSTM0TINT, EDGE, 12,  2, 0)
-
-#undef ENTRY
-};
-
-static const struct intswcd_info r8a779f0_ii = {
-	.ihi = r8a779f0_ihi,
-	.ihi_nr = ARRAY_SIZE(r8a779f0_ihi),
-	.level_parent_irqs_nr = 51,
-	.edge_parent_irqs_nr = 29,
-	.level_sts_regs_base = 0x000,
-	.level_msk_regs_base = 0x040,
-	.level_regs_nr = 14,
-	.edge_sts_regs_base = 0x200,
-	.edge_msk_regs_base = 0x250,
-	.edge_clr_regs_base = 0x2a0,
-	.edge_regs_nr = 17,
-};
-
 static const struct of_device_id intswcd_of_table[] = {
+#if IS_ENABLED(CONFIG_ARCH_R8A779F0)
 	{
 		.compatible = "renesas,intswcd-r8a779f0",
 		.data = &r8a779f0_ii,
 	},
+#endif
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, intswcd_of_table);
