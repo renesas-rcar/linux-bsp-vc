@@ -238,6 +238,9 @@ config RENESAS_INTSWCD
 	  Enable support for the Renesas INTSWCD controller that forwards
 	  interrupts from SoC control domain to SoC application domain.
 
+config R8A779F0_INTSWCD
+	def_bool RENESAS_INTSWCD && ARCH_R8A779F0
+
 config RENESAS_IRQC
 	bool "Renesas R-Mobile APE6, R-Car Gen{2,3} and RZ/G{1,2} IRQC support" if COMPILE_TEST
 	select GENERIC_IRQ_CHIP
