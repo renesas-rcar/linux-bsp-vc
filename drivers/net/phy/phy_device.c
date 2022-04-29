@@ -616,6 +616,7 @@ struct phy_device *phy_device_initialize(struct mii_bus *bus, int addr)
 	phydev->link = 0;
 	phydev->port = PORT_TP;
 	phydev->interface = PHY_INTERFACE_MODE_GMII;
+	phydev->pma_extable = -ENODATA;
 
 	phydev->irq = bus->irq[addr];
 
