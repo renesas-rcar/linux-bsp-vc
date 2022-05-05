@@ -138,6 +138,36 @@
 	};
 };
 
+&etnb0 {
+	/* keep it disabled until driver support is implemented */
+	status = "disabled";
+
+	pinctrl-0 = <&etnb0_pins>;
+	pinctrl-names = "default";
+
+	phy-mode = "rmii";
+	phy-handle = <&etnb0_100base_tx_phy>;
+
+	etnb0_100base_tx_phy: ethernet-phy@1 {
+		reg = <1>;
+		status = "okay";
+	};
+
+	etnb0_100base_t1_phy: ethernet-phy@2 {
+		reg = <2>;
+		status = "disabled";
+	};
+};
+
+&gpio5 {
+	etnb0-mux {
+		gpio-hog;
+		gpios = <17 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "ETNB0-MUX";
+	};
+};
+
 &gpio6 {
 	sel-can-sent {
 		gpio-hog;
@@ -223,5 +253,10 @@
 			groups = "canfd15_data";
 			function = "canfd15";
 		};
+	};
+
+	etnb0_pins: etnb0 {
+		groups = "etnb0_rmii", "etnb0_mdio", "etnb0_link";
+		function = "etnb0";
 	};
 };

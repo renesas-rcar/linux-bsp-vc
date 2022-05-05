@@ -157,6 +157,25 @@
 		};
 	};
 
+	etnb0: ethernet@df0a2000 {
+		compatible = "renesas,etheravb-r8a779f0";
+		reg = <0 0xdf0a2000 0 0x800>;
+		clocks = <&cpg CPG_CD_MOD 200>;
+		clock-names = "fck";
+		interrupt-parent = <&intswcd>;
+		interrupts = <R8A779F0_INTSWCD_INTETNB0DATA>,
+			     <R8A779F0_INTSWCD_INTETNB0ERR>,
+			     <R8A779F0_INTSWCD_INTETNB0MNG>,
+			     <R8A779F0_INTSWCD_INTETNB0MAC>;
+		interrupt-names = "data", "error", "management", "mac";
+		/* power domain is responsible for enabling/disabling clock
+		   in dynamic pm operations */
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
 	gpio4: gpio@dfd90180 {
 		compatible = "renesas,gpio-r8a779f0";
 		reg = <0 0xdfd90180 0 0x54>;
