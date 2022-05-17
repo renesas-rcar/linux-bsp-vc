@@ -2208,6 +2208,397 @@ static const unsigned int canfd15_data_mux[] = {
 	CAN15TX_MARK, CAN15RX_INTP15_MARK,
 };
 
+/* - MSPI0 -------------------------------------------------------------------*/
+
+static const unsigned int mspi0_sck_pins[] = {
+	RCAR_GP_PIN(4, 20),
+};
+static const unsigned int mspi0_sck_mux[] = {
+	MSPI0SC_MARK,
+};
+static const unsigned int mspi0_din_pins[] = {
+	RCAR_GP_PIN(4, 21),
+};
+static const unsigned int mspi0_din_mux[] = {
+	MSPI0SI_MARK,
+};
+static const unsigned int mspi0_dout_pins[] = {
+	RCAR_GP_PIN(4, 22),
+};
+static const unsigned int mspi0_dout_mux[] = {
+	MSPI0SO_MSPI0DCS_MARK,
+};
+static const unsigned int mspi0_cs0_pins[] = {
+	RCAR_GP_PIN(4, 24),
+};
+static const unsigned int mspi0_cs0_mux[] = {
+	MSPI0CSS0_MARK,
+};
+static const unsigned int mspi0_cs1_pins[] = {
+	RCAR_GP_PIN(4, 23),
+};
+static const unsigned int mspi0_cs1_mux[] = {
+	MSPI0CSS1_MARK,
+};
+static const unsigned int mspi0_cs2_pins[] = {
+	RCAR_GP_PIN(4, 28),
+};
+static const unsigned int mspi0_cs2_mux[] = {
+	MSPI0CSS2_MARK,
+};
+static const unsigned int mspi0_cs3_pins[] = {
+	RCAR_GP_PIN(4, 28),
+};
+static const unsigned int mspi0_cs3_mux[] = {
+	MSPI0CSS3_MARK,
+};
+static const unsigned int mspi0_cs4_pins[] = {
+	RCAR_GP_PIN(4, 25),
+};
+static const unsigned int mspi0_cs4_mux[] = {
+	MSPI0CSS4_MARK,
+};
+static const unsigned int mspi0_cs5_pins[] = {
+	RCAR_GP_PIN(4, 27),
+};
+static const unsigned int mspi0_cs5_mux[] = {
+	MSPI0CSS5_MARK,
+};
+static const unsigned int mspi0_cs6_pins[] = {
+	RCAR_GP_PIN(4, 30),
+};
+static const unsigned int mspi0_cs6_mux[] = {
+	MSPI0CSS6_MARK,
+};
+static const unsigned int mspi0_cs7_pins[] = {
+	RCAR_GP_PIN(4, 29),
+};
+static const unsigned int mspi0_cs7_mux[] = {
+	MSPI0CSS7_MARK,
+};
+
+/* - MSPI1 -------------------------------------------------------------------*/
+
+static const unsigned int mspi1_sck_pins[] = {
+	RCAR_GP_PIN(4, 28),
+};
+static const unsigned int mspi1_sck_mux[] = {
+	MSPI1SC_MARK,
+};
+static const unsigned int mspi1_din_pins[] = {
+	RCAR_GP_PIN(4, 25),
+};
+static const unsigned int mspi1_din_mux[] = {
+	MSPI1SI_MARK,
+};
+static const unsigned int mspi1_dout_pins[] = {
+	RCAR_GP_PIN(4, 26),
+};
+static const unsigned int mspi1_dout_mux[] = {
+	MSPI1SO_MSPI1DCS_MARK,
+};
+static const unsigned int mspi1_cs0_pins[] = {
+	RCAR_GP_PIN(4, 27),
+};
+static const unsigned int mspi1_cs0_mux[] = {
+	MSPI1CSS0_MARK,
+};
+static const unsigned int mspi1_cs1_pins[] = {
+	RCAR_GP_PIN(4, 30),
+};
+static const unsigned int mspi1_cs1_mux[] = {
+	MSPI1CSS1_MARK,
+};
+static const unsigned int mspi1_cs2_pins[] = {
+	RCAR_GP_PIN(4, 29),
+};
+static const unsigned int mspi1_cs2_mux[] = {
+	MSPI1CSS2_MARK,
+};
+static const unsigned int mspi1_cs3_pins[] = {
+	RCAR_GP_PIN(4, 15),
+};
+static const unsigned int mspi1_cs3_mux[] = {
+	MSPI1CSS3_MARK,
+};
+static const unsigned int mspi1_cs4_pins[] = {
+	RCAR_GP_PIN(4, 18),
+};
+static const unsigned int mspi1_cs4_mux[] = {
+	MSPI1CSS4_MARK,
+};
+static const unsigned int mspi1_cs5_pins[] = {
+	RCAR_GP_PIN(4, 17),
+};
+static const unsigned int mspi1_cs5_mux[] = {
+	MSPI1CSS5_MARK,
+};
+static const unsigned int mspi1_cs6_pins[] = {
+	RCAR_GP_PIN(4, 19),
+};
+static const unsigned int mspi1_cs6_mux[] = {
+	MSPI1CSS6_MARK,
+};
+static const unsigned int mspi1_cs7_pins[] = {
+	RCAR_GP_PIN(4, 20),
+};
+static const unsigned int mspi1_cs7_mux[] = {
+	MSPI1CSS7_MARK,
+};
+
+/* - MSPI2 -------------------------------------------------------------------*/
+
+static const unsigned int mspi2_sck_pins[] = {
+	RCAR_GP_PIN(7, 1),
+};
+static const unsigned int mspi2_sck_mux[] = {
+	MSPI2SC_MARK,
+};
+static const unsigned int mspi2_din_pins[] = {
+	RCAR_GP_PIN(7, 3),
+};
+static const unsigned int mspi2_din_mux[] = {
+	MSPI2SI_MARK,
+};
+static const unsigned int mspi2_dout_pins[] = {
+	RCAR_GP_PIN(7, 0),
+};
+static const unsigned int mspi2_dout_mux[] = {
+	MSPI2SO_MSPI2DCS_MARK,
+};
+static const unsigned int mspi2_cs0_pins[] = {
+	RCAR_GP_PIN(7, 2),
+};
+static const unsigned int mspi2_cs0_mux[] = {
+	MSPI2CSS0_MARK,
+};
+static const unsigned int mspi2_cs1_pins[] = {
+	RCAR_GP_PIN(7, 5),
+};
+static const unsigned int mspi2_cs1_mux[] = {
+	MSPI2CSS1_MARK,
+};
+static const unsigned int mspi2_cs2_pins[] = {
+	RCAR_GP_PIN(7, 4),
+};
+static const unsigned int mspi2_cs2_mux[] = {
+	MSPI2CSS2_MARK,
+};
+static const unsigned int mspi2_cs3_pins[] = {
+	RCAR_GP_PIN(7, 7),
+};
+static const unsigned int mspi2_cs3_mux[] = {
+	MSPI2CSS3_MARK,
+};
+static const unsigned int mspi2_cs4_pins[] = {
+	RCAR_GP_PIN(7, 6),
+};
+static const unsigned int mspi2_cs4_mux[] = {
+	MSPI2CSS4_MARK,
+};
+static const unsigned int mspi2_cs5_pins[] = {
+	RCAR_GP_PIN(7, 9),
+};
+static const unsigned int mspi2_cs5_mux[] = {
+	MSPI2CSS5_MARK,
+};
+static const unsigned int mspi2_cs6_pins[] = {
+	RCAR_GP_PIN(7, 8),
+};
+static const unsigned int mspi2_cs6_mux[] = {
+	MSPI2CSS6_MARK,
+};
+static const unsigned int mspi2_cs7_pins[] = {
+	RCAR_GP_PIN(7, 11),
+};
+static const unsigned int mspi2_cs7_mux[] = {
+	MSPI2CSS7_MARK,
+};
+
+/* - MSPI3 -------------------------------------------------------------------*/
+
+static const unsigned int mspi3_sck_pins[] = {
+	RCAR_GP_PIN(7, 13),
+};
+static const unsigned int mspi3_sck_mux[] = {
+	MSPI3SC_MARK,
+};
+static const unsigned int mspi3_din_pins[] = {
+	RCAR_GP_PIN(7, 15),
+};
+static const unsigned int mspi3_din_mux[] = {
+	MSPI3SI_MARK,
+};
+static const unsigned int mspi3_dout_pins[] = {
+	RCAR_GP_PIN(7, 12),
+};
+static const unsigned int mspi3_dout_mux[] = {
+	MSPI3SO_MSPI3DCS_MARK,
+};
+static const unsigned int mspi3_cs0_pins[] = {
+	RCAR_GP_PIN(7, 17),
+};
+static const unsigned int mspi3_cs0_mux[] = {
+	MSPI3CSS0_MARK,
+};
+static const unsigned int mspi3_cs1_pins[] = {
+	RCAR_GP_PIN(7, 16),
+};
+static const unsigned int mspi3_cs1_mux[] = {
+	MSPI3CSS1_MARK,
+};
+static const unsigned int mspi3_cs2_pins[] = {
+	RCAR_GP_PIN(7, 19),
+};
+static const unsigned int mspi3_cs2_mux[] = {
+	MSPI3CSS2_MARK,
+};
+static const unsigned int mspi3_cs3_pins[] = {
+	RCAR_GP_PIN(7, 18),
+};
+static const unsigned int mspi3_cs3_mux[] = {
+	MSPI3CSS3_MARK,
+};
+static const unsigned int mspi3_cs4_pins[] = {
+	RCAR_GP_PIN(7, 21),
+};
+static const unsigned int mspi3_cs4_mux[] = {
+	MSPI3CSS4_MARK,
+};
+static const unsigned int mspi3_cs5_pins[] = {
+	RCAR_GP_PIN(7, 20),
+};
+static const unsigned int mspi3_cs5_mux[] = {
+	MSPI3CSS5_MARK,
+};
+static const unsigned int mspi3_cs6_pins[] = {
+	RCAR_GP_PIN(7, 23),
+};
+static const unsigned int mspi3_cs6_mux[] = {
+	MSPI3CSS6_MARK,
+};
+static const unsigned int mspi3_cs7_pins[] = {
+	RCAR_GP_PIN(7, 22),
+};
+static const unsigned int mspi3_cs7_mux[] = {
+	MSPI3CSS7_MARK,
+};
+
+/* - MSPI4 -------------------------------------------------------------------*/
+
+static const unsigned int mspi4_sck_pins[] = {
+	RCAR_GP_PIN(4, 0),
+};
+static const unsigned int mspi4_sck_mux[] = {
+	MSPI4SC_MARK,
+};
+static const unsigned int mspi4_din_pins[] = {
+	RCAR_GP_PIN(4, 1),
+};
+static const unsigned int mspi4_din_mux[] = {
+	MSPI4SI_MARK,
+};
+static const unsigned int mspi4_dout_pins[] = {
+	RCAR_GP_PIN(4, 2),
+};
+static const unsigned int mspi4_dout_mux[] = {
+	MSPI4SO_MSPI4DCS_MARK,
+};
+static const unsigned int mspi4_cs0_pins[] = {
+	RCAR_GP_PIN(4, 4),
+};
+static const unsigned int mspi4_cs0_mux[] = {
+	MSPI4CSS0_MARK,
+};
+static const unsigned int mspi4_cs1_pins[] = {
+	RCAR_GP_PIN(4, 3),
+};
+static const unsigned int mspi4_cs1_mux[] = {
+	MSPI4CSS1_MARK,
+};
+static const unsigned int mspi4_cs2_pins[] = {
+	RCAR_GP_PIN(4, 6),
+};
+static const unsigned int mspi4_cs2_mux[] = {
+	MSPI4CSS2_MARK,
+};
+static const unsigned int mspi4_cs3_pins[] = {
+	RCAR_GP_PIN(4, 5),
+};
+static const unsigned int mspi4_cs3_mux[] = {
+	MSPI4CSS3_MARK,
+};
+static const unsigned int mspi4_cs4_pins[] = {
+	RCAR_GP_PIN(4, 8),
+};
+static const unsigned int mspi4_cs4_mux[] = {
+	MSPI4CSS4_MARK,
+};
+static const unsigned int mspi4_cs5_pins[] = {
+	RCAR_GP_PIN(4, 7),
+};
+static const unsigned int mspi4_cs5_mux[] = {
+	MSPI4CSS5_MARK,
+};
+static const unsigned int mspi4_cs6_pins[] = {
+	RCAR_GP_PIN(4, 10),
+};
+static const unsigned int mspi4_cs6_mux[] = {
+	MSPI4CSS6_MARK,
+};
+static const unsigned int mspi4_cs7_pins[] = {
+	RCAR_GP_PIN(4, 9),
+};
+static const unsigned int mspi4_cs7_mux[] = {
+	MSPI4CSS7_MARK,
+};
+
+/* - MSPI5 -------------------------------------------------------------------*/
+
+static const unsigned int mspi5_sck_pins[] = {
+	RCAR_GP_PIN(4, 4),
+};
+static const unsigned int mspi5_sck_mux[] = {
+	MSPI5SC_MARK,
+};
+static const unsigned int mspi5_din_pins[] = {
+	RCAR_GP_PIN(4, 6),
+};
+static const unsigned int mspi5_din_mux[] = {
+	MSPI5SI_MARK,
+};
+static const unsigned int mspi5_dout_pins[] = {
+	RCAR_GP_PIN(4, 3),
+};
+static const unsigned int mspi5_dout_mux[] = {
+	MSPI5SO_MSPI5DCS_MARK,
+};
+static const unsigned int mspi5_cs0_pins[] = {
+	RCAR_GP_PIN(4, 8),
+};
+static const unsigned int mspi5_cs0_mux[] = {
+	MSPI5CSS0_MARK,
+};
+static const unsigned int mspi5_cs1_pins[] = {
+	RCAR_GP_PIN(4, 7),
+};
+static const unsigned int mspi5_cs1_mux[] = {
+	MSPI5CSS1_MARK,
+};
+static const unsigned int mspi5_cs2_pins[] = {
+	RCAR_GP_PIN(4, 10),
+};
+static const unsigned int mspi5_cs2_mux[] = {
+	MSPI5CSS2_MARK,
+};
+static const unsigned int mspi5_cs3_pins[] = {
+	RCAR_GP_PIN(4, 9),
+};
+static const unsigned int mspi5_cs3_mux[] = {
+	MSPI5CSS3_MARK,
+};
+
+
 static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(tsn0_link),
 	SH_PFC_PIN_GROUP(tsn0_magic),
@@ -2373,6 +2764,74 @@ static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(canfd13_data),
 	SH_PFC_PIN_GROUP(canfd14_data),
 	SH_PFC_PIN_GROUP(canfd15_data),
+
+	SH_PFC_PIN_GROUP(mspi0_sck),
+	SH_PFC_PIN_GROUP(mspi0_din),
+	SH_PFC_PIN_GROUP(mspi0_dout),
+	SH_PFC_PIN_GROUP(mspi0_cs0),
+	SH_PFC_PIN_GROUP(mspi0_cs1),
+	SH_PFC_PIN_GROUP(mspi0_cs2),
+	SH_PFC_PIN_GROUP(mspi0_cs3),
+	SH_PFC_PIN_GROUP(mspi0_cs4),
+	SH_PFC_PIN_GROUP(mspi0_cs5),
+	SH_PFC_PIN_GROUP(mspi0_cs6),
+	SH_PFC_PIN_GROUP(mspi0_cs7),
+
+	SH_PFC_PIN_GROUP(mspi1_sck),
+	SH_PFC_PIN_GROUP(mspi1_din),
+	SH_PFC_PIN_GROUP(mspi1_dout),
+	SH_PFC_PIN_GROUP(mspi1_cs0),
+	SH_PFC_PIN_GROUP(mspi1_cs1),
+	SH_PFC_PIN_GROUP(mspi1_cs2),
+	SH_PFC_PIN_GROUP(mspi1_cs3),
+	SH_PFC_PIN_GROUP(mspi1_cs4),
+	SH_PFC_PIN_GROUP(mspi1_cs5),
+	SH_PFC_PIN_GROUP(mspi1_cs6),
+	SH_PFC_PIN_GROUP(mspi1_cs7),
+
+	SH_PFC_PIN_GROUP(mspi2_sck),
+	SH_PFC_PIN_GROUP(mspi2_din),
+	SH_PFC_PIN_GROUP(mspi2_dout),
+	SH_PFC_PIN_GROUP(mspi2_cs0),
+	SH_PFC_PIN_GROUP(mspi2_cs1),
+	SH_PFC_PIN_GROUP(mspi2_cs2),
+	SH_PFC_PIN_GROUP(mspi2_cs3),
+	SH_PFC_PIN_GROUP(mspi2_cs4),
+	SH_PFC_PIN_GROUP(mspi2_cs5),
+	SH_PFC_PIN_GROUP(mspi2_cs6),
+	SH_PFC_PIN_GROUP(mspi2_cs7),
+
+	SH_PFC_PIN_GROUP(mspi3_sck),
+	SH_PFC_PIN_GROUP(mspi3_din),
+	SH_PFC_PIN_GROUP(mspi3_dout),
+	SH_PFC_PIN_GROUP(mspi3_cs0),
+	SH_PFC_PIN_GROUP(mspi3_cs1),
+	SH_PFC_PIN_GROUP(mspi3_cs2),
+	SH_PFC_PIN_GROUP(mspi3_cs3),
+	SH_PFC_PIN_GROUP(mspi3_cs4),
+	SH_PFC_PIN_GROUP(mspi3_cs5),
+	SH_PFC_PIN_GROUP(mspi3_cs6),
+	SH_PFC_PIN_GROUP(mspi3_cs7),
+
+	SH_PFC_PIN_GROUP(mspi4_sck),
+	SH_PFC_PIN_GROUP(mspi4_din),
+	SH_PFC_PIN_GROUP(mspi4_dout),
+	SH_PFC_PIN_GROUP(mspi4_cs0),
+	SH_PFC_PIN_GROUP(mspi4_cs1),
+	SH_PFC_PIN_GROUP(mspi4_cs2),
+	SH_PFC_PIN_GROUP(mspi4_cs3),
+	SH_PFC_PIN_GROUP(mspi4_cs4),
+	SH_PFC_PIN_GROUP(mspi4_cs5),
+	SH_PFC_PIN_GROUP(mspi4_cs6),
+	SH_PFC_PIN_GROUP(mspi4_cs7),
+
+	SH_PFC_PIN_GROUP(mspi5_sck),
+	SH_PFC_PIN_GROUP(mspi5_din),
+	SH_PFC_PIN_GROUP(mspi5_dout),
+	SH_PFC_PIN_GROUP(mspi5_cs0),
+	SH_PFC_PIN_GROUP(mspi5_cs1),
+	SH_PFC_PIN_GROUP(mspi5_cs2),
+	SH_PFC_PIN_GROUP(mspi5_cs3),
 };
 
 static const char * const tsn0_groups[] = {
@@ -2647,6 +3106,86 @@ static const char * const canfd15_groups[] = {
 	"canfd15_data",
 };
 
+static const char * const mspi0_groups[] = {
+	"mspi0_sck",
+	"mspi0_din",
+	"mspi0_dout",
+	"mspi0_cs0",
+	"mspi0_cs1",
+	"mspi0_cs2",
+	"mspi0_cs3",
+	"mspi0_cs4",
+	"mspi0_cs5",
+	"mspi0_cs6",
+	"mspi0_cs7",
+};
+
+static const char * const mspi1_groups[] = {
+	"mspi1_sck",
+	"mspi1_din",
+	"mspi1_dout",
+	"mspi1_cs0",
+	"mspi1_cs1",
+	"mspi1_cs2",
+	"mspi1_cs3",
+	"mspi1_cs4",
+	"mspi1_cs5",
+	"mspi1_cs6",
+	"mspi1_cs7",
+};
+
+static const char * const mspi2_groups[] = {
+	"mspi2_sck",
+	"mspi2_din",
+	"mspi2_dout",
+	"mspi2_cs0",
+	"mspi2_cs1",
+	"mspi2_cs2",
+	"mspi2_cs3",
+	"mspi2_cs4",
+	"mspi2_cs5",
+	"mspi2_cs6",
+	"mspi2_cs7",
+};
+
+static const char * const mspi3_groups[] = {
+	"mspi3_sck",
+	"mspi3_din",
+	"mspi3_dout",
+	"mspi3_cs0",
+	"mspi3_cs1",
+	"mspi3_cs2",
+	"mspi3_cs3",
+	"mspi3_cs4",
+	"mspi3_cs5",
+	"mspi3_cs6",
+	"mspi3_cs7",
+};
+
+static const char * const mspi4_groups[] = {
+	"mspi4_sck",
+	"mspi4_din",
+	"mspi4_dout",
+	"mspi4_cs0",
+	"mspi4_cs1",
+	"mspi4_cs2",
+	"mspi4_cs3",
+	"mspi4_cs4",
+	"mspi4_cs5",
+	"mspi4_cs6",
+	"mspi4_cs7",
+};
+
+static const char * const mspi5_groups[] = {
+	"mspi5_sck",
+	"mspi5_din",
+	"mspi5_dout",
+	"mspi5_cs0",
+	"mspi5_cs1",
+	"mspi5_cs2",
+	"mspi5_cs3",
+};
+
 static const struct sh_pfc_function pinmux_functions[] = {
 	SH_PFC_FUNCTION(tsn0),
 	SH_PFC_FUNCTION(tsn1),
@@ -2703,6 +3242,13 @@ static const struct sh_pfc_function pinmux_functions[] = {
 	SH_PFC_FUNCTION(canfd13),
 	SH_PFC_FUNCTION(canfd14),
 	SH_PFC_FUNCTION(canfd15),
+
+	SH_PFC_FUNCTION(mspi0),
+	SH_PFC_FUNCTION(mspi1),
+	SH_PFC_FUNCTION(mspi2),
+	SH_PFC_FUNCTION(mspi3),
+	SH_PFC_FUNCTION(mspi4),
+	SH_PFC_FUNCTION(mspi5),
 };
 
 static const struct pinmux_cfg_reg pinmux_config_regs[] = {
