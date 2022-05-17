@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/gpio/driver.h>
 #include <linux/i2c.h>
 #include <linux/kallsyms.h>
 #include <linux/module.h>
@@ -32,16 +33,28 @@
 #define REG_POWER_EN_EXP_BRD		BIT(1)
 #define REG_POWER_EN_GLOBAL		BIT(0)
 
+#define REG_CAN_GPIO_BASE	0x0040
+#define REG_CAN_GPIO_NR		8
+
+#define REG_MAX			0x0047
+
+#define CAN_GPIO_BASE		0
+#define CAN_GPIO_NR		64
+
+#define TOTAL_GPIO_NR		CAN_GPIO_NR
+
 /* ranges, in first..last form, that driver can read */
 static const struct regmap_range readable_ranges[] = {
 	regmap_reg_range(REG_PRODUCT,
 			 REG_FPGAVERSION + REG_FPGAVERSION_SIZE - 1),
 	regmap_reg_range(REG_DIPSW, REG_POWER_EN),
+	regmap_reg_range(REG_CAN_GPIO_BASE, REG_CAN_GPIO_BASE + REG_CAN_GPIO_NR - 1),
 };
 
 /* ranges, in first..last form, that driver can write */
 static const struct regmap_range writeable_ranges[] = {
 	regmap_reg_range(REG_RESET, REG_POWER_EN),
+	regmap_reg_range(REG_CAN_GPIO_BASE, REG_CAN_GPIO_BASE + REG_CAN_GPIO_NR - 1),
 };
 
 /* ranges, in first..last form, that hardware can change at runtime,
@@ -68,7 +81,7 @@ static const struct regmap_access_table fpga4000_volatile_table = {
 static const struct regmap_config fpga4000_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
-	.max_register = 0x0028,
+	.max_register = REG_MAX,
 	.rd_table = &fpga4000_readable_table,
 	.wr_table = &fpga4000_writeable_table,
 	.volatile_table = &fpga4000_volatile_table,
@@ -81,6 +94,8 @@ struct fpga4000 {
 	uint8_t version[REG_FPGAVERSION_SIZE];
 
 	struct notifier_block restart_nb;
+
+	struct gpio_chip gpio;
 };
 
 static int fpga4000_restart_handler(struct notifier_block *nb,
@@ -119,6 +134,47 @@ static void fpga4000_unsetup_poweroff(struct fpga4000 *fpga)
 			pm_power_off = NULL;
 
 		poweroff.regmap = NULL;
+	}
+}
+
+static int gpio_get_direction(struct gpio_chip *gc, unsigned int offset)
+{
+	if (offset >= CAN_GPIO_BASE && offset <= CAN_GPIO_BASE + CAN_GPIO_NR - 1)
+		return GPIO_LINE_DIRECTION_OUT;
+
+	return -EINVAL;
+}
+
+static int gpio_get(struct gpio_chip *gc, unsigned int offset)
+{
+	struct fpga4000 *fpga = container_of(gc, struct fpga4000, gpio);
+	unsigned int reg, mask, val;
+	int ret;
+
+	if (offset >= CAN_GPIO_BASE && offset <= CAN_GPIO_BASE + CAN_GPIO_NR - 1) {
+		reg = REG_CAN_GPIO_BASE + (offset / 8);
+		mask = 1 << (offset % 8);
+
+		ret = regmap_read(fpga->regmap, reg, &val);
+		if (ret < 0)
+			return ret;
+
+		return !!(val & mask);
+	}
+
+	return -EINVAL;
+}
+
+static void gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
+{
+	struct fpga4000 *fpga = container_of(gc, struct fpga4000, gpio);
+	unsigned int reg, mask;
+
+	if (offset >= CAN_GPIO_BASE && offset <= CAN_GPIO_BASE + CAN_GPIO_NR - 1) {
+		reg = REG_CAN_GPIO_BASE + (offset / 8);
+		mask = 1 << (offset % 8);
+
+		regmap_update_bits(fpga->regmap, reg, mask, value ? mask : 0);
 	}
 }
 
@@ -291,6 +347,22 @@ static int fpga4000_probe(struct i2c_client *client,
 		return ret;
 	}
 	dev_info_with_dump(dev, "version", fpga->version, REG_FPGAVERSION_SIZE);
+
+	fpga->gpio.label = client->name;
+	fpga->gpio.parent = dev;
+	fpga->gpio.owner = THIS_MODULE;
+	fpga->gpio.base = -1;
+	fpga->gpio.ngpio = TOTAL_GPIO_NR;
+	fpga->gpio.can_sleep = true;
+	fpga->gpio.get_direction = gpio_get_direction;
+	fpga->gpio.get = gpio_get;
+	fpga->gpio.set = gpio_set;
+
+	ret = devm_gpiochip_add_data(dev, &fpga->gpio, NULL);
+	if (ret) {
+		dev_err(dev, "register gpiochip: %pe\n", ERR_PTR(ret));
+		return ret;
+	}
 
 	fpga->restart_nb.notifier_call = fpga4000_restart_handler;
 	fpga->restart_nb.priority = 200;
