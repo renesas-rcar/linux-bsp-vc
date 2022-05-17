@@ -73,3 +73,33 @@
 		line-name = "TSN1-NO-WAKE";
 	}; */
 };
+
+/* SEL_CAN_SENT is at GPIO3_06 */
+
+&gpio6 {
+	/delete-node/ sel-can-sent;
+};
+
+&gpio3 {
+	sel-can-sent {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "SEL-CAN-SENT";
+	};
+};
+
+/* SEL_CAN_FLXRAY is at GPIO3_14 */
+
+&gpio6 {
+	/delete-node/ sel-can-flxray;
+};
+
+&gpio3 {
+	sel-can-flxray {
+		gpio-hog;
+		gpios = <14 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "SEL-CAN-FLXRAY";
+	};
+};
