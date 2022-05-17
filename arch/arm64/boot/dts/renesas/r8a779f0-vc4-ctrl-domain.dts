@@ -11,3 +11,217 @@
 
 #include "r8a779f0-vc4.dts"
 #include "r8a779f0-ctrl-domain.dtsi"
+
+&canfd0 {
+	status = "okay";
+
+	pinctrl-0 = <&canfd0_pins>;
+	pinctrl-names = "default";
+
+	channel0 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN0_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN0_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel1 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN1_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN1_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel2 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN2_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN2_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel3 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN3_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN3_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel4 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN4_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN4_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel5 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN5_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN5_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel6 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN6_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN6_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel7 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN7_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN7_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+};
+
+&canfd1 {
+	status = "okay";
+
+	pinctrl-0 = <&canfd1_pins>;
+	pinctrl-names = "default";
+
+	channel0 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN8_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN8_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel1 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN9_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN9_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel2 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN10_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN10_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel3 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN11_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN11_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel4 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN12_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN12_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel5 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN13_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN13_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel6 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN14_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN14_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+
+	channel7 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN15_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN15_STBZ GPIO_ACTIVE_HIGH>;
+		gpio-names = "EN", "STB_Z";
+	};
+};
+
+&gpio6 {
+	sel-can-sent {
+		gpio-hog;
+		gpios = <21 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "SEL-CAN-SENT";
+	};
+
+	sel-can-flxray {
+		gpio-hog;
+		gpios = <22 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "SEL-CAN-FLXRAY";
+	};
+};
+
+&pfc {
+	canfd0_pins: canfd0 {
+		channel0 {
+			groups = "canfd0_data";
+			function = "canfd0";
+		};
+		channel1 {
+			groups = "canfd1_data";
+			function = "canfd1";
+		};
+		channel2 {
+			groups = "canfd2_data";
+			function = "canfd2";
+		};
+		channel3 {
+			groups = "canfd3_data";
+			function = "canfd3";
+		};
+		channel4 {
+			groups = "canfd4_data";
+			function = "canfd4";
+		};
+		channel5 {
+			groups = "canfd5_data";
+			function = "canfd5";
+		};
+		channel6 {
+			groups = "canfd6_data";
+			function = "canfd6";
+		};
+		channel7 {
+			groups = "canfd7_data";
+			function = "canfd7";
+		};
+	};
+
+	canfd1_pins: canfd1 {
+		channel8 {
+			groups = "canfd8_data";
+			function = "canfd8";
+		};
+		channel9 {
+			groups = "canfd9_data";
+			function = "canfd9";
+		};
+		channel10 {
+			groups = "canfd10_data";
+			function = "canfd10";
+		};
+		channel11 {
+			groups = "canfd11_data";
+			function = "canfd11";
+		};
+		channel12 {
+			groups = "canfd12_data";
+			function = "canfd12";
+		};
+		channel13 {
+			groups = "canfd13_data";
+			function = "canfd13";
+		};
+		channel14 {
+			groups = "canfd14_data";
+			function = "canfd14";
+		};
+		channel15 {
+			groups = "canfd15_data";
+			function = "canfd15";
+		};
+	};
+};
