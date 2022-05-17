@@ -34,6 +34,8 @@
 #include <linux/clk.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/bitmap.h>
 #include <linux/bitops.h>
 #include <linux/iopoll.h>
@@ -565,6 +567,8 @@ struct rcar_canfd_channel {
 	struct rcar_canfd_global *gpriv;	/* Controller reference */
 	void __iomem *base;			/* Register base address */
 	struct napi_struct napi;
+	int gpiod_count;
+	struct gpio_desc **gpiod;
 	u8  tx_len[RCANFD_FIFO_DEPTH];		/* For net stats */
 	u32 tx_head;				/* Incremented on xmit */
 	u32 tx_tail;				/* Incremented on xmit done */
@@ -1545,7 +1549,10 @@ static int rcar_canfd_open(struct net_device *ndev)
 {
 	struct rcar_canfd_channel *priv = netdev_priv(ndev);
 	struct rcar_canfd_global *gpriv = priv->gpriv;
-	int err;
+	int err, i;
+
+	for (i = 0; i < priv->gpiod_count; i++)
+		gpiod_set_value_cansleep(priv->gpiod[i], 1);
 
 	/* Peripheral clock is already enabled in probe */
 	err = clk_prepare_enable(gpriv->can_clk);
@@ -1573,6 +1580,10 @@ out_close:
 out_can_clock:
 	clk_disable_unprepare(gpriv->can_clk);
 out_clock:
+
+	for (i = priv->gpiod_count; i > 0; i--)
+		gpiod_set_value_cansleep(priv->gpiod[i - 1], 0);
+
 	return err;
 }
 
@@ -1615,6 +1626,7 @@ static int rcar_canfd_close(struct net_device *ndev)
 {
 	struct rcar_canfd_channel *priv = netdev_priv(ndev);
 	struct rcar_canfd_global *gpriv = priv->gpriv;
+	int i;
 
 	netif_stop_queue(ndev);
 	rcar_canfd_stop(ndev);
@@ -1622,6 +1634,10 @@ static int rcar_canfd_close(struct net_device *ndev)
 	clk_disable_unprepare(gpriv->can_clk);
 	close_candev(ndev);
 	can_led_event(ndev, CAN_LED_EVENT_STOP);
+
+	for (i = priv->gpiod_count; i > 0; i--)
+		gpiod_set_value_cansleep(priv->gpiod[i - 1], 0);
+
 	return 0;
 }
 
@@ -1914,13 +1930,22 @@ static const struct net_device_ops rcar_canfd_netdev_ops = {
 	.ndo_change_mtu = can_change_mtu,
 };
 
+static struct device_node *rcar_canfd_channel_subnode(struct platform_device *pdev, u32 ch)
+{
+	char name[16];
+
+	snprintf(name, sizeof(name), "channel%u", ch);
+	return of_get_child_by_name(pdev->dev.of_node, name);
+}
+
 static int rcar_canfd_channel_probe(struct rcar_canfd_global *gpriv, u32 ch,
 				    u32 fcan_freq)
 {
 	struct platform_device *pdev = gpriv->pdev;
 	struct rcar_canfd_channel *priv;
 	struct net_device *ndev;
-	int err = -ENODEV;
+	struct device_node *np;
+	int err, i;
 
 	ndev = alloc_candev(sizeof(*priv), RCANFD_FIFO_DEPTH);
 	if (!ndev) {
@@ -1928,6 +1953,28 @@ static int rcar_canfd_channel_probe(struct rcar_canfd_global *gpriv, u32 ch,
 		return -ENOMEM;
 	}
 	priv = netdev_priv(ndev);
+
+	np = rcar_canfd_channel_subnode(pdev, ch);
+	err = of_gpio_count(np);
+	if (err > 0) {
+		priv->gpiod_count = err;
+		priv->gpiod = devm_kzalloc(&pdev->dev,
+				priv->gpiod_count * sizeof(*priv->gpiod), GFP_KERNEL);
+		if (!priv->gpiod) {
+			err = -ENOMEM;
+			goto fail;
+		}
+		for (i = 0; i < priv->gpiod_count; i++) {
+			priv->gpiod[i] = devm_fwnode_gpiod_get_index(&pdev->dev,
+				of_fwnode_handle(np), NULL, i, GPIOD_OUT_LOW,
+				netdev_name(ndev));
+			if (IS_ERR(priv->gpiod[i])) {
+				err = PTR_ERR(priv->gpiod[i]);
+				goto fail;
+			}
+		}
+	}
+	of_node_put(np);
 
 	ndev->netdev_ops = &rcar_canfd_netdev_ops;
 	ndev->flags |= IFF_ECHO;
@@ -2048,10 +2095,6 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 	int err, ch_irq, g_irq, i;
 	bool fdmode = true;			/* CAN FD only mode - default */
 	const struct rcar_canfd_of_data *of_data;
-	char *name[RCANFD_NUM_CHANNELS] = {
-		"channel0", "channel1", "channel2", "channel3",
-		"channel4", "channel5", "channel6", "channel7",
-		};
 	int g_err_irq, g_recc_irq;
 
 	if (of_property_read_bool(pdev->dev.of_node, "renesas,no-can-fd"))
@@ -2062,9 +2105,10 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	for (i = 0; i < of_data->max_channels; i++) {
-		of_child = of_get_child_by_name(pdev->dev.of_node, name[i]);
+		of_child = rcar_canfd_channel_subnode(pdev, i);
 		if (of_child && of_device_is_available(of_child))
 			channels_mask |= BIT(i);	/* Channel i */
+		of_node_put(of_child);
 	}
 
 	switch (of_data->chip_id) {
