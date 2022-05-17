@@ -9,6 +9,7 @@
 
 #include "r8a779f0.dtsi"
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/mfd/renesas-vc4-fpga4000.h>
 
 / {
 	model = "Renesas VC4 board based on r8a779f0";
@@ -159,9 +160,12 @@
 		pagesize = <8>;
 	};
 
-	fpga4000@71 {
+	fpga4000: fpga4000@71 {
 		compatible = "renesas,vc4-fpga4000";
 		reg = <0x71>;
+
+		gpio-controller;
+		#gpio-cells = <2>;
 	};
 };
 
