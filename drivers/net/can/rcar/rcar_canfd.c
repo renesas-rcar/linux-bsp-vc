@@ -95,11 +95,11 @@
 
 /* AFL Rx rules registers */
 
-/* RSCFDnCFDGAFLCFG0 / RSCFDnGAFLCFG0 */
-#define RCANFD_GAFLCFG_SETRNC(n, x)	(((x) & 0xff) << (24 - n * 8))
-#define RCANFD_GAFLCFG_GETRNC(n, x)	(((x) >> (24 - n * 8)) & 0xff)
-#define RCANFD_V3U_GAFLCFG_SETRNC(n, x)	(((x) & 0x1ff) << (16 - (n) * 16))
-#define RCANFD_V3U_GAFLCFG_GETRNC(n, x)	(((x) >> (16 - (n) * 16)) & 0x1ff)
+/* RSCFDnCFDGAFLCFGx / RSCFDnGAFLCFGx */
+#define RCANFD_GAFLCFG_RNC_MASK		0xff
+#define RCANFD_V3U_GAFLCFG_RNC_MASK	0x1ff
+#define RCANFD_GAFLCFG_RNC_SHIFT(n)	(((n) & 1) ? 24 : 16)
+#define RCANFD_V3U_GAFLCFG_RNC_SHIFT(n)	(((n) & 1) ? 16 : 0)
 
 /* RSCFDnCFDGAFLECTR / RSCFDnGAFLECTR */
 #define RCANFD_GAFLECTR_AFLDAE		BIT(8)
@@ -311,8 +311,7 @@
 /* RSCFDnCFDGAFLECTR / RSCFDnGAFLECTR */
 #define RCANFD_GAFLECTR			(0x0098)
 /* RSCFDnCFDGAFLCFG0 / RSCFDnGAFLCFG0 */
-#define RCANFD_GAFLCFG0			(0x009c)
-#define RCANFD_V3U_GAFLCFG(ch)		(0x009c + (0x04 * ((ch) / 2)))
+#define RCANFD_GAFLCFG(ch)		(0x009c + (0x04 * ((ch) / 2)))
 /* RSCFDnCFDGAFLCFG1 / RSCFDnGAFLCFG1 */
 #define RCANFD_GAFLCFG1			(0x00a0)
 /* RSCFDnCFDRMNB / RSCFDnRMNB */
@@ -539,7 +538,7 @@
 #define RCANFD_CHANNELS_MASK		BIT((RCANFD_NUM_CHANNELS) - 1)
 
 #define RCANFD_GAFL_PAGENUM(entry)	((entry) / 16)
-#define RCANFD_CHANNEL_NUMRULES		1	/* only one rule per channel */
+#define RCANFD_GAFL_PAGEOFS(entry)	((entry) % 16)
 
 /* Rx FIFO is a global resource of the controller. There are 8 such FIFOs
  * available. Each channel gets a dedicated Rx FIFO (i.e.) the channel
@@ -804,6 +803,8 @@ static int rcar_canfd_reset_controller(struct rcar_canfd_global *gpriv)
 static void rcar_canfd_configure_controller(struct rcar_canfd_global *gpriv)
 {
 	u32 cfg, ch;
+	int shift;
+	u32 mask;
 
 	/* Global configuration settings */
 
@@ -831,45 +832,71 @@ static void rcar_canfd_configure_controller(struct rcar_canfd_global *gpriv)
 				      RCANFD_CCTR_BOM_MASK,
 				      RCANFD_CCTR_BOM_BENTRY);
 	}
+
+	/* For all channels, write zeroes to RNC fields.
+	 *
+	 * This field must be initialized for all channels, because hardware
+	 * uses RNC of channels 0..(N-1) to locate AFL for channel N
+	 */
+	for (ch = 0; ch < gpriv->max_channels; ch++) {
+		if (is_gen4(gpriv)) {
+			shift = RCANFD_V3U_GAFLCFG_RNC_SHIFT(ch);
+			mask = RCANFD_V3U_GAFLCFG_RNC_MASK;
+		} else {
+			shift = RCANFD_GAFLCFG_RNC_SHIFT(ch);
+			mask = RCANFD_GAFLCFG_RNC_MASK;
+		}
+		rcar_canfd_clear_bit(gpriv->base, RCANFD_GAFLCFG(ch),
+				     mask << shift);
+	}
 }
 
 static void rcar_canfd_configure_afl_rules(struct rcar_canfd_global *gpriv,
 					   u32 ch)
 {
 	u32 cfg;
-	int offset, start, page, num_rules = RCANFD_CHANNEL_NUMRULES;
-	u32 ridx = ch + RCANFD_RFFIFO_IDX;
+	int shift, mask, offset, start, page, in_page;
+	u32 k, ridx = ch + RCANFD_RFFIFO_IDX;
 
-	if (ch == 0) {
-		start = 0; /* Channel 0 always starts from 0th rule */
-	} else {
-		/* Get number of Channel 0 rules and adjust */
-		cfg = rcar_canfd_read(gpriv->base, RCANFD_V3U_GAFLCFG(ch));
-		if (is_gen4(gpriv))
-			start = ch * num_rules;
-		else
-			start = RCANFD_GAFLCFG_GETRNC(0, cfg);
+	/* Find number of rules used by previous channels */
+	start = 0;
+	for (k = 0; k < ch; k++) {
+		if (!(gpriv->channels_mask & BIT(k)))
+			continue;
+		if (is_gen4(gpriv)) {
+			shift = RCANFD_V3U_GAFLCFG_RNC_SHIFT(k);
+			mask = RCANFD_V3U_GAFLCFG_RNC_MASK;
+		} else {
+			shift = RCANFD_GAFLCFG_RNC_SHIFT(k);
+			mask = RCANFD_GAFLCFG_RNC_MASK;
+		}
+		cfg = rcar_canfd_read(gpriv->base, RCANFD_GAFLCFG(k));
+		start += (cfg >> shift) & mask;
 	}
+
+	/* Write number of rules (1) for channel */
+	if (is_gen4(gpriv)) {
+		shift = RCANFD_V3U_GAFLCFG_RNC_SHIFT(ch);
+		mask = RCANFD_V3U_GAFLCFG_RNC_MASK;
+	} else {
+		shift = RCANFD_GAFLCFG_RNC_SHIFT(ch);
+		mask = RCANFD_GAFLCFG_RNC_MASK;
+	}
+	rcar_canfd_update_bit(gpriv->base, RCANFD_GAFLCFG(ch),
+			      mask << shift, 1 << shift);
 
 	/* Enable write access to entry */
 	page = RCANFD_GAFL_PAGENUM(start);
+	in_page = RCANFD_GAFL_PAGEOFS(start);
 
 	if (is_gen4(gpriv))
-		rcar_canfd_set_bit(gpriv->base, RCANFD_GAFLECTR,
-				   (RCANFD_V3U_GAFLECTR_AFLPN(page) |
+		rcar_canfd_write(gpriv->base, RCANFD_GAFLECTR,
+				 (RCANFD_V3U_GAFLECTR_AFLPN(page) |
 					RCANFD_GAFLECTR_AFLDAE));
 	else
-		rcar_canfd_set_bit(gpriv->base, RCANFD_GAFLECTR,
-				   (RCANFD_GAFLECTR_AFLPN(page) |
+		rcar_canfd_write(gpriv->base, RCANFD_GAFLECTR,
+				 (RCANFD_GAFLECTR_AFLPN(page) |
 					RCANFD_GAFLECTR_AFLDAE));
-
-	/* Write number of rules for channel */
-	if (is_gen4(gpriv))
-		rcar_canfd_set_bit(gpriv->base, RCANFD_V3U_GAFLCFG(ch),
-				   RCANFD_V3U_GAFLCFG_SETRNC(ch, num_rules));
-	else
-		rcar_canfd_set_bit(gpriv->base, RCANFD_GAFLCFG0,
-				   RCANFD_GAFLCFG_SETRNC(ch, num_rules));
 
 	if (is_gen4(gpriv)) {
 		offset = RCANFD_V3U_GAFL_OFFSET;
@@ -881,18 +908,17 @@ static void rcar_canfd_configure_afl_rules(struct rcar_canfd_global *gpriv,
 	}
 
 	/* Accept all IDs */
-	rcar_canfd_write(gpriv->base, RCANFD_GAFLID(offset, start), 0);
+	rcar_canfd_write(gpriv->base, RCANFD_GAFLID(offset, in_page), 0);
 	/* IDE or RTR is not considered for matching */
-	rcar_canfd_write(gpriv->base, RCANFD_GAFLM(offset, start), 0);
+	rcar_canfd_write(gpriv->base, RCANFD_GAFLM(offset, in_page), 0);
 	/* Any data length accepted */
-	rcar_canfd_write(gpriv->base, RCANFD_GAFLP0(offset, start), 0);
+	rcar_canfd_write(gpriv->base, RCANFD_GAFLP0(offset, in_page), 0);
 	/* Place the msg in corresponding Rx FIFO entry */
-	rcar_canfd_set_bit(gpriv->base, RCANFD_GAFLP1(offset, start),
+	rcar_canfd_set_bit(gpriv->base, RCANFD_GAFLP1(offset, in_page),
 			   RCANFD_GAFLP1_GAFLFDP(ridx));
 
 	/* Disable write access to page */
-	rcar_canfd_clear_bit(gpriv->base,
-			     RCANFD_GAFLECTR, RCANFD_GAFLECTR_AFLDAE);
+	rcar_canfd_write(gpriv->base, RCANFD_GAFLECTR, 0);
 }
 
 static void rcar_canfd_configure_rx(struct rcar_canfd_global *gpriv, u32 ch)
