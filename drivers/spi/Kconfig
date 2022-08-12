@@ -658,6 +658,13 @@ config SPI_RSPI
 	help
 	  SPI driver for Renesas RSPI and QSPI blocks.
 
+config SPI_RENESAS_MSPI
+	tristate "Renesas MSPI controller"
+	depends on ARCH_RENESAS || COMPILE_TEST
+	help
+	  SPI driver for Renesas MSPI controller found in control domain
+	  of R-Car S4.
+
 config SPI_QCOM_QSPI
 	tristate "QTI QSPI controller"
 	depends on ARCH_QCOM
