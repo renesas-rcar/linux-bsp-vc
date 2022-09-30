@@ -4,10 +4,8 @@
 #
 
 obj-$(CONFIG_X86)		+= x86/
+obj-$(CONFIG_MELLANOX_PLATFORM)	+= mellanox/
 obj-$(CONFIG_MIPS)		+= mips/
-obj-$(CONFIG_OLPC)		+= olpc/
+obj-$(CONFIG_OLPC_EC)		+= olpc/
 obj-$(CONFIG_GOLDFISH)		+= goldfish/
 obj-$(CONFIG_CHROME_PLATFORMS)	+= chrome/
-# A.Kamal Add Renesas VCFPGA PCI support
-obj-$(CONFIG_RENESAS_VCFPGA_PLATFORM)	+= renesas/vcfpga/
-# A.Kamal Add Renesas VCFPGA PCI support

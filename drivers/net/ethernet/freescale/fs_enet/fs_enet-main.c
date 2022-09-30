@@ -40,9 +40,9 @@
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 #include <linux/of_net.h>
+#include <linux/pgtable.h>
 
 #include <linux/vmalloc.h>
-#include <asm/pgtable.h>
 #include <asm/irq.h>
 #include <linux/uaccess.h>
 
@@ -53,7 +53,6 @@
 MODULE_AUTHOR("Pantelis Antoniou <panto@intracom.gr>");
 MODULE_DESCRIPTION("Freescale Ethernet Driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRV_MODULE_VERSION);
 
 static int fs_enet_debug = -1; /* -1 == use FS_ENET_DEF_MSG_ENABLE as value */
 module_param(fs_enet_debug, int, 0);
@@ -481,7 +480,8 @@ static struct sk_buff *tx_skb_align_workaround(struct net_device *dev,
 }
 #endif
 
-static int fs_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t
+fs_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct fs_enet_private *fep = netdev_priv(dev);
 	cbd_t __iomem *bdp;
@@ -500,7 +500,7 @@ static int fs_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		nr_frags = skb_shinfo(skb)->nr_frags;
 		frag = skb_shinfo(skb)->frags;
 		for (i = 0; i < nr_frags; i++, frag++) {
-			if (!IS_ALIGNED(frag->page_offset, 4)) {
+			if (!IS_ALIGNED(skb_frag_off(frag), 4)) {
 				is_aligned = 0;
 				break;
 			}
@@ -562,10 +562,13 @@ static int fs_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			BD_ENET_TX_TC);
 		CBDS_SC(bdp, BD_ENET_TX_READY);
 
-		if ((CBDR_SC(bdp) & BD_ENET_TX_WRAP) == 0)
-			bdp++, curidx++;
-		else
-			bdp = fep->tx_bd_base, curidx = 0;
+		if ((CBDR_SC(bdp) & BD_ENET_TX_WRAP) == 0) {
+			bdp++;
+			curidx++;
+		} else {
+			bdp = fep->tx_bd_base;
+			curidx = 0;
+		}
 
 		len = skb_frag_size(frag);
 		CBDW_BUFADDR(bdp, skb_frag_dma_map(fep->dev, frag, 0, len,
@@ -613,9 +616,11 @@ static int fs_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 }
 
-static void fs_timeout(struct net_device *dev)
+static void fs_timeout_work(struct work_struct *work)
 {
-	struct fs_enet_private *fep = netdev_priv(dev);
+	struct fs_enet_private *fep = container_of(work, struct fs_enet_private,
+						   timeout_work);
+	struct net_device *dev = fep->ndev;
 	unsigned long flags;
 	int wake = 0;
 
@@ -627,7 +632,6 @@ static void fs_timeout(struct net_device *dev)
 		phy_stop(dev->phydev);
 		(*fep->ops->stop)(dev);
 		(*fep->ops->restart)(dev);
-		phy_start(dev->phydev);
 	}
 
 	phy_start(dev->phydev);
@@ -637,6 +641,13 @@ static void fs_timeout(struct net_device *dev)
 
 	if (wake)
 		netif_wake_queue(dev);
+}
+
+static void fs_timeout(struct net_device *dev, unsigned int txqueue)
+{
+	struct fs_enet_private *fep = netdev_priv(dev);
+
+	schedule_work(&fep->timeout_work);
 }
 
 /*-----------------------------------------------------------------------------
@@ -759,6 +770,7 @@ static int fs_enet_close(struct net_device *dev)
 	netif_stop_queue(dev);
 	netif_carrier_off(dev);
 	napi_disable(&fep->napi);
+	cancel_work_sync(&fep->timeout_work);
 	phy_stop(dev->phydev);
 
 	spin_lock_irqsave(&fep->lock, flags);
@@ -780,7 +792,6 @@ static void fs_get_drvinfo(struct net_device *dev,
 			    struct ethtool_drvinfo *info)
 {
 	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
 }
 
 static int fs_get_regs_len(struct net_device *dev)
@@ -872,14 +883,6 @@ static const struct ethtool_ops fs_ethtool_ops = {
 	.set_tunable = fs_set_tunable,
 };
 
-static int fs_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
-{
-	if (!netif_running(dev))
-		return -EINVAL;
-
-	return phy_mii_ioctl(dev->phydev, rq, cmd);
-}
-
 extern int fs_mii_connect(struct net_device *dev);
 extern void fs_mii_disconnect(struct net_device *dev);
 
@@ -897,7 +900,7 @@ static const struct net_device_ops fs_enet_netdev_ops = {
 	.ndo_start_xmit		= fs_enet_start_xmit,
 	.ndo_tx_timeout		= fs_timeout,
 	.ndo_set_rx_mode	= fs_set_multicast_list,
-	.ndo_do_ioctl		= fs_ioctl,
+	.ndo_do_ioctl		= phy_do_ioctl_running,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -1004,8 +1007,8 @@ static int fs_enet_probe(struct platform_device *ofdev)
 	spin_lock_init(&fep->tx_lock);
 
 	mac_addr = of_get_mac_address(ofdev->dev.of_node);
-	if (mac_addr)
-		memcpy(ndev->dev_addr, mac_addr, ETH_ALEN);
+	if (!IS_ERR(mac_addr))
+		ether_addr_copy(ndev->dev_addr, mac_addr);
 
 	ret = fep->ops->allocate_bd(ndev);
 	if (ret)
@@ -1019,11 +1022,10 @@ static int fs_enet_probe(struct platform_device *ofdev)
 
 	ndev->netdev_ops = &fs_enet_netdev_ops;
 	ndev->watchdog_timeo = 2 * HZ;
+	INIT_WORK(&fep->timeout_work, fs_timeout_work);
 	netif_napi_add(ndev, &fep->napi, fs_enet_napi, fpi->napi_weight);
 
 	ndev->ethtool_ops = &fs_ethtool_ops;
-
-	init_timer(&fep->phy_timer_list);
 
 	netif_carrier_off(ndev);
 
@@ -1044,8 +1046,7 @@ out_cleanup_data:
 out_free_dev:
 	free_netdev(ndev);
 out_put:
-	if (fpi->clk_per)
-		clk_disable_unprepare(fpi->clk_per);
+	clk_disable_unprepare(fpi->clk_per);
 out_deregister_fixed_link:
 	of_node_put(fpi->phy_node);
 	if (of_phy_is_fixed_link(ofdev->dev.of_node))
@@ -1066,8 +1067,7 @@ static int fs_enet_remove(struct platform_device *ofdev)
 	fep->ops->cleanup_data(ndev);
 	dev_set_drvdata(fep->dev, NULL);
 	of_node_put(fep->fpi->phy_node);
-	if (fep->fpi->clk_per)
-		clk_disable_unprepare(fep->fpi->clk_per);
+	clk_disable_unprepare(fep->fpi->clk_per);
 	if (of_phy_is_fixed_link(ofdev->dev.of_node))
 		of_phy_deregister_fixed_link(ofdev->dev.of_node);
 	free_netdev(ndev);

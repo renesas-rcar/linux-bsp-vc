@@ -1,17 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * R-Car SYSC Power management support
  *
  * Copyright (C) 2014  Magnus Damm
  * Copyright (C) 2015-2017 Glider bvba
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
+ * Copyright (C) 2021 Renesas Electronics Corporation
  */
 
 #include <dt-bindings/power/r8a7795-sysc.h>
 #include <dt-bindings/power/r8a7796-sysc.h>
 #include <dt-bindings/power/r8a77965-sysc.h>
+#include <dt-bindings/power/r8a77980-sysc.h>
+#include <dt-bindings/power/r8a779f0-sysc.h>
 #include <linux/clk/renesas.h>
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -63,6 +63,27 @@
 
 #define RCAR_PD_ALWAYS_ON	32	/* Always-on power area */
 
+/* Number of areas need to fixup data when enable PDMODE */
+#define NUM_FIXUP_AREAS		14
+
+/* Module Stop Control/Status Register */
+#define MSTPSR5_ADDR           0xE615003C
+#define MSTPSR8_ADDR           0xE61509A0
+#define SMSTPCR5_ADDR          0xE6150144
+#define SMSTPCR8_ADDR          0xE6150990
+
+/* Mask for IMP clock in Module Stop Control/Status Register 8 */
+#define IMPx8_MASK                     0xff000000
+
+/* Mask for IMP clock in Module Stop Control/Status Register 5 */
+#define IMPx5_MASK                     0xbf200001
+
+struct rcar_sysc_ch {
+	u16 chan_offs;
+	u8 chan_bit;
+	u8 isr_bit;
+};
+
 static
 const struct soc_device_attribute rcar_sysc_quirks_match[] __initconst = {
 	{
@@ -94,27 +115,62 @@ const struct soc_device_attribute rcar_sysc_quirks_match[] __initconst = {
 	{ /* sentinel */ }
 };
 
+/* Fixups for R-Car V3H revision */
+static const struct soc_device_attribute r8a77980[] __initconst = {
+		{ .soc_id = "r8a77980"},
+		{ /* sentinel */ }
+};
+
+static struct
+rcar_sysc_area r8a77980_fixup_areas[3][NUM_FIXUP_AREAS] __initdata = {
+{
+	/* Fix-up area for PDMODE = 1 */
+	{ "a2ir0",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir1",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir2",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir3",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir4",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir5",	0x400, 5, R8A77980_PD_A2IR5,	R8A77980_PD_A3IR },
+	{ "a2sc0",	0x400, 6, R8A77980_PD_A2SC0,	R8A77980_PD_A3IR },
+	{ "a2sc1",	0x400, 6, R8A77980_PD_A2SC0,	R8A77980_PD_A3IR },
+	{ "a2sc2",	0x400, 6, R8A77980_PD_A2SC0,	R8A77980_PD_A3IR },
+	{ "a2sc3",	0x400, 6, R8A77980_PD_A2SC0,	R8A77980_PD_A3IR },
+	{ "a2sc4",	0x400, 6, R8A77980_PD_A2SC0,	R8A77980_PD_A3IR },
+	{ "a2dp0",	0x400, 11, R8A77980_PD_A2DP0,	R8A77980_PD_A3IR },
+	{ "a2dp1",	0x400, 11, R8A77980_PD_A2DP0,	R8A77980_PD_A3IR },
+	{ "a2cn",	0x400, 13, R8A77980_PD_A2CN,	R8A77980_PD_A3IR },
+},
+{
+    /* No handle for PDMODE = 2 */
+},
+{
+	/* Fix-up area for PDMODE = 3 */
+	{ "a2ir0",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir1",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir2",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir3",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir4",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2ir5",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2sc0",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2sc1",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2sc2",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2sc3",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2sc4",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2dp0",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2dp1",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+	{ "a2cn",	0x400, 0, R8A77980_PD_A2IR0,	R8A77980_PD_A3IR },
+}
+
+};
+
 static u32 rcar_sysc_quirks;
+static bool has_clk_crl;
 
 static void __iomem *rcar_sysc_base;
 static DEFINE_SPINLOCK(rcar_sysc_lock); /* SMP CPUs + I/O devices */
-static struct rcar_sysc_extra_regs *extra_regs;
+static u32 rcar_sysc_extmask_offs, rcar_sysc_extmask_val;
 
 static const char *to_pd_name(const struct rcar_sysc_ch *sysc_ch);
-
-static void rcar_sysc_extmask_ctrl(bool on)
-{
-	u32 extmask_msks = 0;
-
-	if (!extra_regs || !extra_regs->sysc_extmask_msks)
-		return;
-
-	if (on)
-		extmask_msks = extra_regs->sysc_extmask_msks;
-
-	iowrite32(extmask_msks,
-		  rcar_sysc_base + extra_regs->sysc_extmask_offs);
-}
 
 static int rcar_sysc_pwr_on_off(const struct rcar_sysc_ch *sysc_ch, bool on)
 {
@@ -140,9 +196,9 @@ static int rcar_sysc_pwr_on_off(const struct rcar_sysc_ch *sysc_ch, bool on)
 		return -EAGAIN;
 
 	/* Start W/A for A3VP, A3VC, and A3IR domains */
-	if (!on && (!strcmp("a3vp", to_pd_name(sysc_ch))
-		|| !strcmp("a3ir", to_pd_name(sysc_ch))
-		|| !strcmp("a3vc", to_pd_name(sysc_ch))))
+	if (!on && (!strcmp("a3vp", to_pd_name(sysc_ch)) ||
+		    !strcmp("a3ir", to_pd_name(sysc_ch)) ||
+		    !strcmp("a3vc", to_pd_name(sysc_ch))))
 		udelay(1);
 
 	/* Submit power shutoff or power resume request */
@@ -163,7 +219,23 @@ static int rcar_sysc_power(const struct rcar_sysc_ch *sysc_ch, bool on)
 
 	spin_lock_irqsave(&rcar_sysc_lock, flags);
 
-	rcar_sysc_extmask_ctrl(1); /* set EXTMSK0 */
+	/*
+	 * Mask external power requests for CPU or 3DG domains
+	 */
+	if (rcar_sysc_extmask_val) {
+		iowrite32(rcar_sysc_extmask_val,
+			  rcar_sysc_base + rcar_sysc_extmask_offs);
+	}
+
+	/*
+	 * The interrupt source needs to be enabled, but masked, to prevent the
+	 * CPU from receiving it.
+	 */
+	iowrite32(ioread32(rcar_sysc_base + SYSCIMR) | isr_mask,
+		  rcar_sysc_base + SYSCIMR);
+	iowrite32(ioread32(rcar_sysc_base + SYSCIER) | isr_mask,
+		  rcar_sysc_base + SYSCIER);
+
 	iowrite32(isr_mask, rcar_sysc_base + SYSCISCR);
 
 	/* Submit power shutoff or resume request until it was accepted */
@@ -198,22 +270,14 @@ static int rcar_sysc_power(const struct rcar_sysc_ch *sysc_ch, bool on)
 	iowrite32(isr_mask, rcar_sysc_base + SYSCISCR);
 
  out:
-	rcar_sysc_extmask_ctrl(0); /* clear EXTMSK0 */
+	if (rcar_sysc_extmask_val)
+		iowrite32(0, rcar_sysc_base + rcar_sysc_extmask_offs);
+
 	spin_unlock_irqrestore(&rcar_sysc_lock, flags);
 
 	pr_debug("sysc power %s domain %d: %08x -> %d\n", on ? "on" : "off",
 		 sysc_ch->isr_bit, ioread32(rcar_sysc_base + SYSCISR), ret);
 	return ret;
-}
-
-int rcar_sysc_power_down(const struct rcar_sysc_ch *sysc_ch)
-{
-	return rcar_sysc_power(sysc_ch, false);
-}
-
-int rcar_sysc_power_up(const struct rcar_sysc_ch *sysc_ch)
-{
-	return rcar_sysc_power(sysc_ch, true);
 }
 
 static bool rcar_sysc_power_is_off(const struct rcar_sysc_ch *sysc_ch)
@@ -231,7 +295,7 @@ struct rcar_sysc_pd {
 	struct generic_pm_domain genpd;
 	struct rcar_sysc_ch ch;
 	unsigned int flags;
-	char name[0];
+	char name[];
 };
 
 static inline struct rcar_sysc_pd *to_rcar_pd(struct generic_pm_domain *d)
@@ -244,20 +308,90 @@ static inline const char *to_pd_name(const struct rcar_sysc_ch *sysc_ch)
 	return container_of(sysc_ch, struct rcar_sysc_pd, ch)->genpd.name;
 }
 
+/* On V3H, necessary to enable/disable IMP clock before A3IR on/off */
+static int  rcar_sysc_a3ir_clk_ctrl(bool clk_en)
+{
+		void __iomem *mstpsr5, *mstpsr8;
+		void __iomem *smstpcr5, *smstpcr8;
+		u32 val, timeout = 0;
+
+		smstpcr5 = ioremap(SMSTPCR5_ADDR, 0x04);
+		smstpcr8 = ioremap(SMSTPCR8_ADDR, 0x04);
+		mstpsr5 = ioremap(MSTPSR5_ADDR, 0x04);
+		mstpsr8 = ioremap(MSTPSR8_ADDR, 0x04);
+
+		if (clk_en) {
+			val = readl(smstpcr5) & ~IMPx5_MASK;
+			writel(val, smstpcr5);
+			val = readl(smstpcr8) & ~IMPx8_MASK;
+			writel(val, smstpcr8);
+
+			while ((readl(mstpsr5) & IMPx5_MASK) |
+				   (readl(mstpsr8) & IMPx8_MASK)) {
+				udelay(1);
+				timeout++;
+
+				if (timeout > 100)
+					break;
+			}
+		} else {
+			val = readl(smstpcr5) | IMPx5_MASK;
+			writel(val, smstpcr5);
+			val = readl(smstpcr8) | IMPx8_MASK;
+			writel(val, smstpcr8);
+
+			while (!((readl(mstpsr5) & IMPx5_MASK) &
+					(readl(mstpsr8) & IMPx8_MASK))) {
+				udelay(1);
+				timeout++;
+
+				if (timeout > 100)
+					break;
+				}
+	}
+
+	if (timeout > 100) {
+		pr_debug("%s : Fail in %s IMP clock\n", __func__,
+			 clk_en ? "enable" : "disable");
+		return -EBUSY;
+	}
+
+	iounmap(smstpcr5);
+	iounmap(smstpcr8);
+	iounmap(mstpsr5);
+	iounmap(mstpsr8);
+
+	return 0;
+}
+
 static int rcar_sysc_pd_power_off(struct generic_pm_domain *genpd)
 {
 	struct rcar_sysc_pd *pd = to_rcar_pd(genpd);
 
+	if (rcar_sysc_power_is_off(&pd->ch))
+		return 0;
+
+	/* Disable IMP clock before power off A3IR */
+	if (has_clk_crl && (!strcmp("a3ir", genpd->name)))
+		rcar_sysc_a3ir_clk_ctrl(false);
+
 	pr_debug("%s: %s\n", __func__, genpd->name);
-	return rcar_sysc_power_down(&pd->ch);
+	return rcar_sysc_power(&pd->ch, false);
 }
 
 static int rcar_sysc_pd_power_on(struct generic_pm_domain *genpd)
 {
 	struct rcar_sysc_pd *pd = to_rcar_pd(genpd);
 
+	if (!rcar_sysc_power_is_off(&pd->ch))
+		return 0;
+
+	/* Enable IMP clock before power on A3IR */
+	if (has_clk_crl && (!strcmp("a3ir", genpd->name)))
+		rcar_sysc_a3ir_clk_ctrl(true);
+
 	pr_debug("%s: %s\n", __func__, genpd->name);
-	return rcar_sysc_power_up(&pd->ch);
+	return rcar_sysc_power(&pd->ch, true);
 }
 
 static bool has_cpg_mstp;
@@ -266,7 +400,6 @@ static int __init rcar_sysc_pd_setup(struct rcar_sysc_pd *pd)
 {
 	struct generic_pm_domain *genpd = &pd->genpd;
 	const char *name = pd->genpd.name;
-	struct dev_power_governor *gov = &simple_qos_governor;
 	int error;
 
 	if (pd->flags & PD_CPU) {
@@ -317,10 +450,10 @@ static int __init rcar_sysc_pd_setup(struct rcar_sysc_pd *pd)
 		goto finalize;
 	}
 
-	rcar_sysc_power_up(&pd->ch);
+	rcar_sysc_power(&pd->ch, true);
 
 finalize:
-	error = pm_genpd_init(genpd, gov, false);
+	error = pm_genpd_init(genpd, &simple_qos_governor, false);
 	if (error)
 		pr_err("Failed to init PM domain %s: %d\n", name, error);
 
@@ -343,20 +476,15 @@ static void rcar_power_on_force(void)
 			if (!rcar_sysc_power_is_off(&pd->ch))
 				continue;
 
-			rcar_sysc_power_up(&pd->ch);
+			rcar_sysc_power(&pd->ch, true);
 		}
 	}
 }
 
-static u32 syscier_val, syscimr_val;
 #ifdef CONFIG_PM_SLEEP
 static void rcar_sysc_resume(void)
 {
 	pr_debug("%s\n", __func__);
-
-	/* Re-enable interrupts as init */
-	iowrite32(syscimr_val, rcar_sysc_base + SYSCIMR);
-	iowrite32(syscier_val, rcar_sysc_base + SYSCIER);
 
 	rcar_power_on_force();
 }
@@ -367,14 +495,31 @@ static struct syscore_ops rcar_sysc_syscore_ops = {
 #endif
 
 static const struct of_device_id rcar_sysc_matches[] __initconst = {
+#ifdef CONFIG_SYSC_R8A7742
+	{ .compatible = "renesas,r8a7742-sysc", .data = &r8a7742_sysc_info },
+#endif
 #ifdef CONFIG_SYSC_R8A7743
 	{ .compatible = "renesas,r8a7743-sysc", .data = &r8a7743_sysc_info },
+	/* RZ/G1N is identical to RZ/G2M w.r.t. power domains. */
+	{ .compatible = "renesas,r8a7744-sysc", .data = &r8a7743_sysc_info },
 #endif
 #ifdef CONFIG_SYSC_R8A7745
 	{ .compatible = "renesas,r8a7745-sysc", .data = &r8a7745_sysc_info },
 #endif
 #ifdef CONFIG_SYSC_R8A77470
 	{ .compatible = "renesas,r8a77470-sysc", .data = &r8a77470_sysc_info },
+#endif
+#ifdef CONFIG_SYSC_R8A774A1
+	{ .compatible = "renesas,r8a774a1-sysc", .data = &r8a774a1_sysc_info },
+#endif
+#ifdef CONFIG_SYSC_R8A774B1
+	{ .compatible = "renesas,r8a774b1-sysc", .data = &r8a774b1_sysc_info },
+#endif
+#ifdef CONFIG_SYSC_R8A774C0
+	{ .compatible = "renesas,r8a774c0-sysc", .data = &r8a774c0_sysc_info },
+#endif
+#ifdef CONFIG_SYSC_R8A774E1
+	{ .compatible = "renesas,r8a774e1-sysc", .data = &r8a774e1_sysc_info },
 #endif
 #ifdef CONFIG_SYSC_R8A7779
 	{ .compatible = "renesas,r8a7779-sysc", .data = &r8a7779_sysc_info },
@@ -396,8 +541,11 @@ static const struct of_device_id rcar_sysc_matches[] __initconst = {
 #ifdef CONFIG_SYSC_R8A7795
 	{ .compatible = "renesas,r8a7795-sysc", .data = &r8a7795_sysc_info },
 #endif
-#ifdef CONFIG_SYSC_R8A7796
-	{ .compatible = "renesas,r8a7796-sysc", .data = &r8a7796_sysc_info },
+#ifdef CONFIG_SYSC_R8A77960
+	{ .compatible = "renesas,r8a7796-sysc", .data = &r8a77960_sysc_info },
+#endif
+#ifdef CONFIG_SYSC_R8A77961
+	{ .compatible = "renesas,r8a77961-sysc", .data = &r8a77961_sysc_info },
 #endif
 #ifdef CONFIG_SYSC_R8A77965
 	{ .compatible = "renesas,r8a77965-sysc", .data = &r8a77965_sysc_info },
@@ -414,6 +562,9 @@ static const struct of_device_id rcar_sysc_matches[] __initconst = {
 #ifdef CONFIG_SYSC_R8A77995
 	{ .compatible = "renesas,r8a77995-sysc", .data = &r8a77995_sysc_info },
 #endif
+#ifdef CONFIG_SYSC_R8A779F0
+	{ .compatible = "renesas,r8a779f0-sysc", .data = &r8a779f0_sysc_info },
+#endif
 	{ /* sentinel */ }
 };
 
@@ -422,20 +573,41 @@ struct rcar_pm_domains {
 	struct generic_pm_domain *domains[RCAR_PD_ALWAYS_ON + 1];
 };
 
+static struct genpd_onecell_data *rcar_sysc_onecell_data;
+
+/* Fix up power domain area in case PDMODE != 0 */
+static void rcar_sysc_fixup_area(struct rcar_sysc_pd *pd, unsigned int mode)
+{
+	int i;
+
+	/* Convert PDMODE to fix-up array position */
+	mode = mode - 1;
+
+	for (i = 0; i < NUM_FIXUP_AREAS; i++) {
+		if (!strcmp(pd->genpd.name, r8a77980_fixup_areas[mode][i].name)) {
+			pd->ch.chan_offs = r8a77980_fixup_areas[mode][i].chan_offs;
+			pd->ch.chan_bit = r8a77980_fixup_areas[mode][i].chan_bit;
+			pd->ch.isr_bit = r8a77980_fixup_areas[mode][i].isr_bit;
+		}
+	}
+}
+
 static int __init rcar_sysc_pd_init(void)
 {
 	const struct rcar_sysc_info *info;
 	const struct of_device_id *match;
 	struct rcar_pm_domains *domains;
 	struct device_node *np;
-	u32 syscier, syscimr;
 	void __iomem *base;
-	unsigned int i;
+	unsigned int i, mode;
 	int error;
 	const struct soc_device_attribute *attr;
 
-	if (rcar_sysc_base)
-		return 0;
+	/* Implement for R-Car V3H only */
+	if (soc_device_match(r8a77980))
+		has_clk_crl = true;
+	else
+		has_clk_crl = false;
 
 	np = of_find_matching_node_and_match(NULL, rcar_sysc_matches, &match);
 	if (!np)
@@ -446,7 +618,7 @@ static int __init rcar_sysc_pd_init(void)
 	if (info->init) {
 		error = info->init();
 		if (error)
-			return error;
+			goto out_put;
 	}
 
 	has_cpg_mstp = of_find_compatible_node(NULL, NULL,
@@ -465,9 +637,9 @@ static int __init rcar_sysc_pd_init(void)
 
 	rcar_sysc_base = base;
 
-	/* Check and get extra registers */
-	if (info->extra_regs)
-		extra_regs = info->extra_regs;
+	/* Optional External Request Mask Register */
+	rcar_sysc_extmask_offs = info->extmask_offs;
+	rcar_sysc_extmask_val = info->extmask_val;
 
 	domains = kzalloc(sizeof(*domains), GFP_KERNEL);
 	if (!domains) {
@@ -477,31 +649,13 @@ static int __init rcar_sysc_pd_init(void)
 
 	domains->onecell_data.domains = domains->domains;
 	domains->onecell_data.num_domains = ARRAY_SIZE(domains->domains);
+	rcar_sysc_onecell_data = &domains->onecell_data;
 
-	for (i = 0, syscier = 0; i < info->num_areas; i++)
-		syscier |= BIT(info->areas[i].isr_bit);
+	if (info->mode)
+		mode = *info->mode;
+	else
+		mode = 0;	/* No handle PDMODE */
 
-	/*
-	 * Mask all interrupt sources to prevent the CPU from receiving them.
-	 * Make sure not to clear reserved bits that were set before.
-	 */
-	syscimr = ioread32(base + SYSCIMR);
-	syscimr |= syscier;
-	pr_debug("%pOF: syscimr = 0x%08x\n", np, syscimr);
-	iowrite32(syscimr, base + SYSCIMR);
-
-	/*
-	 * SYSC needs all interrupt sources enabled to control power.
-	 */
-	pr_debug("%pOF: syscier = 0x%08x\n", np, syscier);
-	iowrite32(syscier, base + SYSCIER);
-
-	syscier_val = syscier;
-	syscimr_val = syscimr;
-
-	/*
-	 * First, create all PM domains
-	 */
 	for (i = 0; i < info->num_areas; i++) {
 		const struct rcar_sysc_area *area = &info->areas[i];
 		struct rcar_sysc_pd *pd;
@@ -524,6 +678,9 @@ static int __init rcar_sysc_pd_init(void)
 		pd->ch.isr_bit = area->isr_bit;
 		pd->flags = area->flags;
 
+		if (mode)
+			rcar_sysc_fixup_area(pd, mode);
+
 		if (rcar_sysc_quirks & BIT(pd->ch.isr_bit))
 			pd->flags |= PD_NO_CR;
 
@@ -533,22 +690,17 @@ static int __init rcar_sysc_pd_init(void)
 
 		domains->domains[area->isr_bit] = &pd->genpd;
 		rcar_domains[i] = pd;
-	}
 
-	/*
-	 * Second, link all PM domains to their parents
-	 */
-	for (i = 0; i < info->num_areas; i++) {
-		const struct rcar_sysc_area *area = &info->areas[i];
-
-		if (!area->name || area->parent < 0)
+		if (area->parent < 0)
 			continue;
 
 		error = pm_genpd_add_subdomain(domains->domains[area->parent],
-					       domains->domains[area->isr_bit]);
-		if (error)
+					       &pd->genpd);
+		if (error) {
 			pr_warn("Failed to add PM subdomain %s to parent %u\n",
 				area->name, area->parent);
+			goto out_put;
+		}
 	}
 
 	rcar_power_on_force();
@@ -578,27 +730,38 @@ void __init rcar_sysc_nullify(struct rcar_sysc_area *areas,
 		}
 }
 
-void __init rcar_sysc_init(phys_addr_t base, u32 syscier)
+#ifdef CONFIG_ARCH_R8A7779
+static int rcar_sysc_power_cpu(unsigned int idx, bool on)
 {
-	u32 syscimr;
+	struct generic_pm_domain *genpd;
+	struct rcar_sysc_pd *pd;
+	unsigned int i;
 
-	if (!rcar_sysc_pd_init())
-		return;
+	if (!rcar_sysc_onecell_data)
+		return -ENODEV;
 
-	rcar_sysc_base = ioremap_nocache(base, PAGE_SIZE);
+	for (i = 0; i < rcar_sysc_onecell_data->num_domains; i++) {
+		genpd = rcar_sysc_onecell_data->domains[i];
+		if (!genpd)
+			continue;
 
-	/*
-	 * Mask all interrupt sources to prevent the CPU from receiving them.
-	 * Make sure not to clear reserved bits that were set before.
-	 */
-	syscimr = ioread32(rcar_sysc_base + SYSCIMR);
-	syscimr |= syscier;
-	pr_debug("%s: syscimr = 0x%08x\n", __func__, syscimr);
-	iowrite32(syscimr, rcar_sysc_base + SYSCIMR);
+		pd = to_rcar_pd(genpd);
+		if (!(pd->flags & PD_CPU) || pd->ch.chan_bit != idx)
+			continue;
 
-	/*
-	 * SYSC needs all interrupt sources enabled to control power.
-	 */
-	pr_debug("%s: syscier = 0x%08x\n", __func__, syscier);
-	iowrite32(syscier, rcar_sysc_base + SYSCIER);
+		return rcar_sysc_power(&pd->ch, on);
+	}
+
+	return -ENOENT;
 }
+
+int rcar_sysc_power_down_cpu(unsigned int cpu)
+{
+	return rcar_sysc_power_cpu(cpu, false);
+}
+
+int rcar_sysc_power_up_cpu(unsigned int cpu)
+{
+	return rcar_sysc_power_cpu(cpu, true);
+}
+#endif /* CONFIG_ARCH_R8A7779 */

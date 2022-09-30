@@ -5,10 +5,6 @@
  * Copyright (C) 2013 Johan Hovold <jhovold@gmail.com>
  * Copyright (C) 2009 Greg Kroah-Hartman <gregkh@suse.de>
  * Copyright (C) 2009 Novell Inc.
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License version
- *	2 as published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -39,6 +35,7 @@ static void symbol_int_callback(struct urb *urb)
 	struct symbol_private *priv = usb_get_serial_port_data(port);
 	unsigned char *data = urb->transfer_buffer;
 	int status = urb->status;
+	unsigned long flags;
 	int result;
 	int data_length;
 
@@ -77,7 +74,7 @@ static void symbol_int_callback(struct urb *urb)
 	}
 
 exit:
-	spin_lock(&priv->lock);
+	spin_lock_irqsave(&priv->lock, flags);
 
 	/* Continue trying to always read if we should */
 	if (!priv->throttled) {
@@ -88,7 +85,7 @@ exit:
 							__func__, result);
 	} else
 		priv->actually_throttled = true;
-	spin_unlock(&priv->lock);
+	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 static int symbol_open(struct tty_struct *tty, struct usb_serial_port *port)
@@ -195,4 +192,4 @@ static struct usb_serial_driver * const serial_drivers[] = {
 
 module_usb_serial_driver(serial_drivers, id_table);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

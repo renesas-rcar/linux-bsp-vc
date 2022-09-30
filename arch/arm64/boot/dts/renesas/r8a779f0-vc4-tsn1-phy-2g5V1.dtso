@@ -1,0 +1,40 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+&gpio4 {
+	tsn1-mux {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "TSN1-MUX";
+	};
+};
+
+&gpio3 {
+	tsn1-no-sleep {
+		gpio-hog;
+		gpios = <12 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN1-NO-SLEEP";
+	};
+};
+
+&gpio6 {
+	tsn1-no-wake {
+		gpio-hog;
+		gpios = <21 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN1-NO-WAKE";
+	};
+};
+
+&tsn1 {
+	phy-handle = <&tsn1_phy_2g5>;
+	phy-mode = "usxgmii";
+};
+
+&tsn1_phy_2g5 {
+	status = "okay";
+};

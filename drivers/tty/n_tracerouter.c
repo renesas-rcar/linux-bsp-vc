@@ -6,17 +6,6 @@
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
  * This trace router uses the Linux line discipline framework to route
  * trace data coming from a HW Modem to a PTI (Parallel Trace Module) port.
  * The solution is not specific to a HW modem and this line disciple can
@@ -129,7 +118,9 @@ static void n_tracerouter_close(struct tty_struct *tty)
  *	 -EINVAL
  */
 static ssize_t n_tracerouter_read(struct tty_struct *tty, struct file *file,
-				  unsigned char __user *buf, size_t nr) {
+				  unsigned char *buf, size_t nr,
+				  void **cookie, unsigned long offset)
+{
 	return -EINVAL;
 }
 

@@ -5,10 +5,6 @@
  * Copyright (C) 2008 Greg Kroah-Hartman <greg@kroah.com>
  * Copyright (C) 2010 Dan Williams <dcbw@redhat.com>
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
- *
  * Devices listed here usually provide a CDC ACM port on which normal modem
  * AT commands and PPP can be used.  But when that port is in-use by PPP it
  * cannot be used simultaneously for status or signal strength.  Instead, the
@@ -88,4 +84,4 @@ static struct usb_serial_driver * const serial_drivers[] = {
 };
 
 module_usb_serial_driver(serial_drivers, id_table);
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

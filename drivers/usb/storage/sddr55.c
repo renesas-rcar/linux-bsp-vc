@@ -8,20 +8,6 @@
  *
  * Current development and maintenance by:
  *   (c) 2002 Simon Munton
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/jiffies.h>
@@ -43,6 +29,7 @@
 MODULE_DESCRIPTION("Driver for SanDisk SDDR-55 SmartMedia reader");
 MODULE_AUTHOR("Simon Munton");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(USB_STORAGE);
 
 /*
  * The table of devices
@@ -567,8 +554,8 @@ static int sddr55_reset(struct us_data *us)
 
 static unsigned long sddr55_get_capacity(struct us_data *us) {
 
-	unsigned char uninitialized_var(manufacturerID);
-	unsigned char uninitialized_var(deviceID);
+	unsigned char manufacturerID;
+	unsigned char deviceID;
 	int result;
 	struct sddr55_card_info *info = (struct sddr55_card_info *)us->extra;
 
@@ -605,6 +592,7 @@ static unsigned long sddr55_get_capacity(struct us_data *us) {
 	case 0x64:
 		info->pageshift = 8;
 		info->smallpageshift = 1;
+		fallthrough;
 	case 0x5d: // 5d is a ROM card with pagesize 512.
 		return 0x00200000;
 
@@ -664,7 +652,7 @@ static int sddr55_read_map(struct us_data *us) {
 
 	numblocks = info->capacity >> (info->blockshift + info->pageshift);
 	
-	buffer = kmalloc( numblocks * 2, GFP_NOIO );
+	buffer = kmalloc_array(numblocks, 2, GFP_NOIO );
 	
 	if (!buffer)
 		return -1;
@@ -697,8 +685,8 @@ static int sddr55_read_map(struct us_data *us) {
 
 	kfree(info->lba_to_pba);
 	kfree(info->pba_to_lba);
-	info->lba_to_pba = kmalloc(numblocks*sizeof(int), GFP_NOIO);
-	info->pba_to_lba = kmalloc(numblocks*sizeof(int), GFP_NOIO);
+	info->lba_to_pba = kmalloc_array(numblocks, sizeof(int), GFP_NOIO);
+	info->pba_to_lba = kmalloc_array(numblocks, sizeof(int), GFP_NOIO);
 
 	if (info->lba_to_pba == NULL || info->pba_to_lba == NULL) {
 		kfree(info->lba_to_pba);

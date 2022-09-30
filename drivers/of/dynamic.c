@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Support for dynamic device trees.
  *
@@ -15,6 +16,11 @@
 #include <linux/proc_fs.h>
 
 #include "of_private.h"
+
+static struct device_node *kobj_to_device_node(struct kobject *kobj)
+{
+	return container_of(kobj, struct device_node, kobj);
+}
 
 /**
  * of_node_get() - Increment refcount of a node
@@ -42,28 +48,6 @@ void of_node_put(struct device_node *node)
 		kobject_put(&node->kobj);
 }
 EXPORT_SYMBOL(of_node_put);
-
-void __of_detach_node_sysfs(struct device_node *np)
-{
-	struct property *pp;
-
-	if (!IS_ENABLED(CONFIG_SYSFS))
-		return;
-
-	BUG_ON(!of_node_is_initialized(np));
-	if (!of_kset)
-		return;
-
-	/* only remove properties if on sysfs */
-	if (of_node_is_attached(np)) {
-		for_each_property_of_node(np, pp)
-			__of_sysfs_remove_bin_file(np, pp);
-		kobject_del(&np->kobj);
-	}
-
-	/* finally remove the kobj_init ref */
-	of_node_put(np);
-}
 
 static BLOCKING_NOTIFIER_HEAD(of_reconfig_chain);
 
@@ -221,15 +205,21 @@ static void __of_attach_node(struct device_node *np)
 	const __be32 *phandle;
 	int sz;
 
-	np->name = __of_get_property(np, "name", NULL) ? : "<NULL>";
-	np->type = __of_get_property(np, "device_type", NULL) ? : "<NULL>";
+	if (!of_node_check_flag(np, OF_OVERLAY)) {
+		np->name = __of_get_property(np, "name", NULL);
+		if (!np->name)
+			np->name = "<NULL>";
 
-	phandle = __of_get_property(np, "phandle", &sz);
-	if (!phandle)
-		phandle = __of_get_property(np, "linux,phandle", &sz);
-	if (IS_ENABLED(CONFIG_PPC_PSERIES) && !phandle)
-		phandle = __of_get_property(np, "ibm,phandle", &sz);
-	np->phandle = (phandle && (sz >= 4)) ? be32_to_cpup(phandle) : 0;
+		phandle = __of_get_property(np, "phandle", &sz);
+		if (!phandle)
+			phandle = __of_get_property(np, "linux,phandle", &sz);
+		if (IS_ENABLED(CONFIG_PPC_PSERIES) && !phandle)
+			phandle = __of_get_property(np, "ibm,phandle", &sz);
+		if (phandle && (sz >= 4))
+			np->phandle = be32_to_cpup(phandle);
+		else
+			np->phandle = 0;
+	}
 
 	np->child = NULL;
 	np->sibling = np->parent->child;
@@ -284,19 +274,18 @@ void __of_detach_node(struct device_node *np)
 	}
 
 	of_node_set_flag(np, OF_DETACHED);
+
+	/* race with of_find_node_by_phandle() prevented by devtree_lock */
+	__of_phandle_cache_inv_entry(np->phandle);
 }
 
 /**
  * of_detach_node() - "Unplug" a node from the device tree.
- *
- * The caller must hold a reference to the node.  The memory associated with
- * the node is not freed until its refcount goes to zero.
  */
 int of_detach_node(struct device_node *np)
 {
 	struct of_reconfig_data rd;
 	unsigned long flags;
-	int rc = 0;
 
 	memset(&rd, 0, sizeof(rd));
 	rd.dn = np;
@@ -311,9 +300,21 @@ int of_detach_node(struct device_node *np)
 
 	of_reconfig_notify(OF_RECONFIG_DETACH_NODE, &rd);
 
-	return rc;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(of_detach_node);
+
+static void property_list_free(struct property *prop_list)
+{
+	struct property *prop, *next;
+
+	for (prop = prop_list; prop != NULL; prop = next) {
+		next = prop->next;
+		kfree(prop->name);
+		kfree(prop->value);
+		kfree(prop);
+	}
+}
 
 /**
  * of_node_release() - release a dynamically allocated node
@@ -324,7 +325,6 @@ EXPORT_SYMBOL_GPL(of_detach_node);
 void of_node_release(struct kobject *kobj)
 {
 	struct device_node *node = kobj_to_device_node(kobj);
-	struct property *prop = node->properties;
 
 	/* We should never be releasing nodes that haven't been detached. */
 	if (!of_node_check_flag(node, OF_DETACHED)) {
@@ -335,18 +335,28 @@ void of_node_release(struct kobject *kobj)
 	if (!of_node_check_flag(node, OF_DYNAMIC))
 		return;
 
-	while (prop) {
-		struct property *next = prop->next;
-		kfree(prop->name);
-		kfree(prop->value);
-		kfree(prop);
-		prop = next;
+	if (of_node_check_flag(node, OF_OVERLAY)) {
 
-		if (!prop) {
-			prop = node->deadprops;
-			node->deadprops = NULL;
+		if (!of_node_check_flag(node, OF_OVERLAY_FREE_CSET)) {
+			/* premature refcount of zero, do not free memory */
+			pr_err("ERROR: memory leak before free overlay changeset,  %pOF\n",
+			       node);
+			return;
 		}
+
+		/*
+		 * If node->properties non-empty then properties were added
+		 * to this node either by different overlay that has not
+		 * yet been removed, or by a non-overlay mechanism.
+		 */
+		if (node->properties)
+			pr_err("ERROR: %s(), unexpected properties in %pOF\n",
+			       __func__, node);
 	}
+
+	property_list_free(node->properties);
+	property_list_free(node->deadprops);
+
 	kfree(node->full_name);
 	kfree(node->data);
 	kfree(node);
@@ -397,25 +407,24 @@ struct property *__of_prop_dup(const struct property *prop, gfp_t allocflags)
 
 /**
  * __of_node_dup() - Duplicate or create an empty device node dynamically.
- * @fmt: Format string (plus vargs) for new full name of the device node
+ * @np:		if not NULL, contains properties to be duplicated in new node
+ * @full_name:	string value to be duplicated into new node's full_name field
  *
- * Create an device tree node, either by duplicating an empty node or by allocating
- * an empty one suitable for further modification.  The node data are
- * dynamically allocated and all the node flags have the OF_DYNAMIC &
- * OF_DETACHED bits set. Returns the newly allocated node or NULL on out of
- * memory error.
+ * Create a device tree node, optionally duplicating the properties of
+ * another node.  The node data are dynamically allocated and all the node
+ * flags have the OF_DYNAMIC & OF_DETACHED bits set.
+ *
+ * Returns the newly allocated node or NULL on out of memory error.
  */
-struct device_node *__of_node_dup(const struct device_node *np, const char *fmt, ...)
+struct device_node *__of_node_dup(const struct device_node *np,
+				  const char *full_name)
 {
-	va_list vargs;
 	struct device_node *node;
 
 	node = kzalloc(sizeof(*node), GFP_KERNEL);
 	if (!node)
 		return NULL;
-	va_start(vargs, fmt);
-	node->full_name = kvasprintf(GFP_KERNEL, fmt, vargs);
-	va_end(vargs);
+	node->full_name = kstrdup(full_name, GFP_KERNEL);
 	if (!node->full_name) {
 		kfree(node);
 		return NULL;
@@ -449,6 +458,16 @@ struct device_node *__of_node_dup(const struct device_node *np, const char *fmt,
 
 static void __of_changeset_entry_destroy(struct of_changeset_entry *ce)
 {
+	if (ce->action == OF_RECONFIG_ATTACH_NODE &&
+	    of_node_check_flag(ce->np, OF_OVERLAY)) {
+		if (kref_read(&ce->np->kobj.kref) > 1) {
+			pr_err("ERROR: memory leak, expected refcount 1 instead of %d, of_node_get()/of_node_put() unbalanced - destroy cset entry: attach overlay node %pOF\n",
+			       kref_read(&ce->np->kobj.kref), ce->np);
+		} else {
+			of_node_set_flag(ce->np, OF_OVERLAY_FREE_CSET);
+		}
+	}
+
 	of_node_put(ce->np);
 	list_del(&ce->node);
 	kfree(ce);

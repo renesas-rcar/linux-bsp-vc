@@ -1,21 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  R-Car Gen3 THS thermal sensor driver
  *  Based on rcar_thermal.c and work from Hien Dang and Khiem Nguyen.
  *
  * Copyright (C) 2016 Renesas Electronics Corporation.
  * Copyright (C) 2016 Sang Engineering
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
  */
-#include <linux/bitfield.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
@@ -26,9 +16,9 @@
 #include <linux/pm_runtime.h>
 #include <linux/sys_soc.h>
 #include <linux/thermal.h>
-#include <linux/of.h>
 
 #include "thermal_core.h"
+#include "thermal_hwmon.h"
 
 /* Register offsets */
 #define REG_GEN3_IRQSTR		0x04
@@ -83,43 +73,8 @@
 
 #define TSC_MAX_NUM	3
 
-/** [ -------- Definition for thermal type b (Chapter B) **/
-/* Define thermal device type */
-#define RCAR_GEN3_THS_TYPE_A	1
-#define RCAR_GEN3_THS_TYPE_B	0
-
-#define is_ths_typeA	(ths_type == RCAR_GEN3_THS_TYPE_A)
-
-/* Define registers and values for thermal device type B */
-#define REG_GEN3_B_STR		0x000
-#define REG_GEN3_B_ENR		0x004
-#define REG_GEN3_B_INT_MASK	0x00C
-#define REG_GEN3_B_POSNEG	0x120
-#define REG_GEN3_B_THSCR	0x12C
-#define REG_GEN3_B_THSSR	0x130
-#define REG_GEN3_B_INTCTRL	0x134
-
-/* ENR */
-#define ENR_Tj00		BIT(0)
-#define ENR_Tj01		BIT(1)
-
-/* THSCR */
-#define THSCR_CPCTL		BIT(12)
-
-/* THSSR */
-#define CTEMP_B_MASK	GENMASK(5, 0)
-
-/* INTCTRL */
-#define CTEMP0_B_MASK	GENMASK(5, 0)
-#define CTEMP1_B_MASK	GENMASK(13, 8)
-
-/* -------------------------------------------------------]*/
-static unsigned int ths_type;
-static int ths_tj;
-static int tj_2;
-
 /* default THCODE values if FUSEs are missing */
-static int thcode[TSC_MAX_NUM][3] = {
+static int thcodes[TSC_MAX_NUM][3] = {
 	{ 3397, 2800, 2221 },
 	{ 3393, 2795, 2216 },
 	{ 3389, 2805, 2237 },
@@ -137,8 +92,9 @@ struct rcar_gen3_thermal_tsc {
 	void __iomem *base;
 	struct thermal_zone_device *zone;
 	struct equation_coefs coef;
-	bool irq_cap;
+	int tj_t;
 	int id; /* thermal channel id */
+	bool irq_cap;
 };
 
 struct rcar_gen3_thermal_priv {
@@ -185,15 +141,11 @@ static inline void rcar_gen3_thermal_write(struct rcar_gen3_thermal_tsc *tsc,
 #define RCAR3_THERMAL_GRAN 500 /* mili Celsius */
 
 /* no idea where these constants come from */
-#define THS_TJ_1	126 /* Use for H3 and M3N */
-#define THS_TJ_1_M3	116 /* Use for M3 */
+#define TJ_3 -41
 
-#define TJ_1 (ths_tj)		/* Tj_H: Contain THS_TJ_1 or THS_TJ_1_M3 */
-#define TJ_2 (INT_FIXPT(tj_2))	/* Tj_T */
-#define TJ_3 -41		/* Tj_L */
-
-static void rcar_gen3_thermal_calc_coefs(struct equation_coefs *coef,
-					 int *ptat, int *thcode)
+static void rcar_gen3_thermal_calc_coefs(struct rcar_gen3_thermal_tsc *tsc,
+					 int *ptat, const int *thcode,
+					 int ths_tj_1)
 {
 	/* TODO: Find documentation and document constant calculation formula */
 
@@ -201,16 +153,16 @@ static void rcar_gen3_thermal_calc_coefs(struct equation_coefs *coef,
 	 * Division is not scaled in BSP and if scaled it might overflow
 	 * the dividend (4095 * 4095 << 14 > INT_MAX) so keep it unscaled
 	 */
-	tj_2 = (FIXPT_INT((ptat[1] - ptat[2]) * (TJ_1 - TJ_3))
-		/ (ptat[0] - ptat[2])) + FIXPT_INT(TJ_3);
+	tsc->tj_t = (FIXPT_INT((ptat[1] - ptat[2]) * (ths_tj_1 - TJ_3))
+		     / (ptat[0] - ptat[2])) + FIXPT_INT(TJ_3);
 
-	coef->a1 = FIXPT_DIV(FIXPT_INT(thcode[1] - thcode[2]),
-			     tj_2 - FIXPT_INT(TJ_3));
-	coef->b1 = FIXPT_INT(thcode[2]) - coef->a1 * TJ_3;
+	tsc->coef.a1 = FIXPT_DIV(FIXPT_INT(thcode[1] - thcode[2]),
+				 tsc->tj_t - FIXPT_INT(TJ_3));
+	tsc->coef.b1 = FIXPT_INT(thcode[2]) - tsc->coef.a1 * TJ_3;
 
-	coef->a2 = FIXPT_DIV(FIXPT_INT(thcode[1] - thcode[0]),
-			     tj_2 - FIXPT_INT(TJ_1));
-	coef->b2 = FIXPT_INT(thcode[0]) - coef->a2 * TJ_1;
+	tsc->coef.a2 = FIXPT_DIV(FIXPT_INT(thcode[1] - thcode[0]),
+				 tsc->tj_t - FIXPT_INT(ths_tj_1));
+	tsc->coef.b2 = FIXPT_INT(thcode[0]) - tsc->coef.a2 * ths_tj_1;
 }
 
 static int rcar_gen3_thermal_round(int temp)
@@ -223,144 +175,27 @@ static int rcar_gen3_thermal_round(int temp)
 	return result * RCAR3_THERMAL_GRAN;
 }
 
-static int rcar_gen3_thermal_convert_temp(struct rcar_gen3_thermal_tsc *tsc)
-{
-	int mcelsius = 0, val;
-	long reg;
-
-	if (is_ths_typeA) {
-		/* Read register and convert to mili Celsius */
-
-		/* Read register and convert value to signed variable type */
-		reg = rcar_gen3_thermal_read(tsc, REG_GEN3_TEMP) & CTEMP_MASK;
-
-		if (reg <= thcode[tsc->id][1])
-			val = FIXPT_DIV(FIXPT_INT(reg) - tsc->coef.b1,
-					tsc->coef.a1);
-		else
-			val = FIXPT_DIV(FIXPT_INT(reg) - tsc->coef.b2,
-					tsc->coef.a2);
-
-		mcelsius = rcar_gen3_thermal_round(FIXPT_TO_MCELSIUS(val));
-
-	} else {
-		int i;
-		u32 old, new;
-
-		reg = 0;
-		old = ~0;
-		for (i = 0; i < 128; i++) {
-			/*
-			 * As hardware description, it needs to wait 300us after
-			 * changing comparator offset to get stable temperature.
-			 */
-			usleep_range(300, 350);
-			new = rcar_gen3_thermal_read(tsc, REG_GEN3_B_THSSR)
-						& CTEMP_B_MASK;
-
-			if (new == old) {
-				reg = new;
-				break;
-			}
-			old = new;
-		}
-		/*
-		 * As hardware description, there are 2 formulas to
-		 * calculate temperature on E3 when CTEMP[5:0] is less than
-		 * and greater or equal to 24.
-		 */
-		if (reg < 24)
-			mcelsius = MCELSIUS(((reg * 55) - 720) / 10);
-			/*
-			 * Equal to mcelsius = MCELSIUS((reg * 5.5) - 72)
-			 * to avoid mismatch between float and integer
-			 */
-		else
-			mcelsius = MCELSIUS((reg * 5) - 60);
-	}
-
-	return mcelsius;
-}
-
 static int rcar_gen3_thermal_get_temp(void *devdata, int *temp)
 {
 	struct rcar_gen3_thermal_tsc *tsc = devdata;
-	int mcelsius;
+	int mcelsius, val;
+	int reg;
 
-	mcelsius = rcar_gen3_thermal_convert_temp(tsc);
+	/* Read register and convert to mili Celsius */
+	reg = rcar_gen3_thermal_read(tsc, REG_GEN3_TEMP) & CTEMP_MASK;
 
-	/* Make sure we are inside specifications */
-	if ((mcelsius < MCELSIUS(-40)) || (mcelsius > MCELSIUS(125)))
-		return -EIO;
+	if (reg <= thcodes[tsc->id][1])
+		val = FIXPT_DIV(FIXPT_INT(reg) - tsc->coef.b1,
+				tsc->coef.a1);
+	else
+		val = FIXPT_DIV(FIXPT_INT(reg) - tsc->coef.b2,
+				tsc->coef.a2);
+	mcelsius = FIXPT_TO_MCELSIUS(val);
 
-	*temp = mcelsius;
+	/* Guaranteed operating range is -40C to 125C. */
 
-	return 0;
-}
-
-static int rcar_gen3_thermal_mcelsius_to_temp(struct rcar_gen3_thermal_tsc *tsc,
-					      int mcelsius)
-{
-	int celsius, val;
-	int ctemp = 0;
-
-	celsius = DIV_ROUND_CLOSEST(mcelsius, 1000);
-	if (is_ths_typeA) {
-		if (celsius <= TJ_2)
-			val = celsius * tsc->coef.a1 + tsc->coef.b1;
-		else
-			val = celsius * tsc->coef.a2 + tsc->coef.b2;
-
-		ctemp = INT_FIXPT(val);
-	} else {
-		/*
-		 * Similarly, to calculate register CTEMP[5:0] for E3
-		 * there are 2 formulas to measure CTEMP[5:0] which is
-		 * depending on temperature changes from less than
-		 * to greater or equal to 60 degrees celsius.
-		 */
-		if (celsius < 60)
-			ctemp = (celsius + 72) * 10  / 55;
-			/*
-			 * Equal to ctemp = (celsius + 72) / 5.5
-			 * to avoid mismatch between float and integer
-			 */
-		else
-			ctemp = (celsius + 60) / 5;
-	}
-
-	return ctemp;
-}
-
-static int rcar_gen3_thermal_set_irq_temp(struct rcar_gen3_thermal_tsc *tsc)
-{
-	int mcelsius, low, high;
-
-	if (!tsc->irq_cap)
-		return 0;
-
-	mcelsius = rcar_gen3_thermal_convert_temp(tsc);
-
-	low = mcelsius - MCELSIUS(1);
-	high = mcelsius + MCELSIUS(1);
-
-	if (is_ths_typeA) {
-		rcar_gen3_thermal_write(tsc, REG_GEN3_IRQTEMP1,
-			rcar_gen3_thermal_mcelsius_to_temp(tsc, low));
-
-		rcar_gen3_thermal_write(tsc, REG_GEN3_IRQTEMP2,
-			rcar_gen3_thermal_mcelsius_to_temp(tsc, high));
-	} else {
-		u32 reg;
-
-		low = rcar_gen3_thermal_mcelsius_to_temp(tsc, low);
-		high = rcar_gen3_thermal_mcelsius_to_temp(tsc, high);
-		reg = rcar_gen3_thermal_read(tsc, REG_GEN3_B_INTCTRL);
-		reg &= (~CTEMP1_B_MASK & ~CTEMP0_B_MASK);
-		reg |= (high << __bf_shf(CTEMP1_B_MASK)
-		    | low << __bf_shf(CTEMP0_B_MASK));
-		rcar_gen3_thermal_write(tsc, REG_GEN3_B_INTCTRL, reg);
-	}
+	/* Round value to device granularity setting */
+	*temp = rcar_gen3_thermal_round(mcelsius);
 
 	return 0;
 }
@@ -368,72 +203,6 @@ static int rcar_gen3_thermal_set_irq_temp(struct rcar_gen3_thermal_tsc *tsc)
 static const struct thermal_zone_of_device_ops rcar_gen3_tz_of_ops = {
 	.get_temp	= rcar_gen3_thermal_get_temp,
 };
-
-static void rcar_thermal_irq_set(struct rcar_gen3_thermal_priv *priv, bool on)
-{
-	unsigned int i;
-	u32 val;
-
-	if (is_ths_typeA) {
-		for (i = 0; i < priv->num_tscs; i++) {
-			val = (on && priv->tscs[i]->irq_cap) ?
-			       IRQ_TEMPD1 | IRQ_TEMP2 : 0;
-			rcar_gen3_thermal_write(priv->tscs[i],
-				REG_GEN3_IRQMSK, val);
-		}
-	} else {
-		for (i = 0; i < priv->num_tscs; i++) {
-			val = (on && priv->tscs[i]->irq_cap) ?
-				ENR_Tj00 | ENR_Tj01 : 0;
-			rcar_gen3_thermal_write(priv->tscs[i],
-				REG_GEN3_B_ENR, val);
-		}
-	}
-}
-
-static irqreturn_t rcar_gen3_thermal_irq(int irq, void *data)
-{
-	struct rcar_gen3_thermal_priv *priv = data;
-	u32 status;
-	int i;
-
-	if (is_ths_typeA) {
-		for (i = 0; i < priv->num_tscs; i++) {
-			status = rcar_gen3_thermal_read(priv->tscs[i],
-							REG_GEN3_IRQSTR);
-			rcar_gen3_thermal_write(priv->tscs[i],
-						REG_GEN3_IRQSTR, 0);
-			if (status)
-				thermal_zone_device_update(priv->tscs[i]->zone,
-						   THERMAL_EVENT_UNSPECIFIED);
-		}
-	} else {
-		for (i = 0; i < priv->num_tscs; i++) {
-			status = rcar_gen3_thermal_read(priv->tscs[i],
-							REG_GEN3_B_STR);
-			rcar_gen3_thermal_write(priv->tscs[i],
-						REG_GEN3_B_STR, 0);
-			if (status)
-				thermal_zone_device_update(priv->tscs[i]->zone,
-						   THERMAL_EVENT_UNSPECIFIED);
-		}
-	}
-
-	return IRQ_HANDLED;
-}
-
-static void rcar_gen3_thermal_init_r8a77990(struct rcar_gen3_thermal_tsc *tsc)
-{
-	/* Using 2 interrupts: Tj00 falling, Tj01 rising */
-	rcar_gen3_thermal_write(tsc, REG_GEN3_B_POSNEG, 0x1);
-
-	rcar_gen3_thermal_write(tsc, REG_GEN3_B_THSCR, THSCR_CPCTL |
-		rcar_gen3_thermal_read(tsc, REG_GEN3_B_THSCR));
-
-	usleep_range(300, 350);
-	rcar_gen3_thermal_write(tsc, REG_GEN3_B_INT_MASK, 0x4 |
-		(~0x7 & rcar_gen3_thermal_read(tsc, REG_GEN3_B_INT_MASK)));
-}
 
 static const struct soc_device_attribute r8a7795es1[] = {
 	{ .soc_id = "r8a7795", .revision = "ES1.*" },
@@ -451,7 +220,6 @@ static void rcar_gen3_thermal_init_r8a7795es1(struct rcar_gen3_thermal_tsc *tsc)
 
 	rcar_gen3_thermal_write(tsc, REG_GEN3_IRQCTL, 0x3F);
 	rcar_gen3_thermal_write(tsc, REG_GEN3_IRQMSK, 0);
-	rcar_gen3_thermal_write(tsc, REG_GEN3_IRQEN, IRQ_TEMPD1 | IRQ_TEMP2);
 
 	rcar_gen3_thermal_write(tsc, REG_GEN3_CTSR,
 				CTSR_PONM | CTSR_AOUT | CTSR_THBGR | CTSR_VMEN);
@@ -477,7 +245,6 @@ static void rcar_gen3_thermal_init(struct rcar_gen3_thermal_tsc *tsc)
 
 	rcar_gen3_thermal_write(tsc, REG_GEN3_IRQCTL, 0);
 	rcar_gen3_thermal_write(tsc, REG_GEN3_IRQMSK, 0);
-	rcar_gen3_thermal_write(tsc, REG_GEN3_IRQEN, IRQ_TEMPD1 | IRQ_TEMP2);
 
 	reg_val = rcar_gen3_thermal_read(tsc, REG_GEN3_THCTR);
 	reg_val |= THCTR_THSST;
@@ -486,21 +253,52 @@ static void rcar_gen3_thermal_init(struct rcar_gen3_thermal_tsc *tsc)
 	usleep_range(1000, 2000);
 }
 
+static const int rcar_gen3_ths_tj_1 = 126;
+static const int rcar_gen3_ths_tj_1_m3_w = 116;
 static const struct of_device_id rcar_gen3_thermal_dt_ids[] = {
-	{ .compatible = "renesas,r8a7795-thermal", },
-	{ .compatible = "renesas,r8a7796-thermal", },
-	{ .compatible = "renesas,r8a77965-thermal", },
-	{ .compatible = "renesas,r8a77990-thermal", },
-	{ /*sentinel*/ },
+	{
+		.compatible = "renesas,r8a774a1-thermal",
+		.data = &rcar_gen3_ths_tj_1_m3_w,
+	},
+	{
+		.compatible = "renesas,r8a774b1-thermal",
+		.data = &rcar_gen3_ths_tj_1,
+	},
+	{
+		.compatible = "renesas,r8a774e1-thermal",
+		.data = &rcar_gen3_ths_tj_1,
+	},
+	{
+		.compatible = "renesas,r8a7795-thermal",
+		.data = &rcar_gen3_ths_tj_1,
+	},
+	{
+		.compatible = "renesas,r8a7796-thermal",
+		.data = &rcar_gen3_ths_tj_1_m3_w,
+	},
+	{
+		.compatible = "renesas,r8a77961-thermal",
+		.data = &rcar_gen3_ths_tj_1_m3_w,
+	},
+	{
+		.compatible = "renesas,r8a77965-thermal",
+		.data = &rcar_gen3_ths_tj_1,
+	},
+	{
+		.compatible = "renesas,r8a77980-thermal",
+		.data = &rcar_gen3_ths_tj_1,
+	},
+	{
+		.compatible = "renesas,r8a779f0-thermal",
+		.data = &rcar_gen3_ths_tj_1,
+	},
+	{},
 };
 MODULE_DEVICE_TABLE(of, rcar_gen3_thermal_dt_ids);
 
 static int rcar_gen3_thermal_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct rcar_gen3_thermal_priv *priv = dev_get_drvdata(dev);
-
-	rcar_thermal_irq_set(priv, false);
 
 	pm_runtime_put(dev);
 	pm_runtime_disable(dev);
@@ -508,16 +306,23 @@ static int rcar_gen3_thermal_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void rcar_gen3_hwmon_action(void *data)
+{
+	struct thermal_zone_device *zone = data;
+
+	thermal_remove_hwmon_sysfs(zone);
+}
+
 static int rcar_gen3_thermal_probe(struct platform_device *pdev)
 {
 	struct rcar_gen3_thermal_priv *priv;
 	struct device *dev = &pdev->dev;
+	const int *rcar_gen3_ths_tj_1_const = of_device_get_match_data(dev);
 	struct resource *res;
 	struct thermal_zone_device *zone;
-	int ret, irq, i;
-	char *irqname;
+	int ret, i;
 	void __iomem *ptat_base;
-	unsigned int cor_para_value = 0;
+	unsigned int cor_para_value;
 	struct device_node *tz_nd;
 
 	/* default values if FUSEs are missing */
@@ -531,75 +336,32 @@ static int rcar_gen3_thermal_probe(struct platform_device *pdev)
 	if (soc_device_match(r8a7795es1))
 		priv->thermal_init = rcar_gen3_thermal_init_r8a7795es1;
 
-	if (!of_device_is_compatible(pdev->dev.of_node,
-				"renesas,r8a77990-thermal")) {
-		ths_type = RCAR_GEN3_THS_TYPE_A;
-
-		if (!of_device_is_compatible(pdev->dev.of_node,
-				"renesas,r8a7796-thermal"))
-			ths_tj = THS_TJ_1;
-		else
-			ths_tj = THS_TJ_1_M3;
-	} else {
-		ths_type = RCAR_GEN3_THS_TYPE_B;
-		priv->thermal_init = rcar_gen3_thermal_init_r8a77990;
-	}
-
-	if (is_ths_typeA) {
-		/* Use FUSE default values if they are missing.
-		 * If not, fetch them from registers.
-		 */
-		ptat_base = ioremap_nocache(PTAT_BASE, REG_GEN3_MAX_SIZE);
-		if (!ptat_base) {
-			dev_err(dev, "Cannot map FUSE register\n");
-			return -ENOMEM;
-		}
-
-		cor_para_value = ioread32(ptat_base + REG_GEN3_THSCP)
-					& COR_PARA_VLD;
-
-		if (cor_para_value != COR_PARA_VLD) {
-			dev_info(dev, "is using pseudo fixed FUSE values\n");
-		} else {
-			dev_info(dev, "is using FUSE values\n");
-			ptat[0] = ioread32(ptat_base + REG_GEN3_PTAT1)
-					& GEN3_FUSE_MASK;
-			ptat[1] = ioread32(ptat_base + REG_GEN3_PTAT2)
-					& GEN3_FUSE_MASK;
-			ptat[2] = ioread32(ptat_base + REG_GEN3_PTAT3)
-					& GEN3_FUSE_MASK;
-		}
-
-		iounmap(ptat_base);
-	}
-
-
 	platform_set_drvdata(pdev, priv);
-
-	/*
-	 * Request 2 (of the 3 possible) IRQs, the driver only needs to
-	 * to trigger on the low and high trip points of the current
-	 * temp window at this point.
-	 */
-	for (i = 0; i < 2; i++) {
-		irq = platform_get_irq(pdev, i);
-		if (irq < 0)
-			return irq;
-
-		irqname = devm_kasprintf(dev, GFP_KERNEL, "%s:ch%d",
-					 dev_name(dev), i);
-		if (!irqname)
-			return -ENOMEM;
-
-		ret = devm_request_threaded_irq(dev, irq, NULL,
-						rcar_gen3_thermal_irq,
-						IRQF_ONESHOT, irqname, priv);
-		if (ret)
-			return ret;
-	}
 
 	pm_runtime_enable(dev);
 	pm_runtime_get_sync(dev);
+
+	/* Use FUSE default values if they are missing.
+	 * If not, fetch them from registers.
+	 */
+	ptat_base = ioremap(PTAT_BASE, REG_GEN3_MAX_SIZE);
+	if (!ptat_base) {
+		dev_err(dev, "Cannot map FUSE register\n");
+		return -ENOMEM;
+	}
+
+	cor_para_value = ioread32(ptat_base + REG_GEN3_THSCP) & COR_PARA_VLD;
+
+	if (cor_para_value != COR_PARA_VLD) {
+		dev_info(dev, "is using pseudo fixed FUSE values\n");
+	} else {
+		dev_info(dev, "is using FUSE values\n");
+		ptat[0] = ioread32(ptat_base + REG_GEN3_PTAT1) & GEN3_FUSE_MASK;
+		ptat[1] = ioread32(ptat_base + REG_GEN3_PTAT2) & GEN3_FUSE_MASK;
+		ptat[2] = ioread32(ptat_base + REG_GEN3_PTAT3) & GEN3_FUSE_MASK;
+	}
+
+	iounmap(ptat_base);
 
 	for (i = 0; i < TSC_MAX_NUM; i++) {
 		struct rcar_gen3_thermal_tsc *tsc;
@@ -625,19 +387,17 @@ static int rcar_gen3_thermal_probe(struct platform_device *pdev)
 
 		priv->thermal_init(tsc);
 
-		if (is_ths_typeA) {
-			if (cor_para_value == COR_PARA_VLD) {
-				thcode[i][0] = rcar_gen3_thermal_read(tsc,
-					REG_GEN3_THCODE1) & GEN3_FUSE_MASK;
-				thcode[i][1] = rcar_gen3_thermal_read(tsc,
-					REG_GEN3_THCODE2) & GEN3_FUSE_MASK;
-				thcode[i][2] = rcar_gen3_thermal_read(tsc,
-					REG_GEN3_THCODE3) & GEN3_FUSE_MASK;
-			}
-
-			rcar_gen3_thermal_calc_coefs(&tsc->coef,
-					ptat, thcode[i]);
+		if (cor_para_value == COR_PARA_VLD) {
+			thcodes[i][0] = GEN3_FUSE_MASK &
+				rcar_gen3_thermal_read(tsc, REG_GEN3_THCODE1);
+			thcodes[i][1] = GEN3_FUSE_MASK &
+				rcar_gen3_thermal_read(tsc, REG_GEN3_THCODE2);
+			thcodes[i][2] = GEN3_FUSE_MASK &
+				rcar_gen3_thermal_read(tsc, REG_GEN3_THCODE3);
 		}
+
+		rcar_gen3_thermal_calc_coefs(tsc, ptat, thcodes[i],
+					     *rcar_gen3_ths_tj_1_const);
 
 		for_each_node_with_property(tz_nd, "polling-delay") {
 			u32 zone_id, idle;
@@ -655,8 +415,6 @@ static int rcar_gen3_thermal_probe(struct platform_device *pdev)
 			}
 		}
 
-		rcar_gen3_thermal_set_irq_temp(tsc);
-
 		zone = devm_thermal_zone_of_sensor_register(dev, i, tsc,
 							    &rcar_gen3_tz_of_ops);
 		if (IS_ERR(zone)) {
@@ -665,6 +423,15 @@ static int rcar_gen3_thermal_probe(struct platform_device *pdev)
 			goto error_unregister;
 		}
 		tsc->zone = zone;
+
+		tsc->zone->tzp->no_hwmon = false;
+		ret = thermal_add_hwmon_sysfs(tsc->zone);
+		if (ret)
+			goto error_unregister;
+
+		ret = devm_add_action_or_reset(dev, rcar_gen3_hwmon_action, zone);
+		if (ret)
+			goto error_unregister;
 
 		ret = of_thermal_get_ntrips(tsc->zone);
 		if (ret < 0)
@@ -680,23 +447,12 @@ static int rcar_gen3_thermal_probe(struct platform_device *pdev)
 		goto error_unregister;
 	}
 
-	rcar_thermal_irq_set(priv, true);
-
 	return 0;
 
 error_unregister:
 	rcar_gen3_thermal_remove(pdev);
 
 	return ret;
-}
-
-static int __maybe_unused rcar_gen3_thermal_suspend(struct device *dev)
-{
-	struct rcar_gen3_thermal_priv *priv = dev_get_drvdata(dev);
-
-	rcar_thermal_irq_set(priv, false);
-
-	return 0;
 }
 
 static int __maybe_unused rcar_gen3_thermal_resume(struct device *dev)
@@ -708,15 +464,12 @@ static int __maybe_unused rcar_gen3_thermal_resume(struct device *dev)
 		struct rcar_gen3_thermal_tsc *tsc = priv->tscs[i];
 
 		priv->thermal_init(tsc);
-		rcar_gen3_thermal_set_irq_temp(tsc);
 	}
-
-	rcar_thermal_irq_set(priv, true);
 
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(rcar_gen3_thermal_pm_ops, rcar_gen3_thermal_suspend,
+static SIMPLE_DEV_PM_OPS(rcar_gen3_thermal_pm_ops, NULL,
 			 rcar_gen3_thermal_resume);
 
 static struct platform_driver rcar_gen3_thermal_driver = {

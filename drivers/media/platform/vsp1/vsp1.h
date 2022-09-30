@@ -2,7 +2,7 @@
 /*
  * vsp1.h  --  R-Car VSP1 Driver
  *
- * Copyright (C) 2013-2018 Renesas Electronics Corporation
+ * Copyright (C) 2013-2021 Renesas Electronics Corporation
  *
  * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
  */
@@ -40,8 +40,6 @@ struct vsp1_uif;
 
 /* Workaround for hung up at the time of underrun in R-Car H3(ES1.x) */
 #define VSP1_UNDERRUN_WORKAROUND	BIT(0)
-/* Auto-FLD for Display List not support */
-#define VSP1_AUTO_FLD_NOT_SUPPORT	BIT(1)
 
 #define VSP1_MAX_LIF		2
 #define VSP1_MAX_RPF		5
@@ -58,6 +56,7 @@ struct vsp1_uif;
 #define VSP1_HAS_HGO		(1 << 7)
 #define VSP1_HAS_HGT		(1 << 8)
 #define VSP1_HAS_BRS		(1 << 9)
+#define VSP1_HAS_EXT_DL		(1 << 10)
 
 struct vsp1_device_info {
 	u32 version;
@@ -72,6 +71,8 @@ struct vsp1_device_info {
 	unsigned int num_bru_inputs;
 	bool uapi;
 };
+
+#define vsp1_feature(vsp1, f) ((vsp1)->info->features & (f))
 
 struct vsp1_device {
 	struct device *dev;

@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * R-Car Gen1 RESET/WDT, R-Car Gen2, Gen3, and RZ/G RST Driver
  *
  * Copyright (C) 2016 Glider bvba
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 
 #include <linux/err.h>
@@ -24,7 +21,8 @@ static int rcar_rst_enable_wdt_reset(void __iomem *base)
 
 struct rst_config {
 	unsigned int modemr;		/* Mode Monitoring Register Offset */
-	int (*configure)(void *base);	/* Platform specific configuration */
+	unsigned int modemr2;		/* Second Mode Monitor Register Offset */
+	int (*configure)(void __iomem *base);	/* Platform specific config */
 };
 
 static const struct rst_config rcar_rst_gen1 __initconst = {
@@ -40,11 +38,27 @@ static const struct rst_config rcar_rst_gen3 __initconst = {
 	.modemr = 0x60,
 };
 
+static const struct rst_config rcar_rst_r8a779a0 __initconst = {
+	.modemr = 0x00,		/* MODEMR0 and it has CPG related bits */
+};
+
+static const struct rst_config rcar_rst_r8a779f0 __initconst = {
+	.modemr = 0x00,
+	.modemr2 = 0x04,
+};
+
 static const struct of_device_id rcar_rst_matches[] __initconst = {
-	/* RZ/G is handled like R-Car Gen2 */
+	/* RZ/G1 is handled like R-Car Gen2 */
+	{ .compatible = "renesas,r8a7742-rst", .data = &rcar_rst_gen2 },
 	{ .compatible = "renesas,r8a7743-rst", .data = &rcar_rst_gen2 },
+	{ .compatible = "renesas,r8a7744-rst", .data = &rcar_rst_gen2 },
 	{ .compatible = "renesas,r8a7745-rst", .data = &rcar_rst_gen2 },
 	{ .compatible = "renesas,r8a77470-rst", .data = &rcar_rst_gen2 },
+	/* RZ/G2 is handled like R-Car Gen3 */
+	{ .compatible = "renesas,r8a774a1-rst", .data = &rcar_rst_gen3 },
+	{ .compatible = "renesas,r8a774b1-rst", .data = &rcar_rst_gen3 },
+	{ .compatible = "renesas,r8a774c0-rst", .data = &rcar_rst_gen3 },
+	{ .compatible = "renesas,r8a774e1-rst", .data = &rcar_rst_gen3 },
 	/* R-Car Gen1 */
 	{ .compatible = "renesas,r8a7778-reset-wdt", .data = &rcar_rst_gen1 },
 	{ .compatible = "renesas,r8a7779-reset-wdt", .data = &rcar_rst_gen1 },
@@ -57,16 +71,22 @@ static const struct of_device_id rcar_rst_matches[] __initconst = {
 	/* R-Car Gen3 */
 	{ .compatible = "renesas,r8a7795-rst", .data = &rcar_rst_gen3 },
 	{ .compatible = "renesas,r8a7796-rst", .data = &rcar_rst_gen3 },
+	{ .compatible = "renesas,r8a77961-rst", .data = &rcar_rst_gen3 },
 	{ .compatible = "renesas,r8a77965-rst", .data = &rcar_rst_gen3 },
 	{ .compatible = "renesas,r8a77970-rst", .data = &rcar_rst_gen3 },
 	{ .compatible = "renesas,r8a77980-rst", .data = &rcar_rst_gen3 },
 	{ .compatible = "renesas,r8a77990-rst", .data = &rcar_rst_gen3 },
 	{ .compatible = "renesas,r8a77995-rst", .data = &rcar_rst_gen3 },
+	/* R-Car V3U */
+	{ .compatible = "renesas,r8a779a0-rst", .data = &rcar_rst_r8a779a0 },
+	/* R-Car S4 */
+	{ .compatible = "renesas,r8a779f0-rst", .data = &rcar_rst_r8a779f0 },
 	{ /* sentinel */ }
 };
 
 static void __iomem *rcar_rst_base __initdata;
 static u32 saved_mode __initdata;
+static u32 saved_mode_2 __initdata;
 
 static int __init rcar_rst_init(void)
 {
@@ -90,6 +110,8 @@ static int __init rcar_rst_init(void)
 	rcar_rst_base = base;
 	cfg = match->data;
 	saved_mode = ioread32(base + cfg->modemr);
+	if (cfg->modemr2)	/* for second reg, zero means "undefined" */
+		saved_mode_2 = ioread32(base + cfg->modemr2);
 	if (cfg->configure) {
 		error = cfg->configure(base);
 		if (error) {
@@ -117,5 +139,19 @@ int __init rcar_rst_read_mode_pins(u32 *mode)
 	}
 
 	*mode = saved_mode;
+	return 0;
+}
+
+int __init rcar_rst_read_mode_pins_64(u64 *mode)
+{
+	int error;
+
+	if (!rcar_rst_base) {
+		error = rcar_rst_init();
+		if (error)
+			return error;
+	}
+
+	*mode = saved_mode | (((u64)saved_mode_2) << 32);
 	return 0;
 }

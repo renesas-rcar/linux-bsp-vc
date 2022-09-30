@@ -1,25 +1,32 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * rcar_lvds.h  --  R-Car LVDS Unit
+ * rcar_lvds.h  --  R-Car LVDS Encoder
  *
- * Copyright (C) 2018 Renesas Electronics Corporation
+ * Copyright (C) 2013-2018 Renesas Electronics Corporation
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
  */
 
 #ifndef __RCAR_LVDS_H__
 #define __RCAR_LVDS_H__
 
-#define RCAR_LVDS_MAX_NUM	2
+struct drm_bridge;
 
 #if IS_ENABLED(CONFIG_DRM_RCAR_LVDS)
-int rcar_lvds_pll_round_rate(u32 index, unsigned long rate);
+int rcar_lvds_clk_enable(struct drm_bridge *bridge, unsigned long freq);
+void rcar_lvds_clk_disable(struct drm_bridge *bridge);
+bool rcar_lvds_dual_link(struct drm_bridge *bridge);
 #else
-static inline int rcar_lvds_pll_round_rate(u32 index, unsigned long rate)
+static inline int rcar_lvds_clk_enable(struct drm_bridge *bridge,
+				       unsigned long freq)
 {
-	return 0;
-};
-#endif
+	return -ENOSYS;
+}
+static inline void rcar_lvds_clk_disable(struct drm_bridge *bridge) { }
+static inline bool rcar_lvds_dual_link(struct drm_bridge *bridge)
+{
+	return false;
+}
+#endif /* CONFIG_DRM_RCAR_LVDS */
+
 #endif /* __RCAR_LVDS_H__ */

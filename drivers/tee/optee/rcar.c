@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2015-2019, Renesas Electronics Corporation
+ * Copyright (c) 2015-2020, Renesas Electronics Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License Version 2 as
@@ -34,18 +35,18 @@ static char *remaped_log_buffer;
 static struct optee *rcar_optee;
 static struct rcar_debug_log_info dlog_info;
 
-#define TEE_LOG_NS_BASE		(0x0407FEC000U)
-#define TEE_LOG_NS_SIZE		(81920U)
-#define LOG_NS_CPU_AREA_SIZE	(1024U)
-#define TEE_CORE_NB_CORE	(8U)
+#define TEE_LOG_NS_BASE        (0x0407FEC000U)
+#define TEE_LOG_NS_SIZE        (81920U)
+#define LOG_NS_CPU_AREA_SIZE   (1024U)
+#define TEE_CORE_NB_CORE   (8U)
 
 static int debug_log_kthread(void *arg);
 static int tz_rcar_suspend(void);
 static int tz_rcar_power_event(struct notifier_block *this,
-			       unsigned long event, void *ptr);
+	unsigned long event, void *ptr);
 static int rcar_optee_add_suspend_callback(void);
 static void rcar_optee_del_suspend_callback(void);
-static int rcar_optee_init_debug_log(void);
+static int rcar_optee_init_debug_log(struct optee *optee);
 static void rcar_optee_final_debug_log(void);
 
 static int debug_log_kthread(void *arg)
@@ -60,8 +61,8 @@ static int debug_log_kthread(void *arg)
 		spin_lock(&dlog->q_lock);
 		while (!list_empty(&dlog->queue)) {
 			node = list_first_entry(&dlog->queue,
-						struct rcar_debug_log_node,
-						list);
+				struct rcar_debug_log_node,
+				list);
 			spin_unlock(&dlog->q_lock);
 
 			if (node->logmsg)
@@ -77,7 +78,7 @@ static int debug_log_kthread(void *arg)
 		if (thread_exit)
 			break;
 		wait_event_interruptible(dlog->waitq,
-					 !list_empty(&dlog->queue));
+			!list_empty(&dlog->queue));
 	}
 
 	pr_info("%s Exit\n", __func__);
@@ -149,7 +150,7 @@ static int tz_rcar_suspend(void)
 }
 
 static int tz_rcar_power_event(struct notifier_block *this,
-			       unsigned long event, void *ptr)
+	unsigned long event, void *ptr)
 {
 	int ret;
 
@@ -186,29 +187,36 @@ static void rcar_optee_del_suspend_callback(void)
 	pr_info("%s: unregister tz_rcar_power_event function\n", __func__);
 }
 
-static int rcar_optee_init_debug_log(void)
+static int rcar_optee_init_debug_log(struct optee *optee)
 {
 	int ret = 0;
 	struct task_struct *thread;
+	struct arm_smccc_res smccc;
 
-	remaped_log_buffer = ioremap_nocache(TEE_LOG_NS_BASE, TEE_LOG_NS_SIZE);
+	remaped_log_buffer = ioremap(TEE_LOG_NS_BASE, TEE_LOG_NS_SIZE);
 	if (!remaped_log_buffer) {
-		pr_err("failed to ioremap_nocache(TEE_LOG_NS_BASE)\n");
+		pr_err("failed to ioremap(TEE_LOG_NS_BASE)\n");
 		ret = -ENOMEM;
 	}
-
 	if (ret == 0) {
 		init_waitqueue_head(&dlog_info.waitq);
 		INIT_LIST_HEAD(&dlog_info.queue);
 		spin_lock_init(&dlog_info.q_lock);
 
 		thread = kthread_run(debug_log_kthread, &dlog_info,
-				     "optee_debug_log");
+			"optee_debug_log");
 		if (IS_ERR(thread)) {
 			pr_err("failed to kthread_run\n");
 			ret = -ENOMEM;
+			goto end;
 		}
 	}
+
+	/* Notify the start of debug log output to optee_os */
+	optee->invoke_fn(OPTEE_SMC_GET_SHM_CONFIG, SMC_RCAR_CMD,
+			START_DLOG_OUTPUT, 0, 0, 0, 0, 0, &smccc);
+
+end:
 
 	return ret;
 }
@@ -240,7 +248,7 @@ int optee_rcar_probe(struct optee *optee)
 
 	ret = rcar_optee_add_suspend_callback();
 	if (ret == 0) {
-		ret = rcar_optee_init_debug_log();
+		ret = rcar_optee_init_debug_log(optee);
 		if (ret != 0)
 			rcar_optee_del_suspend_callback();
 	}

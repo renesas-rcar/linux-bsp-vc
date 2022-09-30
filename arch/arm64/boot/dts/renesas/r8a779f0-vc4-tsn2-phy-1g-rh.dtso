@@ -1,0 +1,21 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+&gpio3 {
+	tsn2-mux {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "TSN2-MUX";
+	};
+};
+
+&tsn2 {
+	phy-handle = <&tsn2_phy_1g_rh>;
+};
+
+&tsn2_phy_1g_rh {
+	status = "okay";
+};

@@ -1,0 +1,331 @@
+#include <dt-bindings/interrupt-controller/renesas-intswcd-r8a779f0.h>
+
+&soc {
+	canfd0: can@dff50000 {
+		compatible = "renesas,r8a779f0-canfd";
+		reg = <0 0xdff50000 0 0x20000>;
+		interrupt-parent = <&intswcd>;
+		interrupts = <R8A779F0_INTSWCD_INTRCANGERR0>,
+			     <R8A779F0_INTSWCD_INTRCANGRECC0>,
+			     <R8A779F0_INTSWCD_INTRCAN0REC>,
+			     <R8A779F0_INTSWCD_INTRCAN0TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN0ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN1REC>,
+			     <R8A779F0_INTSWCD_INTRCAN1TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN1ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN2REC>,
+			     <R8A779F0_INTSWCD_INTRCAN2TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN2ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN3REC>,
+			     <R8A779F0_INTSWCD_INTRCAN3TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN3ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN4REC>,
+			     <R8A779F0_INTSWCD_INTRCAN4TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN4ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN5REC>,
+			     <R8A779F0_INTSWCD_INTRCAN5TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN5ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN6REC>,
+			     <R8A779F0_INTSWCD_INTRCAN6TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN6ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN7REC>,
+			     <R8A779F0_INTSWCD_INTRCAN7TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN7ERR>;
+		interrupt-names = "g_err", "g_recc",
+				  "ch0_rec", "ch0_trx", "ch0_err",
+				  "ch1_rec", "ch1_trx", "ch1_err",
+				  "ch2_rec", "ch2_trx", "ch2_err",
+				  "ch3_rec", "ch3_trx", "ch3_err",
+				  "ch4_rec", "ch4_trx", "ch4_err",
+				  "ch5_rec", "ch5_trx", "ch5_err",
+				  "ch6_rec", "ch6_trx", "ch6_err",
+				  "ch7_rec", "ch7_trx", "ch7_err";
+		clocks = <&cpg CPG_CD_MOD 0>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_CANFD>;
+		clock-names = "fck", "can_clk";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		status = "disabled";
+
+		channel0 {
+			status = "disabled";
+		};
+
+		channel1 {
+			status = "disabled";
+		};
+
+		channel2 {
+			status = "disabled";
+		};
+
+		channel3 {
+			status = "disabled";
+		};
+
+		channel4 {
+			status = "disabled";
+		};
+
+		channel5 {
+			status = "disabled";
+		};
+
+		channel6 {
+			status = "disabled";
+		};
+
+		channel7 {
+			status = "disabled";
+		};
+	};
+
+	canfd1: can@dfd00000 {
+		compatible = "renesas,r8a779f0-canfd";
+		reg = <0 0xdfd00000 0 0x20000>;
+		interrupt-parent = <&intswcd>;
+		interrupts = <R8A779F0_INTSWCD_INTRCANGERR1>,
+			     <R8A779F0_INTSWCD_INTRCANGRECC1>,
+			     <R8A779F0_INTSWCD_INTRCAN8REC>,
+			     <R8A779F0_INTSWCD_INTRCAN8TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN8ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN9REC>,
+			     <R8A779F0_INTSWCD_INTRCAN9TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN9ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN10REC>,
+			     <R8A779F0_INTSWCD_INTRCAN10TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN10ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN11REC>,
+			     <R8A779F0_INTSWCD_INTRCAN11TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN11ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN12REC>,
+			     <R8A779F0_INTSWCD_INTRCAN12TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN12ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN13REC>,
+			     <R8A779F0_INTSWCD_INTRCAN13TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN13ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN14REC>,
+			     <R8A779F0_INTSWCD_INTRCAN14TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN14ERR>,
+			     <R8A779F0_INTSWCD_INTRCAN15REC>,
+			     <R8A779F0_INTSWCD_INTRCAN15TRX>,
+			     <R8A779F0_INTSWCD_INTRCAN15ERR>;
+		interrupt-names = "g_err", "g_recc",
+				  "ch0_rec", "ch0_trx", "ch0_err",
+				  "ch1_rec", "ch1_trx", "ch1_err",
+				  "ch2_rec", "ch2_trx", "ch2_err",
+				  "ch3_rec", "ch3_trx", "ch3_err",
+				  "ch4_rec", "ch4_trx", "ch4_err",
+				  "ch5_rec", "ch5_trx", "ch5_err",
+				  "ch6_rec", "ch6_trx", "ch6_err",
+				  "ch7_rec", "ch7_trx", "ch7_err";
+		clocks = <&cpg CPG_CD_MOD 1>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_CANFD>;
+		clock-names = "fck", "can_clk";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		status = "disabled";
+
+		channel0 {
+			status = "disabled";
+		};
+
+		channel1 {
+			status = "disabled";
+		};
+
+		channel2 {
+			status = "disabled";
+		};
+
+		channel3 {
+			status = "disabled";
+		};
+
+		channel4 {
+			status = "disabled";
+		};
+
+		channel5 {
+			status = "disabled";
+		};
+
+		channel6 {
+			status = "disabled";
+		};
+
+		channel7 {
+			status = "disabled";
+		};
+	};
+
+	etnb0: ethernet@df0a2000 {
+		compatible = "renesas,etheravb-r8a779f0";
+		reg = <0 0xdf0a2000 0 0x800>;
+		clocks = <&cpg CPG_CD_MOD 200>;
+		clock-names = "fck";
+		interrupt-parent = <&intswcd>;
+		interrupts = <R8A779F0_INTSWCD_INTETNB0DATA>,
+			     <R8A779F0_INTSWCD_INTETNB0ERR>,
+			     <R8A779F0_INTSWCD_INTETNB0MNG>,
+			     <R8A779F0_INTSWCD_INTETNB0MAC>;
+		interrupt-names = "data", "error", "management", "mac";
+		/* power domain is responsible for enabling/disabling clock
+		   in dynamic pm operations */
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
+	gpio4: gpio@dfd90180 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd90180 0 0x54>;
+		interrupts = <GIC_SPI 826 IRQ_TYPE_LEVEL_HIGH>;  //number to be confirmed
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 128 31>;
+		#interrupt-cells = <2>;
+		interrupt-controller;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+
+	gpio5: gpio@dfd90980 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd90980 0 0x54>;
+		interrupts = <GIC_SPI 827 IRQ_TYPE_LEVEL_HIGH>;
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 160 20>;
+		#interrupt-cells = <2>;
+		interrupt-controller;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+
+	gpio6: gpio@dfd91180 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd91180 0 0x54>;
+		interrupts = <GIC_SPI 828 IRQ_TYPE_LEVEL_HIGH>;
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 192 32>;
+		#interrupt-cells = <2>;
+		interrupt-controller;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+
+	gpio7: gpio@dfd91980 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd91980 0 0x54>;
+		interrupts = <GIC_SPI 829 IRQ_TYPE_LEVEL_HIGH>;
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 224 32>;
+		#interrupt-cells = <2>;
+		interrupt-controller;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+
+	intswcd: intswcd@d8f11000 {
+		compatible = "renesas,intswcd-r8a779f0";
+		reg = <0 0xd8f11000 0 0x400>;
+		first-level-interrupt = <&gic GIC_SPI 522 IRQ_TYPE_LEVEL_HIGH>;
+		first-edge-interrupt = <&gic GIC_SPI 573 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
+	};
+
+	mspi0: spi@dfc76000 {
+		compatible = "renesas,mspi-r8a779f0";
+		reg = <0 0xdfc76000 0 0x2000>;
+		num-cs = <8>;
+		clocks = <&cpg CPG_CD_MOD 400>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_MSPI>;
+		clock-names = "fck", "spi";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
+	mspi1: spi@dfc7e000 {
+		compatible = "renesas,mspi-r8a779f0";
+		reg = <0 0xdfc7e000 0 0x2000>;
+		num-cs = <8>;
+		clocks = <&cpg CPG_CD_MOD 401>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_MSPI>;
+		clock-names = "fck", "spi";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
+	mspi2: spi@dfd80000 {
+		compatible = "renesas,mspi-r8a779f0";
+		reg = <0 0xdfd80000 0 0x2000>;
+		num-cs = <8>;
+		clocks = <&cpg CPG_CD_MOD 402>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_MSPI>;
+		clock-names = "fck", "spi";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
+	mspi3: spi@dfcc0000 {
+		compatible = "renesas,mspi-r8a779f0";
+		reg = <0 0xdfcc0000 0 0x2000>;
+		num-cs = <8>;
+		clocks = <&cpg CPG_CD_MOD 403>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_MSPI>;
+		clock-names = "fck", "spi";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
+	mspi4: spi@dfd82000 {
+		compatible = "renesas,mspi-r8a779f0";
+		reg = <0 0xdfd82000 0 0x2000>;
+		num-cs = <8>;
+		clocks = <&cpg CPG_CD_MOD 404>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_MSPI>;
+		clock-names = "fck", "spi";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
+	mspi5: spi@dfcc4000 {
+		compatible = "renesas,mspi-r8a779f0";
+		reg = <0 0xdfcc4000 0 0x2000>;
+		num-cs = <4>;
+		clocks = <&cpg CPG_CD_MOD 405>,
+			 <&cpg CPG_CORE R8A779F0_CLK_CD_MSPI>;
+		clock-names = "fck", "spi";
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+};
+
+/* To enable control comain in cpg driver, need to define second reg range.
+ *
+ * Syntax does not allow appending. And kernel code wants addresses in "reg"
+ * property. Thus have to duplicate original value and add second range.
+ */
+&cpg {
+	reg = <0 0xe6150000 0 0x4000>,
+	      <0 0xdf980000 0 0x10000>;
+};

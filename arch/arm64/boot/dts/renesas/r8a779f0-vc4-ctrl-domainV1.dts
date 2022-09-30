@@ -1,0 +1,319 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Device Tree Source for the VC4 vehicle computer board
+ * This device requires full access for CA55 cores (application domain) to
+ * the control domain. Means G4 processor domain needs to grant access before
+ * Linux is booted.
+ *
+ * Copyright (C) 2021 Renesas Electronics Corp.
+ */
+
+#include "r8a779f0-vc4V1.dts"
+#include "r8a779f0-ctrl-domain.dtsi"
+
+&canfd0 {
+	status = "okay";
+
+	pinctrl-0 = <&canfd0_pins>;
+	pinctrl-names = "default";
+
+	channel0 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN0_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN0_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel1 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN1_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN1_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel2 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN2_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN2_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel3 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN3_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN3_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel4 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN4_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN4_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel5 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN5_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN5_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel6 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN6_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN6_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel7 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN7_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN7_STBZ GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&canfd1 {
+	status = "okay";
+
+	pinctrl-0 = <&canfd1_pins>;
+	pinctrl-names = "default";
+
+	channel0 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN8_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN8_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel1 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN9_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN9_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel2 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN10_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN10_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel3 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN11_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN11_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel4 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN12_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN12_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel5 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN13_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN13_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel6 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN14_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN14_STBZ GPIO_ACTIVE_HIGH>;
+	};
+
+	channel7 {
+		status = "okay";
+		gpios = <&fpga4000 FPGA4000_CAN15_EN GPIO_ACTIVE_HIGH>,
+			<&fpga4000 FPGA4000_CAN15_STBZ GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&etnb0 {
+	status = "okay";
+
+	pinctrl-0 = <&etnb0_pins>;
+	pinctrl-names = "default";
+
+	phy-mode = "rmii";
+	phy-handle = <&etnb0_100base_tx_phy>;
+
+	etnb0_100base_tx_phy: ethernet-phy@1 {
+		reg = <1>;
+		status = "okay";
+	};
+
+	etnb0_100base_t1_phy: ethernet-phy@2 {
+		reg = <2>;
+		status = "disabled";
+	};
+};
+
+&gpio3 {
+	sel-can-sent {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "SEL-CAN-SENT";
+	};
+
+	sel-can-flxray {
+		gpio-hog;
+		gpios = <14 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "SEL-CAN-FLXRAY";
+	};
+};
+
+&gpio5 {
+	etnb0-mux {
+		gpio-hog;
+		gpios = <17 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "ETNB0-MUX";
+	};
+};
+
+&mspi0 {
+	status = "okay";
+
+	pinctrl-0 = <&mspi0_pins>;
+	pinctrl-names = "default";
+
+	t1s@0 {
+		compatible = "microchip,lan865x";
+		reg = <0>;
+
+		spi-max-frequency = <20000000>;
+
+		interrupt-parent = <&gpio6>;
+		interrupts = <18 IRQ_TYPE_LEVEL_LOW>;
+
+		plca-enable = /bits/ 8 <0>;
+		tx-cut-through-mode = /bits/ 8 <1>;
+	};
+};
+
+&mspi1 {
+	status = "okay";
+
+	pinctrl-0 = <&mspi1_pins>;
+	pinctrl-names = "default";
+
+	t1s@0 {
+		compatible = "microchip,lan865x";
+		reg = <0>;
+
+		spi-max-frequency = <20000000>;
+
+		interrupt-parent = <&gpio6>;
+		interrupts = <19 IRQ_TYPE_LEVEL_LOW>;
+
+		plca-enable = /bits/ 8 <0>;
+		tx-cut-through-mode = /bits/ 8 <1>;
+	};
+};
+
+&mspi4 {
+	status = "okay";
+
+	pinctrl-0 = <&mspi4_pins>;
+	pinctrl-names = "default";
+
+	t1s@0 {
+		compatible = "microchip,lan865x";
+		reg = <0>;
+
+		spi-max-frequency = <20000000>;
+
+		interrupt-parent = <&gpio6>;
+		interrupts = <20 IRQ_TYPE_LEVEL_LOW>;
+
+		plca-enable = /bits/ 8 <0>;
+		tx-cut-through-mode = /bits/ 8 <1>;
+	};
+};
+
+&pfc {
+	canfd0_pins: canfd0 {
+		channel0 {
+			groups = "canfd0_data";
+			function = "canfd0";
+		};
+		channel1 {
+			groups = "canfd1_data";
+			function = "canfd1";
+		};
+		channel2 {
+			groups = "canfd2_data";
+			function = "canfd2";
+		};
+		channel3 {
+			groups = "canfd3_data";
+			function = "canfd3";
+		};
+		channel4 {
+			groups = "canfd4_data";
+			function = "canfd4";
+		};
+		channel5 {
+			groups = "canfd5_data";
+			function = "canfd5";
+		};
+		channel6 {
+			groups = "canfd6_data";
+			function = "canfd6";
+		};
+		channel7 {
+			groups = "canfd7_data";
+			function = "canfd7";
+		};
+	};
+
+	canfd1_pins: canfd1 {
+		channel8 {
+			groups = "canfd8_data";
+			function = "canfd8";
+		};
+		channel9 {
+			groups = "canfd9_data";
+			function = "canfd9";
+		};
+		channel10 {
+			groups = "canfd10_data";
+			function = "canfd10";
+		};
+		channel11 {
+			groups = "canfd11_data";
+			function = "canfd11";
+		};
+		channel12 {
+			groups = "canfd12_data";
+			function = "canfd12";
+		};
+		channel13 {
+			groups = "canfd13_data";
+			function = "canfd13";
+		};
+		channel14 {
+			groups = "canfd14_data";
+			function = "canfd14";
+		};
+		channel15 {
+			groups = "canfd15_data";
+			function = "canfd15";
+		};
+	};
+
+	etnb0_pins: etnb0 {
+		groups = "etnb0_rmii", "etnb0_mdio", "etnb0_link";
+		function = "etnb0";
+	};
+
+	mspi0_pins: mpsi0 {
+		groups = "mspi0_sck", "mspi0_din", "mspi0_dout", "mspi0_cs0";
+		function = "mspi0";
+	};
+
+	mspi1_pins: mpsi1 {
+		groups = "mspi1_sck", "mspi1_din", "mspi1_dout", "mspi1_cs0";
+		function = "mspi1";
+	};
+
+	mspi4_pins: mpsi4 {
+		groups = "mspi4_sck", "mspi4_din", "mspi4_dout", "mspi4_cs0";
+		function = "mspi4";
+	};
+};

@@ -3,11 +3,6 @@
  * f_hid.c -- USB HID function driver
  *
  * Copyright (C) 2010 Fabien Chouteau <fabien.chouteau@barco.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -257,9 +252,6 @@ static ssize_t f_hidg_read(struct file *file, char __user *buffer,
 	if (!count)
 		return 0;
 
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return -EFAULT;
-
 	spin_lock_irqsave(&hidg->read_spinlock, flags);
 
 #define READ_COND (!list_empty(&hidg->completed_out_req))
@@ -344,9 +336,6 @@ static ssize_t f_hidg_write(struct file *file, const char __user *buffer,
 	unsigned long flags;
 	ssize_t status = -ENOMEM;
 
-	if (!access_ok(VERIFY_READ, buffer, count))
-		return -EFAULT;
-
 	spin_lock_irqsave(&hidg->write_spinlock, flags);
 
 #define WRITE_COND (!hidg->write_pending)
@@ -396,20 +385,20 @@ try_again:
 	req->complete = f_hidg_req_complete;
 	req->context  = hidg;
 
+	spin_unlock_irqrestore(&hidg->write_spinlock, flags);
+
 	status = usb_ep_queue(hidg->in_ep, req, GFP_ATOMIC);
 	if (status < 0) {
 		ERROR(hidg->func.config->cdev,
 			"usb_ep_queue error on int endpoint %zd\n", status);
-		goto release_write_pending_unlocked;
+		goto release_write_pending;
 	} else {
 		status = count;
 	}
-	spin_unlock_irqrestore(&hidg->write_spinlock, flags);
 
 	return status;
 release_write_pending:
 	spin_lock_irqsave(&hidg->write_spinlock, flags);
-release_write_pending_unlocked:
 	hidg->write_pending = 0;
 	spin_unlock_irqrestore(&hidg->write_spinlock, flags);
 
@@ -418,19 +407,19 @@ release_write_pending_unlocked:
 	return status;
 }
 
-static unsigned int f_hidg_poll(struct file *file, poll_table *wait)
+static __poll_t f_hidg_poll(struct file *file, poll_table *wait)
 {
 	struct f_hidg	*hidg  = file->private_data;
-	unsigned int	ret = 0;
+	__poll_t	ret = 0;
 
 	poll_wait(file, &hidg->read_queue, wait);
 	poll_wait(file, &hidg->write_queue, wait);
 
 	if (WRITE_COND)
-		ret |= POLLOUT | POLLWRNORM;
+		ret |= EPOLLOUT | EPOLLWRNORM;
 
 	if (READ_COND)
-		ret |= POLLIN | POLLRDNORM;
+		ret |= EPOLLIN | EPOLLRDNORM;
 
 	return ret;
 }
@@ -488,7 +477,7 @@ static void hidg_set_report_complete(struct usb_ep *ep, struct usb_request *req)
 		break;
 	default:
 		ERROR(cdev, "Set report failed %d\n", req->status);
-		/* FALLTHROUGH */
+		fallthrough;
 	case -ECONNABORTED:		/* hardware forced ep reset */
 	case -ECONNRESET:		/* request dequeued */
 	case -ESHUTDOWN:		/* disconnect from host */
@@ -993,7 +982,7 @@ static struct configfs_attribute *hid_attrs[] = {
 	NULL,
 };
 
-static struct config_item_type hid_func_type = {
+static const struct config_item_type hid_func_type = {
 	.ct_item_ops	= &hidg_item_ops,
 	.ct_attrs	= hid_attrs,
 	.ct_owner	= THIS_MODULE,

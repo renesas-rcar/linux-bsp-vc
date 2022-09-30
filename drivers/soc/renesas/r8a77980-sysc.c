@@ -2,18 +2,25 @@
 /*
  * Renesas R-Car V3H System Controller
  *
- * Copyright (C) 2018 Renesas Electronics Corp.
+ * Copyright (C) 2021 Renesas Electronics Corp.
  * Copyright (C) 2018 Cogent Embedded, Inc.
  */
 
-#include <linux/bug.h>
+#include <linux/bits.h>
+#include <linux/device.h>
 #include <linux/kernel.h>
-
+#include <linux/io.h>
+#include <linux/sys_soc.h>
 #include <dt-bindings/power/r8a77980-sysc.h>
 
 #include "rcar-sysc.h"
 
-static const struct rcar_sysc_area r8a77980_areas[] __initconst = {
+#define SYCSPDMD_ADDR			0xe6180064
+#define PDMODE					(BIT(0) | BIT(1))
+
+static unsigned int pd_mode;
+
+static struct rcar_sysc_area r8a77980_areas[] __initdata = {
 	{ "always-on",	    0, 0, R8A77980_PD_ALWAYS_ON, -1, PD_ALWAYS_ON },
 	{ "ca53-scu",	0x140, 0, R8A77980_PD_CA53_SCU,	R8A77980_PD_ALWAYS_ON,
 	  PD_SCU },
@@ -38,15 +45,42 @@ static const struct rcar_sysc_area r8a77980_areas[] __initconst = {
 	{ "a2sc2",	0x400, 8, R8A77980_PD_A2SC2,	R8A77980_PD_A3IR },
 	{ "a2sc3",	0x400, 9, R8A77980_PD_A2SC3,	R8A77980_PD_A3IR },
 	{ "a2sc4",	0x400, 10, R8A77980_PD_A2SC4,	R8A77980_PD_A3IR },
-	{ "a2pd0",	0x400, 11, R8A77980_PD_A2PD0,	R8A77980_PD_A3IR },
-	{ "a2pd1",	0x400, 12, R8A77980_PD_A2PD1,	R8A77980_PD_A3IR },
+	{ "a2dp0",	0x400, 11, R8A77980_PD_A2DP0,	R8A77980_PD_A3IR },
+	{ "a2dp1",	0x400, 12, R8A77980_PD_A2DP1,	R8A77980_PD_A3IR },
 	{ "a2cn",	0x400, 13, R8A77980_PD_A2CN,	R8A77980_PD_A3IR },
-	{ "a3vip",	0x2c0, 0, R8A77980_PD_A3VIP,	R8A77980_PD_ALWAYS_ON },
-	{ "a3vip1",	0x300, 0, R8A77980_PD_A3VIP1,	R8A77980_PD_A3VIP },
-	{ "a3vip2",	0x280, 0, R8A77980_PD_A3VIP2,	R8A77980_PD_A3VIP },
+	{ "a3vip0",	0x2c0, 0, R8A77980_PD_A3VIP0,	R8A77980_PD_ALWAYS_ON },
+	{ "a3vip1",	0x300, 0, R8A77980_PD_A3VIP1,	R8A77980_PD_ALWAYS_ON },
+	{ "a3vip2",	0x280, 0, R8A77980_PD_A3VIP2,	R8A77980_PD_ALWAYS_ON },
 };
 
+/* Fixups for R-Car V3H ES2.0 revision */
+static const struct soc_device_attribute r8a77980[] __initconst = {
+	{ .soc_id = "r8a77980", .revision = "ES2.0" },
+	{ /* sentinel */ }
+};
+
+static int __init r8a77980_sysc_init(void)
+{
+	void __iomem *syscpdmd;
+
+	if (!soc_device_match(r8a77980)) {
+		pd_mode = 0; /* No handle PDMODE */
+		return 0;
+	}
+
+	/* Get PDMODE bitfield */
+	syscpdmd = ioremap(SYCSPDMD_ADDR, 0x04);
+	pd_mode = readl(syscpdmd) & PDMODE;
+	iounmap(syscpdmd);
+	pr_info("%s: PDMODE %d is selected\n", __func__, pd_mode);
+	return 0;
+}
+
 const struct rcar_sysc_info r8a77980_sysc_info __initconst = {
+	.init = r8a77980_sysc_init,
 	.areas = r8a77980_areas,
 	.num_areas = ARRAY_SIZE(r8a77980_areas),
+	.extmask_offs = 0x138,
+	.extmask_val = BIT(0),
+	.mode = &pd_mode,
 };

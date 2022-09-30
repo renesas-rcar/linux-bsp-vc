@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  R-Car CPU topology for ARM big.LITTLE platforms
  *

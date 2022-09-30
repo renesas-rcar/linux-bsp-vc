@@ -8,27 +8,29 @@
  */
 
 #include <linux/clk.h>
-#include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
 #include <linux/slab.h>
+#include <linux/sys_soc.h>
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_bridge.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_print.h>
+#include <drm/drm_probe_helper.h>
 
 #include "rcar_lvds.h"
 #include "rcar_lvds_regs.h"
 
 struct rcar_lvds;
-static struct rcar_lvds *g_lvds[RCAR_LVDS_MAX_NUM];
 
 /* Keep in sync with the LVDCR0.LVMD hardware register values. */
 enum rcar_lvds_mode {
@@ -37,9 +39,10 @@ enum rcar_lvds_mode {
 	RCAR_LVDS_MODE_VESA = 4,
 };
 
-enum rcar_lvds_link_mode {
-	RCAR_LVDS_SINGLE = 0,
-	RCAR_LVDS_DUAL,
+enum rcar_lvds_link_type {
+	RCAR_LVDS_SINGLE_LINK = 0,
+	RCAR_LVDS_DUAL_LINK_EVEN_ODD_PIXELS = 1,
+	RCAR_LVDS_DUAL_LINK_ODD_EVEN_PIXELS = 2,
 };
 
 #define RCAR_LVDS_QUIRK_LANES		BIT(0)	/* LVDS lanes 1 and 3 inverted */
@@ -71,19 +74,16 @@ struct rcar_lvds {
 		struct clk *extal;		/* External clock */
 		struct clk *dotclkin[2];	/* External DU clocks */
 	} clocks;
-	bool enabled;
 
-	struct drm_display_mode display_mode;
-	enum rcar_lvds_mode mode;
-	enum rcar_lvds_link_mode link_mode;
-	u32 id;
+	struct drm_bridge *companion;
+	enum rcar_lvds_link_type link_type;
 };
 
-#define bridge_to_rcar_lvds(bridge) \
-	container_of(bridge, struct rcar_lvds, bridge)
+#define bridge_to_rcar_lvds(b) \
+	container_of(b, struct rcar_lvds, bridge)
 
-#define connector_to_rcar_lvds(connector) \
-	container_of(connector, struct rcar_lvds, connector)
+#define connector_to_rcar_lvds(c) \
+	container_of(c, struct rcar_lvds, connector)
 
 static void rcar_lvds_write(struct rcar_lvds *lvds, u32 reg, u32 data)
 {
@@ -103,17 +103,19 @@ static int rcar_lvds_connector_get_modes(struct drm_connector *connector)
 {
 	struct rcar_lvds *lvds = connector_to_rcar_lvds(connector);
 
-	return drm_panel_get_modes(lvds->panel);
+	return drm_panel_get_modes(lvds->panel, connector);
 }
 
 static int rcar_lvds_connector_atomic_check(struct drm_connector *connector,
-					    struct drm_connector_state *state)
+					    struct drm_atomic_state *state)
 {
 	struct rcar_lvds *lvds = connector_to_rcar_lvds(connector);
 	const struct drm_display_mode *panel_mode;
+	struct drm_connector_state *conn_state;
 	struct drm_crtc_state *crtc_state;
 
-	if (!state->crtc)
+	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	if (!conn_state->crtc)
 		return 0;
 
 	if (list_empty(&connector->modes)) {
@@ -125,7 +127,7 @@ static int rcar_lvds_connector_atomic_check(struct drm_connector *connector,
 				      struct drm_display_mode, head);
 
 	/* We're not allowed to modify the resolution. */
-	crtc_state = drm_atomic_get_crtc_state(state->state, state->crtc);
+	crtc_state = drm_atomic_get_crtc_state(state, conn_state->crtc);
 	if (IS_ERR(crtc_state))
 		return PTR_ERR(crtc_state);
 
@@ -189,27 +191,31 @@ static void rcar_lvds_pll_setup_gen3(struct rcar_lvds *lvds, unsigned int freq)
 }
 
 struct pll_info {
-	struct clk *clk;
 	unsigned long diff;
 	unsigned int pll_m;
 	unsigned int pll_n;
 	unsigned int pll_e;
 	unsigned int div;
+	u32 clksel;
 };
 
 static void rcar_lvds_d3_e3_pll_calc(struct rcar_lvds *lvds, struct clk *clk,
-				     unsigned long target, struct pll_info *pll)
+				     unsigned long target, struct pll_info *pll,
+				     u32 clksel, bool dot_clock_only)
 {
+	unsigned int div7 = dot_clock_only ? 1 : 7;
+	unsigned long output;
 	unsigned long fin;
 	unsigned int m_min;
 	unsigned int m_max;
 	unsigned int m;
+	int error;
 
 	if (!clk)
 		return;
 
 	/*
-	 * The LVDS PLL is made of a pre-divider and a multiplier (strangerly
+	 * The LVDS PLL is made of a pre-divider and a multiplier (strangely
 	 * enough called M and N respectively), followed by a post-divider E.
 	 *
 	 *         ,-----.         ,-----.     ,-----.         ,-----.
@@ -231,9 +237,9 @@ static void rcar_lvds_d3_e3_pll_calc(struct rcar_lvds *lvds, struct clk *clk,
 	 *                     `------------> | |
 	 *                                    |/
 	 *
-	 * The /7 divider is optional when the LVDS PLL is used to generate a
-	 * dot clock for the DU RGB output, without using the LVDS encoder. We
-	 * don't support this configuration yet.
+	 * The /7 divider is optional, it is enabled when the LVDS PLL is used
+	 * to drive the LVDS encoder, and disabled when  used to generate a dot
+	 * clock for the DU RGB output, without using the LVDS encoder.
 	 *
 	 * The PLL allowed input frequency range is 12 MHz to 192 MHz.
 	 */
@@ -293,17 +299,17 @@ static void rcar_lvds_d3_e3_pll_calc(struct rcar_lvds *lvds, struct clk *clk,
 				 * the PLL, followed by a an optional fixed /7
 				 * divider.
 				 */
-				fout = fvco / (1 << e) / 7;
-				div = DIV_ROUND_CLOSEST(fout, target);
+				fout = fvco / (1 << e) / div7;
+				div = max(1UL, DIV_ROUND_CLOSEST(fout, target));
 				diff = abs(fout / div - target);
 
 				if (diff < pll->diff) {
-					pll->clk = clk;
 					pll->diff = diff;
 					pll->pll_m = m;
 					pll->pll_n = n;
 					pll->pll_e = e;
 					pll->div = div;
+					pll->clksel = clksel;
 
 					if (diff == 0)
 						goto done;
@@ -313,172 +319,166 @@ static void rcar_lvds_d3_e3_pll_calc(struct rcar_lvds *lvds, struct clk *clk,
 	}
 
 done:
-#if defined(CONFIG_DEBUG) || defined(CONFIG_DYNAMIC_DEBUG)
-	{
-		unsigned long output = fin * pll->pll_n / pll->pll_m
-				     / (1 << pll->pll_e) / 7 / pll->div;
-		int error = (long)(output - target) * 10000 / (long)target;
+	output = fin * pll->pll_n / pll->pll_m / (1 << pll->pll_e)
+	       / div7 / pll->div;
+	error = (long)(output - target) * 10000 / (long)target;
 
-		dev_dbg(lvds->dev,
-			"%pC %lu Hz -> Fout %lu Hz (target %lu Hz, error %d.%02u%%), PLL M/N/E/DIV %u/%u/%u/%u\n",
-			clk, fin, output, target, error / 100,
-			error < 0 ? -error % 100 : error % 100,
-			pll->pll_m, pll->pll_n, pll->pll_e, pll->div);
-	}
-#endif
-	return;
+	dev_dbg(lvds->dev,
+		"%pC %lu Hz -> Fout %lu Hz (target %lu Hz, error %d.%02u%%), PLL M/N/E/DIV %u/%u/%u/%u\n",
+		clk, fin, output, target, error / 100,
+		error < 0 ? -error % 100 : error % 100,
+		pll->pll_m, pll->pll_n, pll->pll_e, pll->div);
 }
 
-static void rcar_lvds_pll_setup_d3_e3(struct rcar_lvds *lvds, unsigned int freq)
+static void __rcar_lvds_pll_setup_d3_e3(struct rcar_lvds *lvds,
+					unsigned int freq, bool dot_clock_only)
 {
-	struct drm_crtc *crtc = lvds->bridge.encoder->crtc;
 	struct pll_info pll = { .diff = (unsigned long)-1 };
 	u32 lvdpllcr;
 
-	if (lvds->clocks.dotclkin[0] || lvds->clocks.dotclkin[1]) {
-		rcar_lvds_d3_e3_pll_calc(lvds, lvds->clocks.dotclkin[0],
-					 freq, &pll);
-		rcar_lvds_d3_e3_pll_calc(lvds, lvds->clocks.dotclkin[1],
-					 freq, &pll);
-	} else if (lvds->clocks.extal) {
-		rcar_lvds_d3_e3_pll_calc(lvds, lvds->clocks.extal,
-					 freq, &pll);
-	}
+	rcar_lvds_d3_e3_pll_calc(lvds, lvds->clocks.dotclkin[0], freq, &pll,
+				 LVDPLLCR_CKSEL_DU_DOTCLKIN(0), dot_clock_only);
+	rcar_lvds_d3_e3_pll_calc(lvds, lvds->clocks.dotclkin[1], freq, &pll,
+				 LVDPLLCR_CKSEL_DU_DOTCLKIN(1), dot_clock_only);
+	rcar_lvds_d3_e3_pll_calc(lvds, lvds->clocks.extal, freq, &pll,
+				 LVDPLLCR_CKSEL_EXTAL, dot_clock_only);
 
-	lvdpllcr = LVDPLLCR_PLLON | LVDPLLCR_CLKOUT
+	lvdpllcr = LVDPLLCR_PLLON | pll.clksel | LVDPLLCR_CLKOUT
 		 | LVDPLLCR_PLLN(pll.pll_n - 1) | LVDPLLCR_PLLM(pll.pll_m - 1);
-
-	if (pll.clk == lvds->clocks.extal)
-		lvdpllcr |= LVDPLLCR_CKSEL_EXTAL;
-	else
-		lvdpllcr |= LVDPLLCR_CKSEL_DU_DOTCLKIN(drm_crtc_index(crtc));
 
 	if (pll.pll_e > 0)
 		lvdpllcr |= LVDPLLCR_STP_CLKOUTE | LVDPLLCR_OUTCLKSEL
 			 |  LVDPLLCR_PLLE(pll.pll_e - 1);
 
-	/* Wait 200us until pll-lock */
-	usleep_range(200, 250);
+	if (dot_clock_only)
+		lvdpllcr |= LVDPLLCR_OCKSEL;
 
 	rcar_lvds_write(lvds, LVDPLLCR, lvdpllcr);
 
 	if (pll.div > 1)
+		/*
+		 * The DIVRESET bit is a misnomer, setting it to 1 deasserts the
+		 * divisor reset.
+		 */
 		rcar_lvds_write(lvds, LVDDIV, LVDDIV_DIVSEL |
 				LVDDIV_DIVRESET | LVDDIV_DIV(pll.div - 1));
 	else
 		rcar_lvds_write(lvds, LVDDIV, 0);
 }
 
-static void rcar_lvds_dual_mode(struct rcar_lvds *lvds0,
-				struct rcar_lvds *lvds1)
+static void rcar_lvds_pll_setup_d3_e3(struct rcar_lvds *lvds, unsigned int freq)
 {
-	u32 lvdcr0 = 0, lvdcr1 = 0, lvdhcr;
-	u32 lvdcr0_lvres, lvdcr1_lvres;
-
-	lvdcr0_lvres = rcar_lvds_read(lvds0, LVDCR0) & LVDCR0_LVRES;
-	lvdcr1_lvres = rcar_lvds_read(lvds1, LVDCR0) & LVDCR0_LVRES;
-
-	if (lvdcr0_lvres && lvdcr1_lvres)
-		return;
-
-	lvdhcr = LVDCHCR_CHSEL_CH(0, 0) | LVDCHCR_CHSEL_CH(1, 1) |
-		 LVDCHCR_CHSEL_CH(2, 2) | LVDCHCR_CHSEL_CH(3, 3);
-
-	rcar_lvds_write(lvds0, LVDCTRCR, LVDCTRCR_CTR3SEL_ZERO |
-			LVDCTRCR_CTR2SEL_DISP | LVDCTRCR_CTR1SEL_VSYNC |
-			LVDCTRCR_CTR0SEL_HSYNC);
-	rcar_lvds_write(lvds0, LVDCHCR, lvdhcr);
-	rcar_lvds_write(lvds0, LVDSTRIPE, LVDSTRIPE_ST_ON);
-
-	rcar_lvds_write(lvds1, LVDCTRCR, LVDCTRCR_CTR3SEL_ZERO |
-			LVDCTRCR_CTR2SEL_DISP | LVDCTRCR_CTR1SEL_VSYNC |
-			LVDCTRCR_CTR0SEL_HSYNC);
-	rcar_lvds_write(lvds1, LVDCHCR, lvdhcr);
-	rcar_lvds_write(lvds1, LVDSTRIPE, LVDSTRIPE_ST_ON);
-
-	/* Turn all the channels on. */
-	rcar_lvds_write(lvds0, LVDCR1,
-			LVDCR1_CHSTBY(3) | LVDCR1_CHSTBY(2) |
-			LVDCR1_CHSTBY(1) | LVDCR1_CHSTBY(0) | LVDCR1_CLKSTBY);
-	rcar_lvds_write(lvds1, LVDCR1,
-			LVDCR1_CHSTBY(3) | LVDCR1_CHSTBY(2) |
-			LVDCR1_CHSTBY(1) | LVDCR1_CHSTBY(0) | LVDCR1_CLKSTBY);
-
-	/*
-	 * Turn the PLL on, set it to LVDS normal mode, wait for the startup
-	 * delay and turn the output on.
-	 */
-	if ((lvds0->info->quirks & RCAR_LVDS_QUIRK_PWD) ||
-	    (lvds1->info->quirks & RCAR_LVDS_QUIRK_PWD)) {
-		lvdcr0 |= LVDCR0_PWD;
-		rcar_lvds_write(lvds0, LVDCR0, lvdcr0);
-
-		lvdcr1 |= LVDCR0_PWD;
-		rcar_lvds_write(lvds1, LVDCR0, lvdcr1);
-
-		lvdcr1 |= LVDCR0_LVEN | LVDCR0_LVRES;
-		rcar_lvds_write(lvds1, LVDCR0, lvdcr1);
-
-		lvdcr0 |= LVDCR0_LVEN | LVDCR0_LVRES;
-		rcar_lvds_write(lvds0, LVDCR0, lvdcr0);
-
-		return;
-	}
-
-	lvdcr0 |= LVDCR0_LVEN;
-	rcar_lvds_write(lvds0, LVDCR0, lvdcr0);
-
-	lvdcr1 |= LVDCR0_LVEN;
-	rcar_lvds_write(lvds1, LVDCR0, lvdcr1);
-
-	lvdcr1 |= LVDCR0_LVRES;
-	rcar_lvds_write(lvds1, LVDCR0, lvdcr1);
-
-	lvdcr0 |= LVDCR0_LVRES;
-	rcar_lvds_write(lvds0, LVDCR0, lvdcr0);
+	__rcar_lvds_pll_setup_d3_e3(lvds, freq, false);
 }
+
+/* -----------------------------------------------------------------------------
+ * Clock - D3/E3 only
+ */
+
+int rcar_lvds_clk_enable(struct drm_bridge *bridge, unsigned long freq)
+{
+	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
+	int ret;
+
+	if (WARN_ON(!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)))
+		return -ENODEV;
+
+	dev_dbg(lvds->dev, "enabling LVDS PLL, freq=%luHz\n", freq);
+
+	reset_control_deassert(lvds->rstc);
+
+	ret = clk_prepare_enable(lvds->clocks.mod);
+	if (ret < 0)
+		return ret;
+
+	__rcar_lvds_pll_setup_d3_e3(lvds, freq, true);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rcar_lvds_clk_enable);
+
+void rcar_lvds_clk_disable(struct drm_bridge *bridge)
+{
+	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
+
+	if (WARN_ON(!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)))
+		return;
+
+	dev_dbg(lvds->dev, "disabling LVDS PLL\n");
+
+	rcar_lvds_write(lvds, LVDPLLCR, 0);
+
+	clk_disable_unprepare(lvds->clocks.mod);
+
+	reset_control_assert(lvds->rstc);
+}
+EXPORT_SYMBOL_GPL(rcar_lvds_clk_disable);
 
 /* -----------------------------------------------------------------------------
  * Bridge
  */
 
-static void rcar_lvds_enable(struct drm_bridge *bridge)
+static enum rcar_lvds_mode rcar_lvds_get_lvds_mode(struct rcar_lvds *lvds,
+					const struct drm_connector *connector)
+{
+	const struct drm_display_info *info;
+	enum rcar_lvds_mode mode;
+
+	/*
+	 * There is no API yet to retrieve LVDS mode from a bridge, only panels
+	 * are supported.
+	 */
+	if (!lvds->panel)
+		return RCAR_LVDS_MODE_JEIDA;
+
+	info = &connector->display_info;
+	if (!info->num_bus_formats || !info->bus_formats) {
+		dev_warn(lvds->dev,
+			 "no LVDS bus format reported, using JEIDA\n");
+		return RCAR_LVDS_MODE_JEIDA;
+	}
+
+	switch (info->bus_formats[0]) {
+	case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
+	case MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA:
+		mode = RCAR_LVDS_MODE_JEIDA;
+		break;
+	case MEDIA_BUS_FMT_RGB888_1X7X4_SPWG:
+		mode = RCAR_LVDS_MODE_VESA;
+		break;
+	default:
+		dev_warn(lvds->dev,
+			 "unsupported LVDS bus format 0x%04x, using JEIDA\n",
+			 info->bus_formats[0]);
+		return RCAR_LVDS_MODE_JEIDA;
+	}
+
+	if (info->bus_flags & DRM_BUS_FLAG_DATA_LSB_TO_MSB)
+		mode |= RCAR_LVDS_MODE_MIRROR;
+
+	return mode;
+}
+
+static void __rcar_lvds_atomic_enable(struct drm_bridge *bridge,
+				      struct drm_atomic_state *state,
+				      struct drm_crtc *crtc,
+				      struct drm_connector *connector)
 {
 	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
-	const struct drm_display_mode *mode = &lvds->display_mode;
-	/*
-	 * FIXME: We should really retrieve the CRTC through the state, but how
-	 * do we get a state pointer?
-	 */
-	struct drm_crtc *crtc = lvds->bridge.encoder->crtc;
 	u32 lvdhcr;
 	u32 lvdcr0;
 	int ret;
 
-	WARN_ON(lvds->enabled);
+	reset_control_deassert(lvds->rstc);
 
-	if ((lvds->info->quirks & RCAR_LVDS_QUIRK_DUAL_LINK) &&
-	    lvds->link_mode == RCAR_LVDS_DUAL) {
-		struct rcar_lvds *lvds0;
-		struct rcar_lvds *lvds1;
+	ret = clk_prepare_enable(lvds->clocks.mod);
+	if (ret < 0)
+		return;
 
-		if (!g_lvds[0] || !g_lvds[1])
-			return;
-
-		lvds0 = g_lvds[0];
-		lvds1 = g_lvds[1];
-
-		rcar_lvds_dual_mode(lvds0, lvds1);
-
-		goto dual_link;
-	}
-
-	if (!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)) {
-		reset_control_deassert(lvds->rstc);
-		ret = clk_prepare_enable(lvds->clocks.mod);
-		if (ret < 0)
-			return;
-	}
+	/* Enable the companion LVDS encoder in dual-link mode. */
+	if (lvds->link_type != RCAR_LVDS_SINGLE_LINK && lvds->companion)
+		__rcar_lvds_atomic_enable(lvds->companion, state, crtc,
+					  connector);
 
 	/*
 	 * Hardcode the channels and control signals routing for now.
@@ -501,14 +501,55 @@ static void rcar_lvds_enable(struct drm_bridge *bridge)
 
 	rcar_lvds_write(lvds, LVDCHCR, lvdhcr);
 
-	/* PLL clock configuration. */
-	if (lvds->info->pll_setup)
+	if (lvds->info->quirks & RCAR_LVDS_QUIRK_DUAL_LINK) {
+		u32 lvdstripe = 0;
+
+		if (lvds->link_type != RCAR_LVDS_SINGLE_LINK) {
+			/*
+			 * By default we generate even pixels from the primary
+			 * encoder and odd pixels from the companion encoder.
+			 * Swap pixels around if the sink requires odd pixels
+			 * from the primary encoder and even pixels from the
+			 * companion encoder.
+			 */
+			bool swap_pixels = lvds->link_type ==
+				RCAR_LVDS_DUAL_LINK_ODD_EVEN_PIXELS;
+
+			/*
+			 * Configure vertical stripe since we are dealing with
+			 * an LVDS dual-link connection.
+			 *
+			 * ST_SWAP is reserved for the companion encoder, only
+			 * set it in the primary encoder.
+			 */
+			lvdstripe = LVDSTRIPE_ST_ON
+				  | (lvds->companion && swap_pixels ?
+				     LVDSTRIPE_ST_SWAP : 0);
+		}
+		rcar_lvds_write(lvds, LVDSTRIPE, lvdstripe);
+	}
+
+	/*
+	 * PLL clock configuration on all instances but the companion in
+	 * dual-link mode.
+	 */
+	if (lvds->link_type == RCAR_LVDS_SINGLE_LINK || lvds->companion) {
+		const struct drm_crtc_state *crtc_state =
+			drm_atomic_get_new_crtc_state(state, crtc);
+		const struct drm_display_mode *mode =
+			&crtc_state->adjusted_mode;
+
 		lvds->info->pll_setup(lvds, mode->clock * 1000);
+	}
 
 	/* Set the LVDS mode and select the input. */
-	lvdcr0 = lvds->mode << LVDCR0_LVMD_SHIFT;
-	if (drm_crtc_index(crtc) == 2)
-		lvdcr0 |= LVDCR0_DUSEL;
+	lvdcr0 = rcar_lvds_get_lvds_mode(lvds, connector) << LVDCR0_LVMD_SHIFT;
+
+	if (lvds->bridge.encoder) {
+		if (drm_crtc_index(crtc) == 2)
+			lvdcr0 |= LVDCR0_DUSEL;
+	}
+
 	rcar_lvds_write(lvds, LVDCR0, lvdcr0);
 
 	/* Turn all the channels on. */
@@ -538,9 +579,13 @@ static void rcar_lvds_enable(struct drm_bridge *bridge)
 	}
 
 	if (lvds->info->quirks & RCAR_LVDS_QUIRK_GEN3_LVEN) {
-		/* Turn on the LVDS PHY. */
+		/*
+		 * Turn on the LVDS PHY. On D3, the LVEN and LVRES bit must be
+		 * set at the same time, so don't write the register yet.
+		 */
 		lvdcr0 |= LVDCR0_LVEN;
-		rcar_lvds_write(lvds, LVDCR0, lvdcr0);
+		if (!(lvds->info->quirks & RCAR_LVDS_QUIRK_PWD))
+			rcar_lvds_write(lvds, LVDCR0, lvdcr0);
 	}
 
 	if (!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)) {
@@ -552,111 +597,65 @@ static void rcar_lvds_enable(struct drm_bridge *bridge)
 	lvdcr0 |= LVDCR0_LVRES;
 	rcar_lvds_write(lvds, LVDCR0, lvdcr0);
 
-dual_link:
 	if (lvds->panel) {
 		drm_panel_prepare(lvds->panel);
 		drm_panel_enable(lvds->panel);
 	}
-
-	lvds->enabled = true;
 }
 
-static void __rcar_lvds_disable(struct drm_bridge *bridge)
+static void rcar_lvds_atomic_enable(struct drm_bridge *bridge,
+				    struct drm_bridge_state *old_bridge_state)
+{
+	struct drm_atomic_state *state = old_bridge_state->base.state;
+	struct drm_connector *connector;
+	struct drm_crtc *crtc;
+
+	connector = drm_atomic_get_new_connector_for_encoder(state,
+							     bridge->encoder);
+	crtc = drm_atomic_get_new_connector_state(state, connector)->crtc;
+
+	__rcar_lvds_atomic_enable(bridge, state, crtc, connector);
+}
+
+static void rcar_lvds_atomic_disable(struct drm_bridge *bridge,
+				     struct drm_bridge_state *old_bridge_state)
 {
 	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
 	u32 lvdcr0 = 0;
-
-	WARN_ON(!lvds->enabled);
 
 	if (lvds->panel) {
 		drm_panel_disable(lvds->panel);
 		drm_panel_unprepare(lvds->panel);
 	}
 
-	if (lvds->info->quirks & RCAR_LVDS_QUIRK_DUAL_LINK &&
-	    lvds->link_mode == RCAR_LVDS_DUAL) {
-		struct rcar_lvds *lvds_pair;
-		struct rcar_lvds *lvds0;
-		struct rcar_lvds *lvds1;
-		u32 id;
+	lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_LVRES;
+	rcar_lvds_write(lvds, LVDCR0, lvdcr0);
 
-		if (!g_lvds[0] || !g_lvds[1])
-			return;
-
-		lvds0 = g_lvds[0];
-		lvds1 = g_lvds[1];
-
-		id = lvds->id == 0 ? 1 : 0;
-		lvds_pair = g_lvds[id];
-
-		if (!lvds_pair->enabled) {
-			u32 lvdcr0 = 0, lvdcr1 = 0;
-
-			lvdcr0 = rcar_lvds_read(lvds0, LVDCR0) & ~LVDCR0_LVRES;
-			rcar_lvds_write(lvds0, LVDCR0, lvdcr0);
-			lvdcr1 = rcar_lvds_read(lvds1, LVDCR0) & ~LVDCR0_LVRES;
-			rcar_lvds_write(lvds1, LVDCR0, lvdcr1);
-
-			lvdcr0 = rcar_lvds_read(lvds0, LVDCR0) & ~LVDCR0_LVEN;
-			rcar_lvds_write(lvds0, LVDCR0, lvdcr0);
-			lvdcr1 = rcar_lvds_read(lvds1, LVDCR0) & ~LVDCR0_LVEN;
-			rcar_lvds_write(lvds1, LVDCR0, lvdcr1);
-
-			if (lvds->info->quirks & RCAR_LVDS_QUIRK_PWD) {
-				lvdcr0 = rcar_lvds_read(lvds0, LVDCR0)
-							& ~LVDCR0_PWD;
-				rcar_lvds_write(lvds0, LVDCR0, lvdcr0);
-				lvdcr1 = rcar_lvds_read(lvds1, LVDCR0)
-							& ~LVDCR0_PWD;
-				rcar_lvds_write(lvds1, LVDCR0, lvdcr1);
-			}
-			rcar_lvds_write(lvds0, LVDCR1, 0);
-			rcar_lvds_write(lvds1, LVDCR1, 0);
-			rcar_lvds_write(lvds0, LVDPLLCR, 0);
-			rcar_lvds_write(lvds1, LVDPLLCR, 0);
-
-			clk_disable_unprepare(lvds0->clocks.mod);
-			clk_disable_unprepare(lvds1->clocks.mod);
-			reset_control_assert(lvds0->rstc);
-			reset_control_assert(lvds1->rstc);
-		}
-	} else {
-		lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_LVRES;
+	if (lvds->info->quirks & RCAR_LVDS_QUIRK_GEN3_LVEN) {
+		lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_LVEN;
 		rcar_lvds_write(lvds, LVDCR0, lvdcr0);
-
-		if (lvds->info->quirks & RCAR_LVDS_QUIRK_GEN3_LVEN) {
-			lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_LVEN;
-			rcar_lvds_write(lvds, LVDCR0, lvdcr0);
-		}
-
-		if (lvds->info->quirks & RCAR_LVDS_QUIRK_PWD) {
-			lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_PWD;
-			rcar_lvds_write(lvds, LVDCR0, lvdcr0);
-		}
-
-		if (!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)) {
-			lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_PLLON;
-			rcar_lvds_write(lvds, LVDCR0, lvdcr0);
-		}
-
-		rcar_lvds_write(lvds, LVDCR1, 0);
-		rcar_lvds_write(lvds, LVDPLLCR, 0);
-
-		clk_disable_unprepare(lvds->clocks.mod);
-		reset_control_assert(lvds->rstc);
 	}
 
-	lvds->enabled = false;
-}
+	if (lvds->info->quirks & RCAR_LVDS_QUIRK_PWD) {
+		lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_PWD;
+		rcar_lvds_write(lvds, LVDCR0, lvdcr0);
+	}
 
-static void rcar_lvds_disable(struct drm_bridge *bridge)
-{
-	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
+	if (!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)) {
+		lvdcr0 = rcar_lvds_read(lvds, LVDCR0) & ~LVDCR0_PLLON;
+		rcar_lvds_write(lvds, LVDCR0, lvdcr0);
+	}
 
-	if (lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)
-		return;
+	rcar_lvds_write(lvds, LVDCR1, 0);
+	rcar_lvds_write(lvds, LVDPLLCR, 0);
 
-	__rcar_lvds_disable(bridge);
+	/* Disable the companion LVDS encoder in dual-link mode. */
+	if (lvds->link_type != RCAR_LVDS_SINGLE_LINK && lvds->companion)
+		lvds->companion->funcs->atomic_disable(lvds->companion,
+						       old_bridge_state);
+
+	clk_disable_unprepare(lvds->clocks.mod);
+	reset_control_assert(lvds->rstc);
 }
 
 static bool rcar_lvds_mode_fixup(struct drm_bridge *bridge,
@@ -664,73 +663,21 @@ static bool rcar_lvds_mode_fixup(struct drm_bridge *bridge,
 				 struct drm_display_mode *adjusted_mode)
 {
 	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
+	int min_freq;
 
 	/*
 	 * The internal LVDS encoder has a restricted clock frequency operating
-	 * range (31MHz to 148.5MHz). In case of r8a77990/r8a77995, frequency
-	 * operating range (5MHz to 148.5MHz). Clamp the clock accordingly.
+	 * range, from 5MHz to 148.5MHz on D3 and E3, and from 31MHz to
+	 * 148.5MHz on all other platforms. Clamp the clock accordingly.
 	 */
-	if (lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)
-		adjusted_mode->clock = clamp(adjusted_mode->clock,
-					     5000, 148500);
-	else
-		adjusted_mode->clock = clamp(adjusted_mode->clock,
-					     31000, 148500);
+	min_freq = lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL ? 5000 : 31000;
+	adjusted_mode->clock = clamp(adjusted_mode->clock, min_freq, 148500);
 
 	return true;
 }
 
-static void rcar_lvds_get_lvds_mode(struct rcar_lvds *lvds)
-{
-	struct drm_display_info *info = &lvds->connector.display_info;
-	enum rcar_lvds_mode mode;
-
-	/*
-	 * There is no API yet to retrieve LVDS mode from a bridge, only panels
-	 * are supported.
-	 */
-	if (!lvds->panel)
-		return;
-
-	if (!info->num_bus_formats || !info->bus_formats) {
-		dev_err(lvds->dev, "no LVDS bus format reported\n");
-		return;
-	}
-
-	switch (info->bus_formats[0]) {
-	case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
-	case MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA:
-		mode = RCAR_LVDS_MODE_JEIDA;
-		break;
-	case MEDIA_BUS_FMT_RGB888_1X7X4_SPWG:
-		mode = RCAR_LVDS_MODE_VESA;
-		break;
-	default:
-		dev_err(lvds->dev, "unsupported LVDS bus format 0x%04x\n",
-			info->bus_formats[0]);
-		return;
-	}
-
-	if (info->bus_flags & DRM_BUS_FLAG_DATA_LSB_TO_MSB)
-		mode |= RCAR_LVDS_MODE_MIRROR;
-
-	lvds->mode = mode;
-}
-
-static void rcar_lvds_mode_set(struct drm_bridge *bridge,
-			       struct drm_display_mode *mode,
-			       struct drm_display_mode *adjusted_mode)
-{
-	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
-
-	WARN_ON(lvds->enabled);
-
-	lvds->display_mode = *adjusted_mode;
-
-	rcar_lvds_get_lvds_mode(lvds);
-}
-
-static int rcar_lvds_attach(struct drm_bridge *bridge)
+static int rcar_lvds_attach(struct drm_bridge *bridge,
+			    enum drm_bridge_attach_flags flags)
 {
 	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
 	struct drm_connector *connector = &lvds->connector;
@@ -740,9 +687,17 @@ static int rcar_lvds_attach(struct drm_bridge *bridge)
 	/* If we have a next bridge just attach it. */
 	if (lvds->next_bridge)
 		return drm_bridge_attach(bridge->encoder, lvds->next_bridge,
-					 bridge);
+					 bridge, flags);
 
-	/* Otherwise we have a panel, create a connector. */
+	if (flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR) {
+		DRM_ERROR("Fix bridge driver to make connector optional!");
+		return -EINVAL;
+	}
+
+	/* Otherwise if we have a panel, create a connector. */
+	if (!lvds->panel)
+		return 0;
+
 	ret = drm_connector_init(bridge->dev, connector, &rcar_lvds_conn_funcs,
 				 DRM_MODE_CONNECTOR_LVDS);
 	if (ret < 0)
@@ -750,172 +705,159 @@ static int rcar_lvds_attach(struct drm_bridge *bridge)
 
 	drm_connector_helper_add(connector, &rcar_lvds_conn_helper_funcs);
 
-	ret = drm_mode_connector_attach_encoder(connector, encoder);
+	ret = drm_connector_attach_encoder(connector, encoder);
 	if (ret < 0)
 		return ret;
 
-	return drm_panel_attach(lvds->panel, connector);
+	return 0;
 }
 
 static void rcar_lvds_detach(struct drm_bridge *bridge)
 {
-	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
-
-	if (lvds->panel)
-		drm_panel_detach(lvds->panel);
 }
 
 static const struct drm_bridge_funcs rcar_lvds_bridge_ops = {
 	.attach = rcar_lvds_attach,
 	.detach = rcar_lvds_detach,
-	.enable = rcar_lvds_enable,
-	.disable = rcar_lvds_disable,
+	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
+	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
+	.atomic_reset = drm_atomic_helper_bridge_reset,
+	.atomic_enable = rcar_lvds_atomic_enable,
+	.atomic_disable = rcar_lvds_atomic_disable,
 	.mode_fixup = rcar_lvds_mode_fixup,
-	.mode_set = rcar_lvds_mode_set,
 };
+
+bool rcar_lvds_dual_link(struct drm_bridge *bridge)
+{
+	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
+
+	return lvds->link_type != RCAR_LVDS_SINGLE_LINK;
+}
+EXPORT_SYMBOL_GPL(rcar_lvds_dual_link);
 
 /* -----------------------------------------------------------------------------
  * Probe & Remove
  */
 
-static int rcar_lvds_parse_dt(struct rcar_lvds *lvds)
+static int rcar_lvds_parse_dt_companion(struct rcar_lvds *lvds)
 {
-	struct device_node *local_output = NULL;
-	struct device_node *remote_input = NULL;
-	struct device_node *remote = NULL;
-	struct device_node *node;
-	bool is_bridge = false;
+	const struct of_device_id *match;
+	struct device_node *companion;
+	struct device_node *port0, *port1;
+	struct rcar_lvds *companion_lvds;
+	struct device *dev = lvds->dev;
+	int dual_link;
 	int ret = 0;
-	u32 id;
-	const char *str;
 
-	local_output = of_graph_get_endpoint_by_regs(lvds->dev->of_node, 1, 0);
-	if (!local_output) {
-		dev_dbg(lvds->dev, "unconnected port@1\n");
-		return -ENODEV;
+	/* Locate the companion LVDS encoder for dual-link operation, if any. */
+	companion = of_parse_phandle(dev->of_node, "renesas,companion", 0);
+	if (!companion)
+		return 0;
+
+	/*
+	 * Sanity check: the companion encoder must have the same compatible
+	 * string.
+	 */
+	match = of_match_device(dev->driver->of_match_table, dev);
+	if (!of_device_is_compatible(companion, match->compatible)) {
+		dev_err(dev, "Companion LVDS encoder is invalid\n");
+		ret = -ENXIO;
+		goto done;
 	}
 
 	/*
-	 * Locate the connected entity and infer its type from the number of
-	 * endpoints.
+	 * We need to work out if the sink is expecting us to function in
+	 * dual-link mode. We do this by looking at the DT port nodes we are
+	 * connected to, if they are marked as expecting even pixels and
+	 * odd pixels than we need to enable vertical stripe output.
 	 */
-	remote = of_graph_get_remote_port_parent(local_output);
-	if (!remote) {
-		dev_dbg(lvds->dev, "unconnected endpoint %pOF\n", local_output);
-		ret = -ENODEV;
-		goto done;
-	}
+	port0 = of_graph_get_port_by_id(dev->of_node, 1);
+	port1 = of_graph_get_port_by_id(companion, 1);
+	dual_link = drm_of_lvds_get_dual_link_pixel_order(port0, port1);
+	of_node_put(port0);
+	of_node_put(port1);
 
-	if (!of_device_is_available(remote)) {
-		dev_dbg(lvds->dev, "connected entity %pOF is disabled\n",
-			remote);
-		ret = -ENODEV;
-		goto done;
-	}
-
-	remote_input = of_graph_get_remote_endpoint(local_output);
-
-	for_each_endpoint_of_node(remote, node) {
-		if (node != remote_input) {
-			/*
-			 * We've found one endpoint other than the input, this
-			 * must be a bridge.
-			 */
-			is_bridge = true;
-			of_node_put(node);
-			break;
-		}
-	}
-
-	if (is_bridge) {
-		lvds->next_bridge = of_drm_find_bridge(remote);
-		if (!lvds->next_bridge)
-			ret = -EPROBE_DEFER;
-	} else {
-		lvds->panel = of_drm_find_panel(remote);
-		if (!lvds->panel)
-			ret = -EPROBE_DEFER;
-	}
-
-	/* Make sure LVDS id is present and sane */
-	if (!of_property_read_u32(lvds->dev->of_node, "renesas,id", &id))
-		lvds->id = id;
-	else
-		lvds->id = 0;
-
-	if (!of_property_read_string(lvds->dev->of_node, "mode", &str)) {
-		if (!strcmp(str, "dual-link"))
-			lvds->link_mode = RCAR_LVDS_DUAL;
+	switch (dual_link) {
+	case DRM_LVDS_DUAL_LINK_ODD_EVEN_PIXELS:
+		lvds->link_type = RCAR_LVDS_DUAL_LINK_ODD_EVEN_PIXELS;
+		break;
+	case DRM_LVDS_DUAL_LINK_EVEN_ODD_PIXELS:
+		lvds->link_type = RCAR_LVDS_DUAL_LINK_EVEN_ODD_PIXELS;
+		break;
+	default:
+		/*
+		 * Early dual-link bridge specific implementations populate the
+		 * timings field of drm_bridge. If the flag is set, we assume
+		 * that we are expected to generate even pixels from the primary
+		 * encoder, and odd pixels from the companion encoder.
+		 */
+		if (lvds->next_bridge && lvds->next_bridge->timings &&
+		    lvds->next_bridge->timings->dual_link)
+			lvds->link_type = RCAR_LVDS_DUAL_LINK_EVEN_ODD_PIXELS;
 		else
-			lvds->link_mode = RCAR_LVDS_SINGLE;
-	} else {
-		lvds->link_mode = RCAR_LVDS_SINGLE;
+			lvds->link_type = RCAR_LVDS_SINGLE_LINK;
 	}
+
+	if (lvds->link_type == RCAR_LVDS_SINGLE_LINK) {
+		dev_dbg(dev, "Single-link configuration detected\n");
+		goto done;
+	}
+
+	lvds->companion = of_drm_find_bridge(companion);
+	if (!lvds->companion) {
+		ret = -EPROBE_DEFER;
+		goto done;
+	}
+
+	dev_dbg(dev,
+		"Dual-link configuration detected (companion encoder %pOF)\n",
+		companion);
+
+	if (lvds->link_type == RCAR_LVDS_DUAL_LINK_ODD_EVEN_PIXELS)
+		dev_dbg(dev, "Data swapping required\n");
+
+	/*
+	 * FIXME: We should not be messing with the companion encoder private
+	 * data from the primary encoder, we should rather let the companion
+	 * encoder work things out on its own. However, the companion encoder
+	 * doesn't hold a reference to the primary encoder, and
+	 * drm_of_lvds_get_dual_link_pixel_order needs to be given references
+	 * to the output ports of both encoders, therefore leave it like this
+	 * for the time being.
+	 */
+	companion_lvds = bridge_to_rcar_lvds(lvds->companion);
+	companion_lvds->link_type = lvds->link_type;
 
 done:
-	of_node_put(local_output);
-	of_node_put(remote_input);
-	of_node_put(remote);
+	of_node_put(companion);
 
 	return ret;
 }
 
-int rcar_lvds_pll_round_rate(u32 index, unsigned long rate)
+static int rcar_lvds_parse_dt(struct rcar_lvds *lvds)
 {
-	struct rcar_lvds *lvds;
 	int ret;
 
-	if (index >= RCAR_LVDS_MAX_NUM)
-		return 0;
+	ret = drm_of_find_panel_or_bridge(lvds->dev->of_node, 1, 0,
+					  &lvds->panel, &lvds->next_bridge);
+	if (ret)
+		goto done;
 
-	lvds = g_lvds[index];
+	if (lvds->info->quirks & RCAR_LVDS_QUIRK_DUAL_LINK)
+		ret = rcar_lvds_parse_dt_companion(lvds);
 
-	if (!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL))
-		return 0;
+done:
+	/*
+	 * On D3/E3 the LVDS encoder provides a clock to the DU, which can be
+	 * used for the DPAD output even when the LVDS output is not connected.
+	 * Don't fail probe in that case as the DU will need the bridge to
+	 * control the clock.
+	 */
+	if (lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL)
+		return ret == -ENODEV ? 0 : ret;
 
-	if (rate == 0) {
-		__rcar_lvds_disable(&lvds->bridge);
-	} else {
-		if ((lvds->info->quirks & RCAR_LVDS_QUIRK_DUAL_LINK) &&
-		    lvds->link_mode == RCAR_LVDS_DUAL) {
-			bool enable;
-			struct rcar_lvds *lvds0;
-			struct rcar_lvds *lvds1;
-
-			if (!g_lvds[0] || !g_lvds[1])
-				return 0;
-
-			lvds0 = g_lvds[0];
-			lvds1 = g_lvds[1];
-
-			enable = __clk_is_enabled(lvds->clocks.mod);
-			if (enable)
-				goto skip;
-
-			reset_control_deassert(lvds0->rstc);
-			reset_control_deassert(lvds1->rstc);
-
-			ret = clk_prepare_enable(lvds0->clocks.mod);
-			if (ret < 0)
-				return ret;
-
-			ret = clk_prepare_enable(lvds1->clocks.mod);
-			if (ret < 0)
-				return ret;
-skip:
-			rcar_lvds_pll_setup_d3_e3(lvds, rate);
-		} else {
-			reset_control_deassert(lvds->rstc);
-			ret = clk_prepare_enable(lvds->clocks.mod);
-			if (ret < 0)
-				return ret;
-			rcar_lvds_pll_setup_d3_e3(lvds, rate);
-		}
-	}
-
-	return 0;
+	return ret;
 }
-EXPORT_SYMBOL(rcar_lvds_pll_round_rate);
 
 static struct clk *rcar_lvds_get_clock(struct rcar_lvds *lvds, const char *name,
 				       bool optional)
@@ -971,8 +913,23 @@ static int rcar_lvds_get_clocks(struct rcar_lvds *lvds)
 	return 0;
 }
 
+static const struct rcar_lvds_device_info rcar_lvds_r8a7790es1_info = {
+	.gen = 2,
+	.quirks = RCAR_LVDS_QUIRK_LANES,
+	.pll_setup = rcar_lvds_pll_setup_gen2,
+};
+
+static const struct soc_device_attribute lvds_quirk_matches[] = {
+	{
+		.soc_id = "r8a7790", .revision = "ES1.*",
+		.data = &rcar_lvds_r8a7790es1_info,
+	},
+	{ /* sentinel */ }
+};
+
 static int rcar_lvds_probe(struct platform_device *pdev)
 {
+	const struct soc_device_attribute *attr;
 	struct rcar_lvds *lvds;
 	struct resource *mem;
 	int ret;
@@ -985,7 +942,10 @@ static int rcar_lvds_probe(struct platform_device *pdev)
 
 	lvds->dev = &pdev->dev;
 	lvds->info = of_device_get_match_data(&pdev->dev);
-	lvds->enabled = false;
+
+	attr = soc_device_match(lvds_quirk_matches);
+	if (attr)
+		lvds->info = attr->data;
 
 	ret = rcar_lvds_parse_dt(lvds);
 	if (ret < 0)
@@ -1012,11 +972,6 @@ static int rcar_lvds_probe(struct platform_device *pdev)
 
 	drm_bridge_add(&lvds->bridge);
 
-	if (!(lvds->info->quirks & RCAR_LVDS_QUIRK_EXT_PLL))
-		return 0;
-
-	g_lvds[lvds->id] = lvds;
-
 	return 0;
 }
 
@@ -1031,12 +986,6 @@ static int rcar_lvds_remove(struct platform_device *pdev)
 
 static const struct rcar_lvds_device_info rcar_lvds_gen2_info = {
 	.gen = 2,
-	.pll_setup = rcar_lvds_pll_setup_gen2,
-};
-
-static const struct rcar_lvds_device_info rcar_lvds_r8a7790_info = {
-	.gen = 2,
-	.quirks = RCAR_LVDS_QUIRK_LANES,
 	.pll_setup = rcar_lvds_pll_setup_gen2,
 };
 
@@ -1056,25 +1005,35 @@ static const struct rcar_lvds_device_info rcar_lvds_r8a77990_info = {
 	.gen = 3,
 	.quirks = RCAR_LVDS_QUIRK_GEN3_LVEN | RCAR_LVDS_QUIRK_EXT_PLL
 		| RCAR_LVDS_QUIRK_DUAL_LINK,
+	.pll_setup = rcar_lvds_pll_setup_d3_e3,
 };
 
 static const struct rcar_lvds_device_info rcar_lvds_r8a77995_info = {
 	.gen = 3,
 	.quirks = RCAR_LVDS_QUIRK_GEN3_LVEN | RCAR_LVDS_QUIRK_PWD
 		| RCAR_LVDS_QUIRK_EXT_PLL | RCAR_LVDS_QUIRK_DUAL_LINK,
+	.pll_setup = rcar_lvds_pll_setup_d3_e3,
 };
 
 static const struct of_device_id rcar_lvds_of_table[] = {
+	{ .compatible = "renesas,r8a7742-lvds", .data = &rcar_lvds_gen2_info },
 	{ .compatible = "renesas,r8a7743-lvds", .data = &rcar_lvds_gen2_info },
-	{ .compatible = "renesas,r8a7790-lvds", .data = &rcar_lvds_r8a7790_info },
+	{ .compatible = "renesas,r8a7744-lvds", .data = &rcar_lvds_gen2_info },
+	{ .compatible = "renesas,r8a774a1-lvds", .data = &rcar_lvds_gen3_info },
+	{ .compatible = "renesas,r8a774b1-lvds", .data = &rcar_lvds_gen3_info },
+	{ .compatible = "renesas,r8a774c0-lvds", .data = &rcar_lvds_r8a77990_info },
+	{ .compatible = "renesas,r8a774e1-lvds", .data = &rcar_lvds_gen3_info },
+	{ .compatible = "renesas,r8a7790-lvds", .data = &rcar_lvds_gen2_info },
 	{ .compatible = "renesas,r8a7791-lvds", .data = &rcar_lvds_gen2_info },
 	{ .compatible = "renesas,r8a7793-lvds", .data = &rcar_lvds_gen2_info },
 	{ .compatible = "renesas,r8a7795-lvds", .data = &rcar_lvds_gen3_info },
 	{ .compatible = "renesas,r8a7796-lvds", .data = &rcar_lvds_gen3_info },
+	{ .compatible = "renesas,r8a77961-lvds", .data = &rcar_lvds_gen3_info },
 	{ .compatible = "renesas,r8a77965-lvds", .data = &rcar_lvds_gen3_info },
+	{ .compatible = "renesas,r8a77970-lvds", .data = &rcar_lvds_r8a77970_info },
+	{ .compatible = "renesas,r8a77980-lvds", .data = &rcar_lvds_gen3_info },
 	{ .compatible = "renesas,r8a77990-lvds", .data = &rcar_lvds_r8a77990_info },
 	{ .compatible = "renesas,r8a77995-lvds", .data = &rcar_lvds_r8a77995_info },
-	{ .compatible = "renesas,r8a77970-lvds", .data = &rcar_lvds_r8a77970_info },
 	{ }
 };
 

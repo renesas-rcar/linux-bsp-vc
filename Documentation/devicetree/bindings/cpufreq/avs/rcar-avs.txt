@@ -14,24 +14,26 @@ Optional properties:
  - None
 
 Examples:
- - Below is device tree definition for R-Car H3 and M3:
+ - Below is device tree definition for R-Car H3/M3:
 
-  For H3:
+  For R-Car H3 ES2.0+:
 	avs: avs@e60a013c {
-		compatible = "renesas,r8a7795-avs", "renesas,rcar-gen3-avs";
+		compatible = "renesas,r8a77951-avs", "renesas,rcar-gen3-avs";
 		reg = <0 0xe60a013c 0 0x04>;
 		target_devices = <&a57_0>, <&a57_1>, <&a57_2>, <&a57_3>;
 	};
 
-  For M3:
+  For R-Car M3 ES1.x:
 	avs: avs@e60a013c {
-		compatible = "renesas,r8a7796-avs", "renesas,rcar-gen3-avs";
+		compatible = "renesas,r8a77960-avs", "renesas,rcar-gen3-avs";
 		reg = <0 0xe60a013c 0 0x04>;
 		target_devices = <&a57_0>, <&a57_1>;
 	};
 
-  For M3N:
-	avs: avs@e60a013c {
-		compatible = "renesas,r8a77965-avs", "renesas,rcar-gen3-avs";
-		reg = <0 0xe60a013c 0 0x04>;
-	};
+  For R-Car M3 ES3.0:
+        avs: avs@e60a013c {
+                compatible = "renesas,r8a77961-avs", "renesas,rcar-gen3-avs";
+                reg = <0 0xe60a013c 0 0x04>;
+                target_devices = <&a57_0>, <&a57_1>;
+        };
+

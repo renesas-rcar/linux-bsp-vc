@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * rcar_hwspinlock.c
  *
@@ -83,9 +84,9 @@ static int rcar_hwspinlock_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	/* map MFIS lock register */
-	addr = (u32 __iomem *)devm_ioremap_nocache(&pdev->dev,
-						   res->start,
-						   resource_size(res));
+	addr = (u32 __iomem *)devm_ioremap(&pdev->dev,
+					   res->start,
+					   resource_size(res));
 	if (!addr) {
 		dev_err(&pdev->dev, "Failed to remap register.\n");
 		ret = PTR_ERR(addr);

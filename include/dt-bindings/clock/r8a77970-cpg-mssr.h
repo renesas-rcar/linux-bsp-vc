@@ -1,11 +1,7 @@
-/*
+/* SPDX-License-Identifier: GPL-2.0+
+ *
  * Copyright (C) 2016 Renesas Electronics Corp.
  * Copyright (C) 2017 Cogent Embedded, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 #ifndef __DT_BINDINGS_CLOCK_R8A77970_CPG_MSSR_H__
 #define __DT_BINDINGS_CLOCK_R8A77970_CPG_MSSR_H__
@@ -44,5 +40,7 @@
 #define R8A77970_CLK_CPEX		28
 #define R8A77970_CLK_R			29
 #define R8A77970_CLK_OSC		30
+#define R8A77970_CLK_POST		31
+#define R8A77970_CLK_POST2		32
 
 #endif /* __DT_BINDINGS_CLOCK_R8A77970_CPG_MSSR_H__ */

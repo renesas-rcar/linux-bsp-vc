@@ -20,6 +20,18 @@
 #define RPF_MAX_WIDTH				8190
 #define RPF_MAX_HEIGHT				8190
 
+/* Pre extended display list command data structure. */
+struct vsp1_extcmd_auto_fld_body {
+	u32 top_y0;
+	u32 bottom_y0;
+	u32 top_c0;
+	u32 bottom_c0;
+	u32 top_c1;
+	u32 bottom_c1;
+	u32 reserved0;
+	u32 reserved1;
+} __packed;
+
 /* -----------------------------------------------------------------------------
  * Device Access
  */
@@ -45,6 +57,7 @@ static const struct v4l2_subdev_ops rpf_ops = {
 
 static void rpf_configure_stream(struct vsp1_entity *entity,
 				 struct vsp1_pipeline *pipe,
+				 struct vsp1_dl_list *dl,
 				 struct vsp1_dl_body *dlb)
 {
 	struct vsp1_rwpf *rpf = to_rwpf(&entity->subdev);
@@ -65,10 +78,15 @@ static void rpf_configure_stream(struct vsp1_entity *entity,
 		pstride |= format->plane_fmt[1].bytesperline
 			<< VI6_RPF_SRCM_PSTRIDE_C_SHIFT;
 
-	if (rpf->interlaced)
-		vsp1_rpf_write(rpf, dlb, VI6_RPF_SRCM_PSTRIDE, pstride * 2);
-	else
-		vsp1_rpf_write(rpf, dlb, VI6_RPF_SRCM_PSTRIDE, pstride);
+	/*
+	 * pstride has both STRIDE_Y and STRIDE_C, but multiplying the whole
+	 * of pstride by 2 is conveniently OK here as we are multiplying both
+	 * values.
+	 */
+	if (pipe->interlaced)
+		pstride *= 2;
+
+	vsp1_rpf_write(rpf, dlb, VI6_RPF_SRCM_PSTRIDE, pstride);
 
 	/* Format */
 	sink_format = vsp1_entity_get_pad_format(&rpf->entity,
@@ -92,7 +110,37 @@ static void rpf_configure_stream(struct vsp1_entity *entity,
 	vsp1_rpf_write(rpf, dlb, VI6_RPF_INFMT, infmt);
 	vsp1_rpf_write(rpf, dlb, VI6_RPF_DSWAP, fmtinfo->swap);
 
-	/* Output location */
+	/* Setting new pixel format for V3U */
+	if (fmtinfo->hwfmt == VI6_FMT_RGB10_RGB10A2_A2RGB10) {
+		if (fmtinfo->fourcc == V4L2_PIX_FMT_RGB10) {
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT0,
+					VI6_RPF_EXT_INFMT0_BYPP_M1_RGB10);
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT1,
+					VI6_RPF_EXT_INFMT1_RGB10);
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT2,
+					VI6_RPF_EXT_INFMT2_RGB10);
+		}
+
+		if (fmtinfo->fourcc == V4L2_PIX_FMT_A2RGB10) {
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT0,
+					VI6_RPF_EXT_INFMT0_BYPP_M1_RGB10);
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT1,
+					VI6_RPF_EXT_INFMT1_A2RGB10);
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT2,
+					VI6_RPF_EXT_INFMT2_A2RGB10);
+		}
+
+		if (fmtinfo->fourcc == V4L2_PIX_FMT_RGB10A2) {
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT0,
+					VI6_RPF_EXT_INFMT0_BYPP_M1_RGB10);
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT1,
+					VI6_RPF_EXT_INFMT1_RGB10A2);
+			vsp1_rpf_write(rpf, dlb, VI6_RPF_EXT_INFMT2,
+					VI6_RPF_EXT_INFMT2_RGB10A2);
+		}
+	}
+
+	/* Output location. */
 	if (pipe->brx) {
 		const struct v4l2_rect *compose;
 
@@ -104,14 +152,12 @@ static void rpf_configure_stream(struct vsp1_entity *entity,
 		top = compose->top;
 	}
 
-	if (rpf->interlaced)
-		vsp1_rpf_write(rpf, dlb, VI6_RPF_LOC,
-			       (left << VI6_RPF_LOC_HCOORD_SHIFT) |
-			       ((top / 2) << VI6_RPF_LOC_VCOORD_SHIFT));
-	else
-		vsp1_rpf_write(rpf, dlb, VI6_RPF_LOC,
-			       (left << VI6_RPF_LOC_HCOORD_SHIFT) |
-			       (top << VI6_RPF_LOC_VCOORD_SHIFT));
+	if (pipe->interlaced)
+		top /= 2;
+
+	vsp1_rpf_write(rpf, dlb, VI6_RPF_LOC,
+		       (left << VI6_RPF_LOC_HCOORD_SHIFT) |
+		       (top << VI6_RPF_LOC_VCOORD_SHIFT));
 
 	/*
 	 * On Gen2 use the alpha channel (extended to 8 bits) when available or
@@ -138,7 +184,7 @@ static void rpf_configure_stream(struct vsp1_entity *entity,
 	 */
 	switch (fmtinfo->fourcc) {
 	case V4L2_PIX_FMT_ARGB555:
-		if (CONFIG_VIDEO_RENESAS_VSP_ALPHA_BIT_ARGB1555 == 1)
+		if (CONFIG_VIDEO_RENESAS_VSP_ALPHA_BIT_ARGB1555 == 0)
 			alph_sel = VI6_RPF_ALPH_SEL_ASEL_SELECT |
 				   VI6_RPF_ALPH_SEL_AEXT_EXT |
 				   VI6_RPF_ALPH_SEL_ALPHA1_MASK |
@@ -211,6 +257,36 @@ static void rpf_configure_stream(struct vsp1_entity *entity,
 	}
 }
 
+static void vsp1_rpf_configure_autofld(struct vsp1_rwpf *rpf,
+				       struct vsp1_dl_list *dl)
+{
+	const struct v4l2_pix_format_mplane *format = &rpf->format;
+	struct vsp1_dl_ext_cmd *cmd;
+	struct vsp1_extcmd_auto_fld_body *auto_fld;
+	u32 offset_y, offset_c;
+
+	cmd = vsp1_dl_get_pre_cmd(dl);
+	if (WARN_ONCE(!cmd, "Failed to obtain an autofld cmd"))
+		return;
+
+	/* Re-index our auto_fld to match the current RPF. */
+	auto_fld = cmd->data;
+	auto_fld = &auto_fld[rpf->entity.index];
+
+	auto_fld->top_y0 = rpf->mem.addr[0];
+	auto_fld->top_c0 = rpf->mem.addr[1];
+	auto_fld->top_c1 = rpf->mem.addr[2];
+
+	offset_y = format->plane_fmt[0].bytesperline;
+	offset_c = format->plane_fmt[1].bytesperline;
+
+	auto_fld->bottom_y0 = rpf->mem.addr[0] + offset_y;
+	auto_fld->bottom_c0 = rpf->mem.addr[1] + offset_c;
+	auto_fld->bottom_c1 = rpf->mem.addr[2] + offset_c;
+
+	cmd->flags |= VI6_DL_EXT_AUTOFLD_INT | BIT(16 + rpf->entity.index);
+}
+
 static void rpf_configure_frame(struct vsp1_entity *entity,
 				struct vsp1_pipeline *pipe,
 				struct vsp1_dl_list *dl,
@@ -237,7 +313,6 @@ static void rpf_configure_partition(struct vsp1_entity *entity,
 	const struct vsp1_format_info *fmtinfo = rpf->fmtinfo;
 	const struct v4l2_pix_format_mplane *format = &rpf->format;
 	struct v4l2_rect crop;
-	u32 crop_width, crop_height, crop_x, crop_y, fourcc;
 	u32 i;
 
 	if (pipe->vmute_flag) {
@@ -272,63 +347,26 @@ static void rpf_configure_partition(struct vsp1_entity *entity,
 		crop.left += pipe->partition->rpf.left;
 	}
 
-	crop_width = crop.width;
-	crop_x = crop.left;
-	fourcc = rpf->fmtinfo->fourcc;
-
-	if (rpf->interlaced) {
-		crop_height = crop.height / 2;
-		crop_y = crop.top / 2;
-
-		if (fourcc == V4L2_PIX_FMT_UYVY ||
-		    fourcc == V4L2_PIX_FMT_VYUY ||
-		    fourcc == V4L2_PIX_FMT_YUYV ||
-		    fourcc == V4L2_PIX_FMT_YVYU) {
-			crop_width = round_down(crop_width, 2);
-			crop_x = round_down(crop_x, 2);
-		} else if ((fourcc == V4L2_PIX_FMT_NV12M) ||
-			   (fourcc == V4L2_PIX_FMT_NV21M)) {
-			crop_width = round_down(crop_width, 2);
-			crop_height = round_down(crop_height, 2);
-			crop_x = round_down(crop_x, 2);
-			crop_y = round_down(crop_y, 2);
-		} else if ((fourcc == V4L2_PIX_FMT_NV16M) ||
-			   (fourcc == V4L2_PIX_FMT_NV61M)) {
-			crop_width = round_down(crop_width, 2);
-			crop_x = round_down(crop_x, 2);
-		} else if ((fourcc == V4L2_PIX_FMT_YUV420M) ||
-			   (fourcc == V4L2_PIX_FMT_YUV444M) ||
-			   (fourcc == V4L2_PIX_FMT_YVU420M) ||
-			   (fourcc == V4L2_PIX_FMT_YVU444M)) {
-			crop_width = round_down(crop_width, 2);
-			crop_height = round_down(crop_height, 2);
-		} else if ((fourcc == V4L2_PIX_FMT_YUV422M) ||
-			   (fourcc == V4L2_PIX_FMT_YVU422M)) {
-			crop_width = round_down(crop_width, 2);
-			crop_height = round_down(crop_height, 2);
-			crop_x = round_down(crop_x, 2);
-			crop_y = round_down(crop_y, 2);
-		}
-	} else {
-		crop_height = crop.height;
-		crop_y = crop.top;
+	if (pipe->interlaced) {
+		crop.height = round_down(crop.height / 2, fmtinfo->vsub);
+		crop.top = round_down(crop.top / 2, fmtinfo->vsub);
 	}
 
 	vsp1_rpf_write(rpf, dlb, VI6_RPF_SRC_BSIZE,
-		       (crop_width << VI6_RPF_SRC_BSIZE_BHSIZE_SHIFT) |
-		       (crop_height << VI6_RPF_SRC_BSIZE_BVSIZE_SHIFT));
+		       (crop.width << VI6_RPF_SRC_BSIZE_BHSIZE_SHIFT) |
+		       (crop.height << VI6_RPF_SRC_BSIZE_BVSIZE_SHIFT));
 	vsp1_rpf_write(rpf, dlb, VI6_RPF_SRC_ESIZE,
-		       (crop_width << VI6_RPF_SRC_ESIZE_EHSIZE_SHIFT) |
-		       (crop_height << VI6_RPF_SRC_ESIZE_EVSIZE_SHIFT));
+		       (crop.width << VI6_RPF_SRC_ESIZE_EHSIZE_SHIFT) |
+		       (crop.height << VI6_RPF_SRC_ESIZE_EVSIZE_SHIFT));
 
-	mem.addr[0] += crop_y * format->plane_fmt[0].bytesperline
-		     + crop_x * fmtinfo->bpp[0] / 8;
+	mem.addr[0] += crop.top * format->plane_fmt[0].bytesperline
+		     + crop.left * fmtinfo->bpp[0] / 8;
 
 	if (format->num_planes > 1) {
 		unsigned int offset;
 
-		offset = crop_y * format->plane_fmt[1].bytesperline
-		       + crop_x / fmtinfo->hsub
+		offset = crop.top * format->plane_fmt[1].bytesperline
+		       + crop.left / fmtinfo->hsub
 		       * fmtinfo->bpp[1] / 8;
 		mem.addr[1] += offset;
 		mem.addr[2] += offset;
@@ -342,8 +380,12 @@ static void rpf_configure_partition(struct vsp1_entity *entity,
 	    fmtinfo->swap_uv)
 		swap(mem.addr[1], mem.addr[2]);
 
-	if (!(vsp1->ths_quirks & VSP1_AUTO_FLD_NOT_SUPPORT)) {
-		vsp1_dl_set_addr_auto_fld(dlb, rpf, mem);
+	/*
+	 * Interlaced pipelines will use the extended pre-cmd to process
+	 * SRCM_ADDR_{Y,C0,C1}.
+	 */
+	if (pipe->interlaced) {
+		vsp1_rpf_configure_autofld(rpf, dl);
 	} else {
 		vsp1_rpf_write(rpf, dlb, VI6_RPF_SRCM_ADDR_Y, mem.addr[0]);
 		vsp1_rpf_write(rpf, dlb, VI6_RPF_SRCM_ADDR_C0, mem.addr[1]);

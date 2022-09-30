@@ -1,7 +1,7 @@
 /*
  * TI SYSCON regmap reset driver
  *
- * Copyright (C) 2015-2016 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2015-2016 Texas Instruments Incorporated - https://www.ti.com/
  *	Andrew F. Davis <afd@ti.com>
  *	Suman Anna <afd@ti.com>
  *
@@ -189,7 +189,8 @@ static int ti_syscon_reset_probe(struct platform_device *pdev)
 	}
 
 	nr_controls = (size / sizeof(*list)) / 7;
-	controls = devm_kzalloc(dev, nr_controls * sizeof(*controls), GFP_KERNEL);
+	controls = devm_kcalloc(dev, nr_controls, sizeof(*controls),
+				GFP_KERNEL);
 	if (!controls)
 		return -ENOMEM;
 

@@ -1,37 +1,44 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
    drm_edid_load.c: use a built-in EDID data set or load it via the firmware
 		    interface
 
    Copyright (C) 2012 Carsten Emde <C.Emde@osadl.org>
 
-   This program is free software; you can redistribute it and/or
-   modify it under the terms of the GNU General Public License
-   as published by the Free Software Foundation; either version 2
-   of the License, or (at your option) any later version.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA.
 */
 
-#include <linux/module.h>
 #include <linux/firmware.h>
-#include <drm/drmP.h>
+#include <linux/module.h>
+#include <linux/platform_device.h>
+
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_drv.h>
 #include <drm/drm_edid.h>
+#include <drm/drm_print.h>
 
 static char edid_firmware[PATH_MAX];
 module_param_string(edid_firmware, edid_firmware, sizeof(edid_firmware), 0644);
 MODULE_PARM_DESC(edid_firmware, "Do not probe monitor, use specified EDID blob "
 	"from built-in data or /lib/firmware instead. ");
 
-#define GENERIC_EDIDS 7
+/* Use only for backward compatibility with drm_kms_helper.edid_firmware */
+int __drm_set_edid_firmware_path(const char *path)
+{
+	scnprintf(edid_firmware, sizeof(edid_firmware), "%s", path);
+
+	return 0;
+}
+EXPORT_SYMBOL(__drm_set_edid_firmware_path);
+
+/* Use only for backward compatibility with drm_kms_helper.edid_firmware */
+int __drm_get_edid_firmware_path(char *buf, size_t bufsize)
+{
+	return scnprintf(buf, bufsize, "%s", edid_firmware);
+}
+EXPORT_SYMBOL(__drm_get_edid_firmware_path);
+
+#define GENERIC_EDIDS 6
 static const char * const generic_edid_name[GENERIC_EDIDS] = {
 	"edid/800x600.bin",
 	"edid/1024x768.bin",
@@ -39,7 +46,6 @@ static const char * const generic_edid_name[GENERIC_EDIDS] = {
 	"edid/1600x1200.bin",
 	"edid/1680x1050.bin",
 	"edid/1920x1080.bin",
-	"edid/VMO1312_1920x1080.bin",
 };
 
 static const u8 generic_edid[GENERIC_EDIDS][128] = {
@@ -151,24 +157,6 @@ static const u8 generic_edid[GENERIC_EDIDS][128] = {
 	0x00, 0x4c, 0x69, 0x6e, 0x75, 0x78, 0x20, 0x46,
 	0x48, 0x44, 0x0a, 0x20, 0x20, 0x20, 0x00, 0x05,
 	},
-	{
-	0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
-	0x59, 0xaf, 0x12, 0x13, 0x00, 0x00, 0x00, 0x00,
-	0x12, 0x17, 0x01, 0x03, 0x80, 0xc0, 0x6c, 0x78,
-	0xea, 0xc9, 0x05, 0xa3, 0x57, 0x4b, 0x9c, 0x25,
-	0x12, 0x50, 0x54, 0x21, 0x08, 0x00, 0x01, 0x01,
-	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x24, 0x36,
-	0x80, 0xa0, 0x70, 0x38, 0x1f, 0x40, 0x30, 0x20,
-	0x25, 0x00, 0xc0, 0x6c, 0x00, 0x00, 0x00, 0x1a,
-	0x00, 0x00, 0x00, 0xff, 0x00, 0x30, 0x30, 0x0a,
-	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-	0x20, 0x20, 0x00, 0x00, 0x00, 0xfd, 0x00, 0x38,
-	0x46, 0x1f, 0x4d, 0x11, 0x00, 0x0a, 0x20, 0x20,
-	0x20, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0xfc,
-	0x00, 0x56, 0x43, 0x42, 0x31, 0x33, 0x30, 0x30,
-	0x48, 0x0a, 0x20, 0x20, 0x20, 0x20, 0x00, 0xc7,
-	},
 };
 
 static int edid_size(const u8 *edid, int data_size)
@@ -187,7 +175,7 @@ static void *edid_load(struct drm_connector *connector, const char *name,
 	u8 *edid;
 	int fwsize, builtin;
 	int i, valid_extensions = 0;
-	bool print_bad_edid = !connector->bad_edid_counter || (drm_debug & DRM_UT_KMS);
+	bool print_bad_edid = !connector->bad_edid_counter || drm_debug_enabled(DRM_UT_KMS);
 
 	builtin = match_string(generic_edid_name, GENERIC_EDIDS, name);
 	if (builtin >= 0) {
@@ -293,6 +281,8 @@ struct edid *drm_load_edid_firmware(struct drm_connector *connector)
 	 * the last one found one as a fallback.
 	 */
 	fwstr = kstrdup(edid_firmware, GFP_KERNEL);
+	if (!fwstr)
+		return ERR_PTR(-ENOMEM);
 	edidstr = fwstr;
 
 	while ((edidname = strsep(&edidstr, ","))) {

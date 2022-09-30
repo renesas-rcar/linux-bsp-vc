@@ -35,6 +35,8 @@
 #include <asm/mach/flash.h>
 #include <asm/mach/time.h>
 
+#include "irqs.h"
+
 #define DSMG600_SDA_PIN		5
 #define DSMG600_SCL_PIN		4
 
@@ -179,10 +181,10 @@ static int power_button_countdown;
 /* Must hold the button down for at least this many counts to be processed */
 #define PBUTTON_HOLDDOWN_COUNT 4 /* 2 secs */
 
-static void dsmg600_power_handler(unsigned long data);
-static DEFINE_TIMER(dsmg600_power_timer, dsmg600_power_handler, 0, 0);
+static void dsmg600_power_handler(struct timer_list *unused);
+static DEFINE_TIMER(dsmg600_power_timer, dsmg600_power_handler);
 
-static void dsmg600_power_handler(unsigned long data)
+static void dsmg600_power_handler(struct timer_list *unused)
 {
 	/* This routine is called twice per second to check the
 	 * state of the power button.
@@ -267,9 +269,6 @@ device_initcall(dsmg600_gpio_init);
 static void __init dsmg600_init(void)
 {
 	ixp4xx_sys_init();
-
-	/* Make sure that GPIO14 and GPIO15 are not used as clocks */
-	*IXP4XX_GPIO_GPCLKR = 0;
 
 	dsmg600_flash_resource.start = IXP4XX_EXP_BUS_BASE(0);
 	dsmg600_flash_resource.end =

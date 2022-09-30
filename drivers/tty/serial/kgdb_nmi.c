@@ -50,7 +50,7 @@ static int kgdb_nmi_console_setup(struct console *co, char *options)
 	 * I/O utilities that messages sent to the console will automatically
 	 * be displayed on the dbg_io.
 	 */
-	dbg_io_ops->is_console = true;
+	dbg_io_ops->cons = co;
 
 	return 0;
 }
@@ -118,7 +118,7 @@ static int kgdb_nmi_poll_one_knock(void)
 	int c = -1;
 	const char *magic = kgdb_nmi_magic;
 	size_t m = strlen(magic);
-	bool printch = 0;
+	bool printch = false;
 
 	c = dbg_io_ops->read_char();
 	if (c == NO_POLL_CHAR)
@@ -130,7 +130,7 @@ static int kgdb_nmi_poll_one_knock(void)
 		n = (n + 1) % m;
 		if (!n)
 			return 1;
-		printch = 1;
+		printch = true;
 	} else {
 		n = 0;
 	}
@@ -188,9 +188,9 @@ bool kgdb_nmi_poll_knock(void)
  * The tasklet is cheap, it does not cause wakeups when reschedules itself,
  * instead it waits for the next tick.
  */
-static void kgdb_nmi_tty_receiver(unsigned long data)
+static void kgdb_nmi_tty_receiver(struct timer_list *t)
 {
-	struct kgdb_nmi_tty_priv *priv = (void *)data;
+	struct kgdb_nmi_tty_priv *priv = from_timer(priv, t, timer);
 	char ch;
 
 	priv->timer.expires = jiffies + (HZ/100);
@@ -241,7 +241,7 @@ static int kgdb_nmi_tty_install(struct tty_driver *drv, struct tty_struct *tty)
 		return -ENOMEM;
 
 	INIT_KFIFO(priv->fifo);
-	setup_timer(&priv->timer, kgdb_nmi_tty_receiver, (unsigned long)priv);
+	timer_setup(&priv->timer, kgdb_nmi_tty_receiver, 0);
 	tty_port_init(&priv->port);
 	priv->port.ops = &kgdb_nmi_tty_port_ops;
 	tty->driver_data = priv;

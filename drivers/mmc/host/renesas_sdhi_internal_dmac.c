@@ -1,12 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * DMA support for Internal DMAC with SDHI SD/SDIO controller
  *
- * Copyright (C) 2016-17 Renesas Electronics Corporation
+ * Copyright (C) 2016-19 Renesas Electronics Corporation
  * Copyright (C) 2016-17 Horms Solutions, Simon Horman
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (C) 2018-19 Sang Engineering, Wolfram Sang
  */
 
 #include <linux/bitops.h>
@@ -35,9 +33,9 @@
 
 /* DM_CM_DTRAN_MODE */
 #define DTRAN_MODE_CH_NUM_CH0	0	/* "downstream" = for write commands */
-#define DTRAN_MODE_CH_NUM_CH1	BIT(16)	/* "uptream" = for read commands */
-#define DTRAN_MODE_BUS_WID_TH	(BIT(5) | BIT(4))
-#define DTRAN_MODE_ADDR_MODE	BIT(0)	/* 1 = Increment address */
+#define DTRAN_MODE_CH_NUM_CH1	BIT(16)	/* "upstream" = for read commands */
+#define DTRAN_MODE_BUS_WIDTH	(BIT(5) | BIT(4))
+#define DTRAN_MODE_ADDR_MODE	BIT(0)	/* 1 = Increment address, 0 = Fixed */
 
 /* DM_CM_DTRAN_CTRL */
 #define DTRAN_CTRL_DM_START	BIT(0)
@@ -49,13 +47,13 @@
 
 /* DM_CM_INFO1 and DM_CM_INFO1_MASK */
 #define INFO1_CLEAR		0
-#define INFO1_MASK_CLEAR        GENMASK_ULL(31, 0)
+#define INFO1_MASK_CLEAR	GENMASK_ULL(31, 0)
 #define INFO1_DTRANEND1_BIT20	BIT(20)
 #define INFO1_DTRANEND1_BIT17	BIT(17)
 #define INFO1_DTRANEND0		BIT(16)
 
 /* DM_CM_INFO2 and DM_CM_INFO2_MASK */
-#define INFO2_MASK_CLEAR        GENMASK_ULL(31, 0)
+#define INFO2_MASK_CLEAR	GENMASK_ULL(31, 0)
 #define INFO2_DTRANERR1		BIT(17)
 #define INFO2_DTRANERR0		BIT(16)
 
@@ -77,14 +75,34 @@ static unsigned long global_flags;
 #define SDHI_INTERNAL_DMAC_ONE_RX_ONLY	0
 #define SDHI_INTERNAL_DMAC_RX_IN_USE	1
 
+/* RZ/A2 does not have the ADRR_MODE bit */
+#define SDHI_INTERNAL_DMAC_ADDR_MODE_FIXED_ONLY 2
+
+/* Gen3 DMAC end interrupt */
+#define SDHI_INTERNAL_DMAC_DTRANEND17	3
+
 /* Definitions for sampling clocks */
 static struct renesas_sdhi_scc rcar_gen3_scc_taps[] = {
 	{
 		.clk_rate = 0,
 		.tap = 0x00000300,
-		.tap_hs400 = 0x00000300,
 		.tap_hs400_4tap = 0x00000100,
 	},
+};
+
+static const struct renesas_sdhi_of_data of_rza2_compatible = {
+	.tmio_flags	= TMIO_MMC_HAS_IDLE_WAIT | TMIO_MMC_CLK_ACTUAL |
+			  TMIO_MMC_HAVE_CBSY,
+	.tmio_ocr_mask	= MMC_VDD_32_33,
+	.capabilities	= MMC_CAP_SD_HIGHSPEED | MMC_CAP_SDIO_IRQ |
+			  MMC_CAP_CMD23,
+	.bus_shift	= 2,
+	.scc_offset	= 0 - 0x1000,
+	.taps		= rcar_gen3_scc_taps,
+	.taps_num	= ARRAY_SIZE(rcar_gen3_scc_taps),
+	/* DMAC can handle 32bit blk count but only 1 segment */
+	.max_blk_count	= UINT_MAX / TMIO_MAX_BLK_SIZE,
+	.max_segs	= 1,
 };
 
 static const struct renesas_sdhi_of_data of_rcar_gen3_compatible = {
@@ -92,25 +110,24 @@ static const struct renesas_sdhi_of_data of_rcar_gen3_compatible = {
 			  TMIO_MMC_HAVE_CBSY | TMIO_MMC_MIN_RCAR2,
 	.capabilities	= MMC_CAP_SD_HIGHSPEED | MMC_CAP_SDIO_IRQ |
 			  MMC_CAP_CMD23,
-	.capabilities2	= MMC_CAP2_NO_WRITE_PROTECT,
+	.capabilities2	= MMC_CAP2_NO_WRITE_PROTECT | MMC_CAP2_MERGE_CAPABLE |
+			  MMC_CAP2_STOP_TUNE_SD,
 	.bus_shift	= 2,
-	.mmc0_addr	= 0xee140000,
 	.scc_offset	= 0x1000,
-	/* SCC module clock (SDnH) is enabled at 100MHz or more */
-	.scc_base_f_min = 100000000,
 	.taps		= rcar_gen3_scc_taps,
 	.taps_num	= ARRAY_SIZE(rcar_gen3_scc_taps),
-	/* DMAC can handle 0xffffffff blk count but only 1 segment */
-	.max_blk_count	= 0xffffffff,
+	/* DMAC can handle 32bit blk count but only 1 segment */
+	.max_blk_count	= UINT_MAX / TMIO_MAX_BLK_SIZE,
 	.max_segs	= 1,
-	/* If this device's IOMMU is enabled, it can use multiple segments */
-	.max_segs_on_iommu = 512,
 };
 
 static const struct of_device_id renesas_sdhi_internal_dmac_of_match[] = {
+	{ .compatible = "renesas,sdhi-r7s9210", .data = &of_rza2_compatible, },
+	{ .compatible = "renesas,sdhi-mmc-r8a77470", .data = &of_rcar_gen3_compatible, },
 	{ .compatible = "renesas,sdhi-r8a7795", .data = &of_rcar_gen3_compatible, },
 	{ .compatible = "renesas,sdhi-r8a7796", .data = &of_rcar_gen3_compatible, },
 	{ .compatible = "renesas,rcar-gen3-sdhi", .data = &of_rcar_gen3_compatible, },
+	{ .compatible = "renesas,rcar-gen4-sdhi", .data = &of_rcar_gen3_compatible, },
 	{},
 };
 MODULE_DEVICE_TABLE(of, renesas_sdhi_internal_dmac_of_match);
@@ -132,6 +149,9 @@ static void
 renesas_sdhi_internal_dmac_enable_dma(struct tmio_mmc_host *host, bool enable)
 {
 	struct renesas_sdhi *priv = host_to_priv(host);
+	u32 dma_dtranend1 =
+		test_bit(SDHI_INTERNAL_DMAC_DTRANEND17, &global_flags) ?
+		INFO1_DTRANEND1_BIT17 : INFO1_DTRANEND1_BIT20;
 
 	if (!host->chan_tx || !host->chan_rx)
 		return;
@@ -141,7 +161,7 @@ renesas_sdhi_internal_dmac_enable_dma(struct tmio_mmc_host *host, bool enable)
 						    INFO1_CLEAR);
 
 	if (priv->dma_priv.enable) {
-		host->dma_irq_mask = ~(host->dma_tranend1 | INFO1_DTRANEND0);
+		host->dma_irq_mask = ~(dma_dtranend1 | INFO1_DTRANEND0);
 		priv->dma_priv.enable(host, enable);
 		renesas_sdhi_internal_dmac_dm_write(host, DM_CM_INFO1_MASK,
 						    host->dma_irq_mask);
@@ -176,15 +196,16 @@ renesas_sdhi_internal_dmac_start_dma(struct tmio_mmc_host *host,
 				     struct mmc_data *data)
 {
 	struct scatterlist *sg = host->sg_ptr;
-	u32 dtran_mode = DTRAN_MODE_BUS_WID_TH | DTRAN_MODE_ADDR_MODE;
+	u32 dtran_mode = DTRAN_MODE_BUS_WIDTH;
 
-	if (!tmio_mmc_pre_dma_transfer(host, data, COOKIE_MAPPED))
+	if (!test_bit(SDHI_INTERNAL_DMAC_ADDR_MODE_FIXED_ONLY, &global_flags))
+		dtran_mode |= DTRAN_MODE_ADDR_MODE;
+
+	if (!dma_map_sg(&host->pdev->dev, sg, host->sg_len,
+			mmc_get_dma_dir(data)))
 		goto force_pio;
 
-	/*
-	 * In case of Gen3, this DMAC cannot handle if buffer is
-	 * not 128-bytes alignment
-	 */
+	/* This DMAC cannot handle if buffer is not 128-bytes alignment */
 	if (!IS_ALIGNED(sg_dma_address(sg), 128))
 		goto force_pio_with_unmap;
 
@@ -206,14 +227,14 @@ renesas_sdhi_internal_dmac_start_dma(struct tmio_mmc_host *host,
 	renesas_sdhi_internal_dmac_dm_write(host, DM_DTRAN_ADDR,
 					    sg_dma_address(sg));
 
+	host->dma_on = true;
+
 	return;
 
 force_pio_with_unmap:
 	dma_unmap_sg(&host->pdev->dev, sg, host->sg_len, mmc_get_dma_dir(data));
-	data->host_cookie = COOKIE_UNMAPPED;
 
 force_pio:
-	host->force_pio = true;
 	renesas_sdhi_internal_dmac_enable_dma(host, false);
 }
 
@@ -221,12 +242,37 @@ static void renesas_sdhi_internal_dmac_issue_tasklet_fn(unsigned long arg)
 {
 	struct tmio_mmc_host *host = (struct tmio_mmc_host *)arg;
 
-	tmio_mmc_enable_mmc_irqs(host, TMIO_STAT_DATAEND |
-				 TMIO_STAT_DATATIMEOUT);
+	tmio_mmc_enable_mmc_irqs(host, TMIO_STAT_DATAEND);
 
 	/* start the DMAC */
 	renesas_sdhi_internal_dmac_dm_write(host, DM_CM_DTRAN_CTRL,
 					    DTRAN_CTRL_DM_START);
+}
+
+static bool renesas_sdhi_internal_dmac_complete(struct tmio_mmc_host *host)
+{
+	enum dma_data_direction dir;
+
+	if (!host->dma_on)
+		return false;
+
+	if (!host->data)
+		return false;
+
+	if (host->data->flags & MMC_DATA_READ)
+		dir = DMA_FROM_DEVICE;
+	else
+		dir = DMA_TO_DEVICE;
+
+	renesas_sdhi_internal_dmac_enable_dma(host, false);
+	dma_unmap_sg(&host->pdev->dev, host->sg_ptr, host->sg_len, dir);
+
+	if (dir == DMA_FROM_DEVICE)
+		clear_bit(SDHI_INTERNAL_DMAC_RX_IN_USE, &global_flags);
+
+	host->dma_on = false;
+
+	return true;
 }
 
 static void renesas_sdhi_internal_dmac_complete_tasklet_fn(unsigned long arg)
@@ -234,28 +280,26 @@ static void renesas_sdhi_internal_dmac_complete_tasklet_fn(unsigned long arg)
 	struct tmio_mmc_host *host = (struct tmio_mmc_host *)arg;
 
 	spin_lock_irq(&host->lock);
-
-	if (!host->data)
+	if (!renesas_sdhi_internal_dmac_complete(host))
 		goto out;
-
-	renesas_sdhi_internal_dmac_enable_dma(host, false);
-	if (host->data && host->data->host_cookie == COOKIE_MAPPED) {
-		dma_unmap_sg(&host->pdev->dev, host->sg_ptr, host->sg_len,
-			     mmc_get_dma_dir(host->data));
-		host->data->host_cookie = COOKIE_UNMAPPED;
-	}
-
-	if (host->data->flags & MMC_DATA_READ)
-		clear_bit(SDHI_INTERNAL_DMAC_RX_IN_USE, &global_flags);
 
 	tmio_mmc_do_data_irq(host);
 out:
 	spin_unlock_irq(&host->lock);
 }
 
+static void renesas_sdhi_internal_dmac_end_dma(struct tmio_mmc_host *host)
+{
+	if (host->data)
+		renesas_sdhi_internal_dmac_complete(host);
+}
+
 static bool renesas_sdhi_internal_dmac_dma_irq(struct tmio_mmc_host *host)
 {
 	unsigned int ireg, status;
+	u32 dma_dtranend1 =
+		test_bit(SDHI_INTERNAL_DMAC_DTRANEND17, &global_flags) ?
+		INFO1_DTRANEND1_BIT17 : INFO1_DTRANEND1_BIT20;
 
 	status = renesas_sdhi_internal_dmac_dm_read(host, DM_CM_INFO1);
 	ireg = status & ~host->dma_irq_mask;
@@ -267,9 +311,9 @@ static bool renesas_sdhi_internal_dmac_dma_irq(struct tmio_mmc_host *host)
 		return true;
 	}
 
-	if (ireg & host->dma_tranend1) {
+	if (ireg & dma_dtranend1) {
 		renesas_sdhi_internal_dmac_dm_write(host, DM_CM_INFO1, ireg &
-						    ~host->dma_tranend1);
+						    ~dma_dtranend1);
 		tmio_mmc_set_transtate(host, TMIO_TRANSTATE_DEND);
 		return true;
 	}
@@ -290,9 +334,6 @@ renesas_sdhi_internal_dmac_request_dma(struct tmio_mmc_host *host,
 
 	/* Each value is set to non-zero to assume "enabling" each DMA */
 	host->chan_rx = host->chan_tx = (void *)0xdeadbeaf;
-
-	host->dma_tranend1 = (priv->dtranend1_bit17) ?
-		INFO1_DTRANEND1_BIT17 : INFO1_DTRANEND1_BIT20;
 
 	tasklet_init(&priv->dma_priv.dma_complete,
 		     renesas_sdhi_internal_dmac_complete_tasklet_fn,
@@ -316,6 +357,7 @@ static const struct tmio_mmc_dma_ops renesas_sdhi_internal_dmac_dma_ops = {
 	.release = renesas_sdhi_internal_dmac_release_dma,
 	.abort = renesas_sdhi_internal_dmac_abort_dma,
 	.dataend = renesas_sdhi_internal_dmac_dataend_dma,
+	.end = renesas_sdhi_internal_dmac_end_dma,
 	.dma_irq = renesas_sdhi_internal_dmac_dma_irq,
 };
 
@@ -323,30 +365,28 @@ static const struct tmio_mmc_dma_ops renesas_sdhi_internal_dmac_dma_ops = {
  * Whitelist of specific R-Car Gen3 SoC ES versions to use this DMAC
  * implementation as others may use a different implementation.
  */
-static const struct soc_device_attribute gen3_soc_whitelist[] = {
-	/* specific ones */
+static const struct soc_device_attribute soc_dma_quirks[] = {
+	{ .soc_id = "r7s9210",
+	  .data = (void *)BIT(SDHI_INTERNAL_DMAC_ADDR_MODE_FIXED_ONLY) },
 	{ .soc_id = "r8a7795", .revision = "ES1.*",
-	  .data = (void *)BIT(SDHI_INTERNAL_DMAC_ONE_RX_ONLY) },
+	  .data = (void *)(BIT(SDHI_INTERNAL_DMAC_ONE_RX_ONLY) |
+			   BIT(SDHI_INTERNAL_DMAC_DTRANEND17)) },
 	{ .soc_id = "r8a7796", .revision = "ES1.0",
-	  .data = (void *)BIT(SDHI_INTERNAL_DMAC_ONE_RX_ONLY) },
-	/* generic ones */
-	{ .soc_id = "r8a7795" },
-	{ .soc_id = "r8a7796" },
-	{ .soc_id = "r8a77965" },
-	{ .soc_id = "r8a77980" },
-	{ .soc_id = "r8a77990" },
-	{ .soc_id = "r8a77995" },
+	  .data = (void *)(BIT(SDHI_INTERNAL_DMAC_ONE_RX_ONLY) |
+			   BIT(SDHI_INTERNAL_DMAC_DTRANEND17)) },
 	{ /* sentinel */ }
 };
 
 static int renesas_sdhi_internal_dmac_probe(struct platform_device *pdev)
 {
-	const struct soc_device_attribute *soc = soc_device_match(gen3_soc_whitelist);
+	const struct soc_device_attribute *soc = soc_device_match(soc_dma_quirks);
+	struct device *dev = &pdev->dev;
 
-	if (!soc)
-		return -ENODEV;
+	if (soc)
+		global_flags |= (unsigned long)soc->data;
 
-	global_flags |= (unsigned long)soc->data;
+	/* value is max of SD_SECCNT. Confirmed by HW engineers */
+	dma_set_max_seg_size(dev, 0xffffffff);
 
 #ifndef CONFIG_MMC_SDHI_PIO
 	return renesas_sdhi_probe(pdev, &renesas_sdhi_internal_dmac_dma_ops);
@@ -366,6 +406,7 @@ static const struct dev_pm_ops renesas_sdhi_internal_dmac_dev_pm_ops = {
 static struct platform_driver renesas_internal_dmac_sdhi_driver = {
 	.driver		= {
 		.name	= "renesas_sdhi_internal_dmac",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.pm	= &renesas_sdhi_internal_dmac_dev_pm_ops,
 		.of_match_table = renesas_sdhi_internal_dmac_of_match,
 	},

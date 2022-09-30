@@ -1,0 +1,405 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Device Tree Source for the VC4 vehicle computer board
+ *
+ * Copyright (C) 2021 Renesas Electronics Corp.
+ */
+
+/dts-v1/;
+
+#include "r8a779f0.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/mfd/renesas-vc4-fpga4000.h>
+
+/ {
+	model = "Renesas VC4 board based on r8a779f0";
+	compatible = "renesas,vc4", "renesas,r8a779f0";
+
+	aliases {
+		serial0 = &scif3;
+		serial1 = &scif0;
+		eth0 = &rswitch;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory@48000000 {
+		device_type = "memory";
+		/* first 128MB is reserved for secure area. */
+		reg = <0x0 0x48000000 0x0 0x78000000>;
+	};
+
+	reg_1p8v: regulator-1p8v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-1.8V";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	reg_3p3v: regulator-3p3v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-3.3V";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	vcc_sdhi: regulator-vcc-sdhi {
+		compatible = "regulator-fixed";
+
+		regulator-name = "SDHI Vcc";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		gpio = <&gpio1 24 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	vccq_sdhi: regulator-vccq-sdhi {
+		compatible = "regulator-gpio";
+
+		regulator-name = "SDHI VccQ";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3300000>;
+
+		gpio = <&gpio2 16 GPIO_ACTIVE_HIGH>;
+		gpios-states = <1>;
+		states = <3300000 1>, <1800000 0>;
+	};
+};
+
+&extal_clk {
+	clock-frequency = <20000000>;
+};
+
+&extalr_clk {
+	clock-frequency = <32768>;
+};
+
+&i2c1 {
+	status = "okay";
+
+	pinctrl-0 = <&i2c1_pins>;
+	pinctrl-names = "default";
+
+	clock-frequency = <400000>;
+
+	rtc@6f {
+		compatible = "isil,isl1208";
+		reg = <0x6f>;
+	};
+};
+
+&i2c4 {
+	status = "okay";
+
+	pinctrl-0 = <&i2c4_pins>;
+	pinctrl-names = "default";
+
+	clock-frequency = <400000>;
+
+	eeprom@50 {
+		compatible = "st,24c16", "atmel,24c16";
+		reg = <0x50>;
+
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		vcc-supply = <&reg_3p3v>;
+
+		label = "board-data";
+		pagesize = <8>;
+
+		rswitch2_gw_mac: rsw2gwmac@720 {
+			reg = <0x720 0x06>;
+		};
+		rswitch2_port0_mac: rsw2p2mac@728 {
+			reg = <0x728 0x06>;
+		};
+		rswitch2_port1_mac: rsw2p2mac@730 {
+			reg = <0x730 0x06>;
+		};
+		rswitch2_port2_mac: rsw2p2mac@738 {
+			reg = <0x738 0x06>;
+		};
+
+
+
+	};
+
+	fpga4000: fpga4000@71 {
+		compatible = "renesas,vc4-fpga4000";
+		reg = <0x71>;
+
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+};
+
+&mmc0 {
+	status = "okay";
+
+	pinctrl-0 = <&sd_pins>;
+	pinctrl-1 = <&sd_pins>;
+	pinctrl-names = "default", "state_uhs";
+
+	vmmc-supply = <&vcc_sdhi>;
+	vqmmc-supply = <&vccq_sdhi>;
+	cd-gpios = <&gpio1 23 GPIO_ACTIVE_LOW>;
+	bus-width = <4>;
+};
+
+&pfc {
+	i2c1_pins: i2c1 {
+		groups = "i2c1";
+		function = "i2c1";
+	};
+
+	i2c4_pins: i2c4 {
+		groups = "i2c4";
+		function = "i2c4";
+	};
+
+	pcie0_pins: pcie0 {
+		groups = "pcie0_clkreq_n";
+		function = "pcie";
+	};
+
+	pcie1_pins: pcie1 {
+		groups = "pcie1_clkreq_n";
+		function = "pcie";
+	};
+
+	rpc_pins: rpc {
+		qspi0 {
+			groups = "qspi0_data4", "qspi0_ctrl";
+			function = "qspi0";
+		};
+		qspi1 {
+			groups = "qspi1_data4", "qspi1_ctrl";
+			function = "qspi1";
+		};
+	};
+
+	scif0_pins: scif0 {
+		groups = "scif0_data", "scif0_ctrl";
+		function = "scif0";
+	};
+
+	scif3_pins: scif3 {
+		groups = "scif3_data", "scif3_ctrl";
+		function = "scif3";
+	};
+
+	scif_clk_pins: scif_clk {
+		groups = "scif_clk";
+		function = "scif_clk";
+	};
+
+	sd_pins: sd {
+		groups = "mmc_data4", "mmc_ctrl";
+		function = "mmc";
+		power-source = <3300>;
+	};
+};
+
+&pciec0 {
+	status = "okay";
+
+	pinctrl-0 = <&pcie0_pins>;
+	pinctrl-names = "default";
+};
+
+&pciec1 {
+	// Exists on the board, but enabling it currently causes boot hang
+	//status = "okay";
+
+	pinctrl-0 = <&pcie1_pins>;
+	pinctrl-names = "default";
+};
+
+&pcie_bus_clk {
+	clock-frequency = <100000000>;
+};
+
+&rpc {
+	status = "okay";
+
+	pinctrl-0 = <&rpc_pins>;
+	pinctrl-names = "default";
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <133000000>;
+		spi-rx-bus-width = <4>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			bootparam@0 {
+				reg = <0x00000000 0x00040000>;
+				read-only;
+			};
+			icumxa_loader@40000 {
+				reg = <0x00040000 0x00200000>;
+				read-only;
+			};
+			cert_header@240000 {
+				reg = <0x00240000 0x00040000>;
+				read-only;
+			};
+			secure_fw@280000 {
+				reg = <0x00280000 0x00100000>;
+				read-only;
+			};
+			icumh_payload@280000 {
+				reg = <0x00380000 0x00100000>;
+				read-only;
+			};
+			secure_monitor@480000 {
+				reg = <0x00480000 0x00080000>;
+				read-only;
+			};
+			rtos@500000 {
+				reg = <0x00500000 0x00400000>;
+				read-only;
+			};
+			g4mh_payload@900000 {
+				reg = <0x00900000 0x00100000>;
+				read-only;
+			};
+			space1@a00000 {
+				reg = <0x00a00000 0x00300000>;
+			};
+			uboot-env@d00000 {
+				reg = <0x00d00000 0x00040000>;
+			};
+			space2@d40000 {
+				reg = <0x00d40000 0x000c0000>;
+			};
+			uboot@e00000 {
+				reg = <0x00e00000 0x00200000>;
+				read-only;
+			};
+			tee@1000000 {
+				reg = <0x01000000 0x00100000>;
+				read-only;
+			};
+			space3@1100000 {
+				reg = <0x01100000 0x02f00000>;
+			};
+		};
+	};
+};
+
+&rswitch {
+	status = "okay";
+
+	/* MAC address of the gateway port sw0 */
+	nvmem-cells = <&rswitch2_gw_mac>;
+	nvmem-cell-names = "mac-address";
+
+	/* All 00 to be overwritten by bootloader or manually */
+	mac-address = [00 00 00 00 00 00];
+
+	ports {
+		tsn0: port@0 {
+			phy-mode = "sgmii";
+
+			nvmem-cells = <&rswitch2_port0_mac>;
+			nvmem-cell-names = "mac-address";
+
+			/* All 00 to be overwritten by bootloader or manually */
+			mac-address = [00 00 00 00 00 00];
+
+
+			/* phy-handle set via plugin */
+			tsn0_phy_2g5: ethernet-phy@0 {
+				reg = <0>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "disabled";
+			};
+			tsn0_phy_1g: ethernet-phy@3 {
+				reg = <3>;
+				compatible = "ethernet-phy-id002B.0218";
+				status = "disabled";
+			};
+		};
+		tsn1: port@1 {
+			phy-mode = "sgmii";
+
+			nvmem-cells = <&rswitch2_port1_mac>;
+			nvmem-cell-names = "mac-address";
+
+			/* All 00 to be overwritten by bootloader or manually */
+			mac-address = [00 00 00 00 00 00];
+
+			/* phy-handle set via plugin */
+			tsn1_phy_2g5: ethernet-phy@0 {
+				reg = <0>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "disabled";
+			};
+			tsn1_phy_1g: ethernet-phy@3 {
+				reg = <3>;
+				compatible = "ethernet-phy-id002B.0218";
+				status = "disabled";
+			};
+		};
+		tsn2: port@2 {
+			phy-mode = "sgmii";
+
+			nvmem-cells = <&rswitch2_port2_mac>;
+			nvmem-cell-names = "mac-address";
+
+			/* All 00 to be overwritten by bootloader or manually */
+			mac-address = [00 00 00 00 00 00];
+
+
+			/* phy-handle set via plugin */
+			tsn2_phy_1g_rh: ethernet-phy@1 {
+				reg = <1>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "disabled";
+			};
+			tsn2_phy_1g: ethernet-phy@3 {
+				reg = <3>;
+				compatible = "ethernet-phy-id002B.0218";
+				status = "disabled";
+			};
+		};
+	};
+};
+
+&scif0 {
+	status = "okay";
+
+	pinctrl-0 = <&scif0_pins>;
+	pinctrl-names = "default";
+
+	uart-has-rtscts;
+};
+
+&scif3 {
+	status = "okay";
+
+	pinctrl-0 = <&scif3_pins>;
+	pinctrl-names = "default";
+
+	uart-has-rtscts;
+};
+
+&scif_clk {
+	pinctrl-0 = <&scif_clk_pins>;
+	pinctrl-names = "default";
+
+	clock-frequency = <24000000>;
+};

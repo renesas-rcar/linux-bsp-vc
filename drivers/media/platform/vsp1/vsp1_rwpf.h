@@ -2,7 +2,7 @@
 /*
  * vsp1_rwpf.h  --  R-Car VSP1 Read and Write Pixel Formatters
  *
- * Copyright (C) 2013-2018 Renesas Electronics Corporation
+ * Copyright (C) 2013-2014 Renesas Electronics Corporation
  *
  * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
  */
@@ -64,10 +64,9 @@ struct vsp1_rwpf {
 	} flip;
 
 	struct vsp1_rwpf_memory mem;
+	bool writeback;
 
 	struct vsp1_dl_manager *dlm;
-
-	bool interlaced;
 
 	int write_back;
 	dma_addr_t buf_addr[3];

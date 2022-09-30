@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Driver for Analog Devices ADV748X 8 channel analog front end (AFE) receiver
  * with standard definition processor (SDP)
  *
  * Copyright (C) 2017 Renesas Electronics Corp.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/delay.h>
@@ -124,6 +120,9 @@ static void adv748x_afe_fill_format(struct adv748x_afe *afe,
 
 	fmt->width = 720;
 	fmt->height = afe->curr_norm & V4L2_STD_525_60 ? 480 : 576;
+
+	/* Field height */
+	fmt->height /= 2;
 }
 
 static int adv748x_afe_std(v4l2_std_id std)
@@ -215,6 +214,7 @@ static int adv748x_afe_querystd(struct v4l2_subdev *sd, v4l2_std_id *std)
 {
 	struct adv748x_afe *afe = adv748x_sd_to_afe(sd);
 	struct adv748x_state *state = adv748x_afe_to_state(afe);
+	int afe_std;
 	int ret;
 
 	mutex_lock(&state->mutex);
@@ -233,8 +233,12 @@ static int adv748x_afe_querystd(struct v4l2_subdev *sd, v4l2_std_id *std)
 	/* Read detected standard */
 	ret = adv748x_afe_status(afe, NULL, std);
 
+	afe_std = adv748x_afe_std(afe->curr_norm);
+	if (afe_std < 0)
+		goto unlock;
+
 	/* Restore original state */
-	adv748x_afe_set_video_standard(state, afe->curr_norm);
+	adv748x_afe_set_video_standard(state, afe_std);
 
 unlock:
 	mutex_unlock(&state->mutex);
@@ -260,6 +264,7 @@ static int adv748x_afe_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	ret = adv748x_afe_status(afe, status, NULL);
 
 	mutex_unlock(&state->mutex);
+
 	return ret;
 }
 
@@ -267,7 +272,8 @@ static int adv748x_afe_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct adv748x_afe *afe = adv748x_sd_to_afe(sd);
 	struct adv748x_state *state = adv748x_afe_to_state(afe);
-	int ret, signal = V4L2_IN_ST_NO_SIGNAL;
+	u32 signal = V4L2_IN_ST_NO_SIGNAL;
+	int ret;
 
 	mutex_lock(&state->mutex);
 
@@ -277,10 +283,7 @@ static int adv748x_afe_s_stream(struct v4l2_subdev *sd, int enable)
 			goto unlock;
 	}
 
-	if (state->afe.txa_switch)
-		ret = adv748x_txa_power(state, enable);
-	else
-		ret = adv748x_txb_power(state, enable);
+	ret = adv748x_tx_power(afe->tx, enable);
 	if (ret)
 		goto unlock;
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* Renesas Ethernet AVB device driver
  *
  * Copyright (C) 2014-2017 Renesas Electronics Corporation
@@ -5,10 +6,6 @@
  * Copyright (C) 2015-2016 Cogent Embedded, Inc. <source@cogentembedded.com>
  *
  * Based on the SuperH Ethernet driver
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License version 2,
- * as published by the Free Software Foundation.
  */
 
 #ifndef __RAVB_H__
@@ -277,7 +274,7 @@ enum ravb_reg {
 	GECMR	= 0x05b0,
 	MAHR	= 0x05c0,
 	MALR	= 0x05c8,
-	TROCR	= 0x0700,	/* Undocumented? */
+	TROCR	= 0x0700,	/* R-Car Gen3 only */
 	CEFCR	= 0x0740,
 	FRECR	= 0x0748,
 	TSFRCR	= 0x0750,
@@ -515,10 +512,8 @@ enum EIS_BIT {
 	EIS_CULF1	= 0x00000080,
 	EIS_TFFF	= 0x00000100,
 	EIS_QFS		= 0x00010000,
+	EIS_RESERVED	= (GENMASK(31, 17) | GENMASK(15, 11)),
 };
-
-#define EIS_RESERVED_BIT \
-	(unsigned int)(GENMASK_ULL(31, 17) | GENMASK_ULL(15, 11))
 
 /* RIC0 */
 enum RIC0_BIT {
@@ -562,9 +557,8 @@ enum RIS0_BIT {
 	RIS0_FRF15	= 0x00008000,
 	RIS0_FRF16	= 0x00010000,
 	RIS0_FRF17	= 0x00020000,
+	RIS0_RESERVED	= GENMASK(31, 18),
 };
-
-#define RIS0_RESERVED_BIT	(unsigned int)(GENMASK_ULL(31, 18))
 
 /* RIC1 */
 enum RIC1_BIT {
@@ -620,9 +614,8 @@ enum RIS2_BIT {
 	RIS2_QFF16	= 0x00010000,
 	RIS2_QFF17	= 0x00020000,
 	RIS2_RFFF	= 0x80000000,
+	RIS2_RESERVED	= GENMASK(30, 18),
 };
-
-#define RIS2_RESERVED_BIT	(unsigned int)(GENMASK_ULL(30, 18))
 
 /* TIC */
 enum TIC_BIT {
@@ -638,11 +631,8 @@ enum TIS_BIT {
 	TIS_FTF1	= 0x00000002,	/* Undocumented? */
 	TIS_TFUF	= 0x00000100,
 	TIS_TFWF	= 0x00000200,
+	TIS_RESERVED	= (GENMASK(31, 20) | GENMASK(15, 12) | GENMASK(7, 4))
 };
-
-#define TIS_RESERVED_BIT \
-	(unsigned int)(GENMASK_ULL(31, 20) | GENMASK_ULL(15, 12) | \
-	GENMASK_ULL(7, 4))
 
 /* ISS */
 enum ISS_BIT {
@@ -715,9 +705,8 @@ enum GIC_BIT {
 enum GIS_BIT {
 	GIS_PTCF	= 0x00000001,	/* Undocumented? */
 	GIS_PTMF	= 0x00000004,
+	GIS_RESERVED	= GENMASK(15, 10),
 };
-
-#define GIS_RESERVED_BIT	(unsigned int)(GENMASK_ULL(15, 10))
 
 /* GIE (R-Car Gen3 only) */
 enum GIE_BIT {
@@ -1101,6 +1090,12 @@ enum RAVB_QUEUE {
 #define NUM_RX_QUEUE	2
 #define NUM_TX_QUEUE	2
 
+#define RX_BUF_SZ	(2048 - ETH_FCS_LEN + sizeof(__sum16))
+
+/* TX descriptors per packet */
+#define NUM_TX_DESC_GEN2	2
+#define NUM_TX_DESC_GEN3	1
+
 struct ravb_tstamp_skb {
 	struct list_head list;
 	struct sk_buff *skb;
@@ -1127,6 +1122,7 @@ struct ravb_ptp {
 enum ravb_chip_id {
 	RCAR_GEN2,
 	RCAR_GEN3,
+	RCAR_S4,
 };
 
 struct ravb_private {
@@ -1160,7 +1156,6 @@ struct ravb_private {
 	u32 dirty_rx[NUM_RX_QUEUE];	/* Producer ring indices */
 	u32 cur_tx[NUM_TX_QUEUE];
 	u32 dirty_tx[NUM_TX_QUEUE];
-	u32 rx_buf_sz;			/* Based on MTU+slack. */
 	struct napi_struct napi[NUM_RX_QUEUE];
 	struct work_struct work;
 	/* MII transceiver section. */
@@ -1169,7 +1164,6 @@ struct ravb_private {
 	phy_interface_t phy_interface;
 	int msg_enable;
 	int speed;
-	int duplex;
 	int emac_irq;
 	enum ravb_chip_id chip_id;
 	int rx_irqs[NUM_RX_QUEUE];
@@ -1178,7 +1172,10 @@ struct ravb_private {
 	unsigned no_avb_link:1;
 	unsigned avb_link_active_low:1;
 	unsigned wol_enabled:1;
-	int num_tx_desc;        /* TX descriptors per packet */
+	unsigned rxcidm:1;		/* RX Clock Internal Delay Mode */
+	unsigned txcidm:1;		/* TX Clock Internal Delay Mode */
+	unsigned rgmii_override:1;	/* Deprecated rgmii-*id behavior */
+	int num_tx_desc;		/* TX descriptors per packet */
 };
 
 static inline u32 ravb_read(struct net_device *ndev, enum ravb_reg reg)

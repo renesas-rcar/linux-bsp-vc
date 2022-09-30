@@ -1,19 +1,31 @@
-# A.Kamal (RSWITCH2)
+# SPDX-License-Identifier: GPL-2.0
 #
-# Makefile for the R-SWITCH2 Ethernet device driver.
+# Makefile for the RSwitch2 ethernet switch device driver.
 #
 
 #
 #  Build Options
 #
 
-# Include DEBUG functions
-#AK: Suppress GCC 4.9 warning for date & time 
-EXTRA_CFLAGS += -D_RSWITCH2_DEBUG -Wno-date-time
+obj-$(CONFIG_RENESAS_RSWITCH2) += rswitch2.o
 
-obj-$(CONFIG_RENESAS_RSWITCH2) += rswitch2.o 
+ifneq ($(CONFIG_RENESAS_RSWITCH2_PCI), )
+	rswitch2-y += rswitch2_pci.o
 
-rswitch2-objs := rswitch2_eth.o rswitch2_fwd.o rswitch2_ptp.o rswitch2_bridge.o
-# A.Kamal (RSWITCH2)
+ifneq ($(CONFIG_RENESAS_RSWITCH2_PCI_FW), )
+	rswitch2-y += rswitch2_pci_fw.o
+endif
+endif
+ifneq ($(CONFIG_RENESAS_RSWITCH2_PLATF), )
+	rswitch2-y += rswitch2_platf.o
+endif
+
+rswitch2-y += rswitch2_main.o
+ifneq ($(CONFIG_RENESAS_RSWITCH2_GWCA), )
+	rswitch2-y += rswitch2_eth.o
+endif
+
+rswitch2-y += rswitch2_fwd.o
+rswitch2-y += ../rtsn_ptp.o
 
 

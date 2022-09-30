@@ -2,7 +2,7 @@
 /*
  * Renesas USB driver R-Car Gen. 3 initialization and power control
  *
- * Copyright (C) 2016 Renesas Electronics Corporation
+ * Copyright (C) 2016-2019 Renesas Electronics Corporation
  */
 
 #include <linux/delay.h>
@@ -18,7 +18,7 @@
 /* Low Power Status register (LPSTS) */
 #define LPSTS_SUSPM	0x4000
 
-/* R-Car D3/E3 only: USB General control register (UGCTRL) */
+/* R-Car D3 only: USB General control register (UGCTRL) */
 #define UGCTRL_PLLRESET		0x00000001
 #define UGCTRL_CONNECT		0x00000004
 
@@ -31,7 +31,7 @@
 #define UGCTRL2_USB0SEL_OTG	0x00000030
 #define UGCTRL2_VBUSSEL		0x00000400
 
-/* R-Car D3/E3 only: USB General status register (UGSTS) */
+/* R-Car D3 only: USB General status register (UGSTS) */
 #define UGSTS_LOCK		0x00000100
 
 static void usbhs_write32(struct usbhs_priv *priv, u32 reg, u32 data)
@@ -59,7 +59,7 @@ static int usbhs_rcar3_power_ctrl(struct platform_device *pdev,
 	if (enable) {
 		usbhs_bset(priv, LPSTS, LPSTS_SUSPM, LPSTS_SUSPM);
 		/* The controller on R-Car Gen3 needs to wait up to 45 usec */
-		udelay(45);
+		usleep_range(45, 90);
 	} else {
 		usbhs_bset(priv, LPSTS, LPSTS_SUSPM, 0);
 	}
@@ -67,7 +67,7 @@ static int usbhs_rcar3_power_ctrl(struct platform_device *pdev,
 	return 0;
 }
 
-/* R-Car D3/E3 needs to release UGCTRL.PLLRESET */
+/* R-Car D3 needs to release UGCTRL.PLLRESET */
 static int usbhs_rcar3_power_and_pll_ctrl(struct platform_device *pdev,
 					  void __iomem *base, int enable)
 {
@@ -95,17 +95,26 @@ static int usbhs_rcar3_power_and_pll_ctrl(struct platform_device *pdev,
 	return 0;
 }
 
-static int usbhs_rcar3_get_id(struct platform_device *pdev)
-{
-	return USBHS_GADGET;
-}
-
-const struct renesas_usbhs_platform_callback usbhs_rcar3_ops = {
-	.power_ctrl = usbhs_rcar3_power_ctrl,
-	.get_id = usbhs_rcar3_get_id,
+const struct renesas_usbhs_platform_info usbhs_rcar_gen3_plat_info = {
+	.platform_callback = {
+		.power_ctrl = usbhs_rcar3_power_ctrl,
+		.get_id = usbhs_get_id_as_gadget,
+	},
+	.driver_param = {
+		.has_usb_dmac = 1,
+		.multi_clks = 1,
+		.has_new_pipe_configs = 1,
+	},
 };
 
-const struct renesas_usbhs_platform_callback usbhs_rcar3_with_pll_ops = {
-	.power_ctrl = usbhs_rcar3_power_and_pll_ctrl,
-	.get_id = usbhs_rcar3_get_id,
+const struct renesas_usbhs_platform_info usbhs_rcar_gen3_with_pll_plat_info = {
+	.platform_callback = {
+		.power_ctrl = usbhs_rcar3_power_and_pll_ctrl,
+		.get_id = usbhs_get_id_as_gadget,
+	},
+	.driver_param = {
+		.has_usb_dmac = 1,
+		.multi_clks = 1,
+		.has_new_pipe_configs = 1,
+	},
 };

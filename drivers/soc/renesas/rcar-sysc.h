@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Renesas R-Car System Controller
  *
  * Copyright (C) 2016 Glider bvba
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
  */
 #ifndef __SOC_RENESAS_RCAR_SYSC_H__
 #define __SOC_RENESAS_RCAR_SYSC_H__
@@ -38,13 +35,6 @@ struct rcar_sysc_area {
 	unsigned int flags;	/* See PD_* */
 };
 
-/*
- * List of registers that are not common in all platform.
- */
-struct rcar_sysc_extra_regs {
-	u16 sysc_extmask_offs;	/* Offset of SYSCEXTMASK register */
-	u32 sysc_extmask_msks;	/* Mask value of SYSCEXTMASK register */
-};
 
 /*
  * SoC-specific Power Area Description
@@ -54,24 +44,34 @@ struct rcar_sysc_info {
 	int (*init)(void);	/* Optional */
 	const struct rcar_sysc_area *areas;
 	unsigned int num_areas;
-	struct rcar_sysc_extra_regs *extra_regs;
+	/* Optional External Request Mask Register */
+	u32 extmask_offs;	/* SYSCEXTMASK register offset */
+	u32 extmask_val;	/* SYSCEXTMASK register mask value */
+	unsigned int *mode;	/* Optional - handle PDMODE on R-Car V3H v2.0 */
 };
 
+extern const struct rcar_sysc_info r8a7742_sysc_info;
 extern const struct rcar_sysc_info r8a7743_sysc_info;
 extern const struct rcar_sysc_info r8a7745_sysc_info;
 extern const struct rcar_sysc_info r8a77470_sysc_info;
+extern const struct rcar_sysc_info r8a774a1_sysc_info;
+extern const struct rcar_sysc_info r8a774b1_sysc_info;
+extern const struct rcar_sysc_info r8a774c0_sysc_info;
+extern const struct rcar_sysc_info r8a774e1_sysc_info;
 extern const struct rcar_sysc_info r8a7779_sysc_info;
 extern const struct rcar_sysc_info r8a7790_sysc_info;
 extern const struct rcar_sysc_info r8a7791_sysc_info;
 extern const struct rcar_sysc_info r8a7792_sysc_info;
 extern const struct rcar_sysc_info r8a7794_sysc_info;
-extern const struct rcar_sysc_info r8a7795_sysc_info;
-extern const struct rcar_sysc_info r8a7796_sysc_info;
+extern struct rcar_sysc_info r8a7795_sysc_info;
+extern const struct rcar_sysc_info r8a77960_sysc_info;
+extern const struct rcar_sysc_info r8a77961_sysc_info;
 extern const struct rcar_sysc_info r8a77965_sysc_info;
 extern const struct rcar_sysc_info r8a77970_sysc_info;
 extern const struct rcar_sysc_info r8a77980_sysc_info;
 extern const struct rcar_sysc_info r8a77990_sysc_info;
 extern const struct rcar_sysc_info r8a77995_sysc_info;
+extern const struct rcar_sysc_info r8a779f0_sysc_info;
 
 
     /*

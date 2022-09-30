@@ -2,7 +2,7 @@
 /*
  * vsp1_lif.c  --  R-Car VSP1 LCD Controller Interface
  *
- * Copyright (C) 2013-2018 Renesas Electronics Corporation
+ * Copyright (C) 2013-2014 Renesas Electronics Corporation
  *
  * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
  */
@@ -84,30 +84,39 @@ static const struct v4l2_subdev_ops lif_ops = {
 
 static void lif_configure_stream(struct vsp1_entity *entity,
 				 struct vsp1_pipeline *pipe,
+				 struct vsp1_dl_list *dl,
 				 struct vsp1_dl_body *dlb)
 {
 	const struct v4l2_mbus_framefmt *format;
 	struct vsp1_lif *lif = to_lif(&entity->subdev);
-	struct vsp1_device *vsp1 = entity->vsp1;
-	unsigned int hbth = 1300;
-	unsigned int obth = 400;
-	unsigned int lbth = 200;
+	unsigned int hbth;
+	unsigned int obth;
+	unsigned int lbth;
 
 	format = vsp1_entity_get_pad_format(&lif->entity, lif->entity.config,
 					    LIF_PAD_SOURCE);
 
-	obth = min(obth, (format->width + 1) / 2 * format->height - 4);
+	switch (entity->vsp1->version & VI6_IP_VERSION_MODEL_MASK) {
+	case VI6_IP_VERSION_MODEL_VSPD_GEN2:
+	case VI6_IP_VERSION_MODEL_VSPD_V2H:
+		hbth = 1536;
+		obth = min(128U, (format->width + 1) / 2 * format->height - 4);
+		lbth = 1520;
+		break;
 
-	if ((vsp1->version & VI6_IP_VERSION_MODEL_MASK) ==
-	    VI6_IP_VERSION_MODEL_VSPD_GEN3) {
-		hbth = 0;
-		obth = 3000;
-		lbth = 0;
-	} else if ((vsp1->version & VI6_IP_VERSION_MODEL_MASK) ==
-		   VI6_IP_VERSION_MODEL_VSPDL_GEN3) {
+	case VI6_IP_VERSION_MODEL_VSPDL_GEN3:
+	case VI6_IP_VERSION_MODEL_VSPD_V3:
 		hbth = 0;
 		obth = 1500;
 		lbth = 0;
+		break;
+
+	case VI6_IP_VERSION_MODEL_VSPD_GEN3:
+	default:
+		hbth = 0;
+		obth = 3000;
+		lbth = 0;
+		break;
 	}
 
 	vsp1_lif_write(lif, dlb, VI6_LIF_CSBTH,

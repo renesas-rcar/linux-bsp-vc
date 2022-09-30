@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 include ../scripts/Makefile.include
 
 bindir ?= /usr/bin
@@ -11,8 +12,6 @@ endif
 # (this improves performance and avoids hard-to-debug behaviour);
 MAKEFLAGS += -r
 
-CC = $(CROSS_COMPILE)gcc
-LD = $(CROSS_COMPILE)ld
 CFLAGS += -O2 -Wall -g -D_GNU_SOURCE -I$(OUTPUT)include
 
 ALL_TARGETS := spidev_test spidev_fdx
@@ -52,8 +51,10 @@ $(OUTPUT)spidev_fdx: $(SPIDEV_FDX_IN)
 
 clean:
 	rm -f $(ALL_PROGRAMS)
-	rm -f $(OUTPUT)include/linux/spi/spidev.h
-	find $(if $(OUTPUT),$(OUTPUT),.) -name '*.o' -delete -o -name '\.*.d' -delete
+	rm -rf $(OUTPUT)include/
+	find $(if $(OUTPUT),$(OUTPUT),.) -name '*.o' -delete
+	find $(if $(OUTPUT),$(OUTPUT),.) -name '\.*.o.d' -delete
+	find $(if $(OUTPUT),$(OUTPUT),.) -name '\.*.o.cmd' -delete
 
 install: $(ALL_PROGRAMS)
 	install -d -m 755 $(DESTDIR)$(bindir);		\

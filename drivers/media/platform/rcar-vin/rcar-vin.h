@@ -1,17 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Driver for Renesas R-Car VIN
  *
- * Copyright (C) 2016-2018 Renesas Electronics Corp.
+ * Copyright (C) 2016 Renesas Electronics Corp.
  * Copyright (C) 2011-2013 Renesas Solutions Corp.
  * Copyright (C) 2013 Cogent Embedded, Inc., <source@cogentembedded.com>
  * Copyright (C) 2008 Magnus Damm
  *
  * Based on the soc-camera rcar_vin driver
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #ifndef __RCAR_VIN__
@@ -25,6 +21,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-dev.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-fwnode.h>
 #include <media/videobuf2-v4l2.h>
 
 #define DRV_NAME "rcar-vin"
@@ -43,8 +40,6 @@
 #define SETUP_WAIT_TIME 3000
 
 #define MSTP_WAIT_TIME 100
-
-#define RCAR_VIN_DES1_RESERVED		BIT(0)
 
 struct rvin_group;
 
@@ -65,15 +60,32 @@ enum rvin_csi_id {
 
 /**
  * STOPPED  - No operation in progress
+ * STARTING - Capture starting up
  * RUNNING  - Operation in progress have buffers
- * STALLED  - No operation in progress have no buffers
  * STOPPING - Stopping operation
  */
 enum rvin_dma_state {
 	STOPPED = 0,
+	STARTING,
 	RUNNING,
-	STALLED,
 	STOPPING,
+};
+
+/**
+ * enum rvin_buffer_type
+ *
+ * Describes how a buffer is given to the hardware. To be able
+ * to capture SEQ_TB/BT it's needed to capture to the same vb2
+ * buffer twice so the type of buffer needs to be kept.
+ *
+ * FULL - One capture fills the whole vb2 buffer
+ * HALF_TOP - One capture fills the top half of the vb2 buffer
+ * HALF_BOTTOM - One capture fills the bottom half of the vb2 buffer
+ */
+enum rvin_buffer_type {
+	FULL,
+	HALF_TOP,
+	HALF_BOTTOM,
 };
 
 /**
@@ -87,32 +99,24 @@ struct rvin_video_format {
 };
 
 /**
- * struct rvin_graph_entity - Video endpoint from async framework
+ * struct rvin_parallel_entity - Parallel video input endpoint descriptor
  * @asd:	sub-device descriptor for async framework
  * @subdev:	subdevice matched using async framework
+ * @mbus_type:	media bus type
+ * @bus:	media bus parallel configuration
  * @source_pad:	source pad of remote subdevice
  * @sink_pad:	sink pad of remote subdevice
+ *
  */
-struct rvin_graph_entity {
+struct rvin_parallel_entity {
 	struct v4l2_async_subdev asd;
 	struct v4l2_subdev *subdev;
 
+	enum v4l2_mbus_type mbus_type;
+	struct v4l2_fwnode_bus_parallel bus;
+
 	unsigned int source_pad;
 	unsigned int sink_pad;
-};
-
-/**
- * struct rvin_uds_regs - UDS register information
- * @ctrl:		UDS Control register
- * @scale:		UDS Scaling Factor register
- * @pass_bwidth:	UDS Passband Register
- * @clip_size:		UDS Output Size Clipping Register
- */
-struct rvin_uds_regs {
-	unsigned long ctrl;
-	unsigned long scale;
-	unsigned long pass_bwidth;
-	unsigned long clip_size;
 };
 
 /**
@@ -147,21 +151,47 @@ struct rvin_group_route {
 };
 
 /**
+ * struct rvin_group_scaler - describes a scaler attached to a VIN
+ *
+ * @vin:	Numerical VIN id that have access to a UDS.
+ * @companion:  Numerical VIN id that @vin share the UDS with.
+ *
+ * -- note::
+ *	Some R-Car VIN instances have access to a Up Down Scaler (UDS).
+ *	If a VIN have a UDS attached it's almost always shared between
+ *	two VIN instances. The UDS can only be used by one VIN at a time,
+ *	so the companion relationship needs to be described as well.
+ *
+ *	There are at most two VINs sharing a UDS. For each UDS shared
+ *	between two VINs there needs to be two instances of struct
+ *	rvin_group_scaler describing each of the VINs individually. If
+ *	a VIN do not share its UDS set companion to -1.
+ */
+struct rvin_group_scaler {
+	int vin;
+	int companion;
+};
+
+/**
  * struct rvin_info - Information about the particular VIN implementation
  * @model:		VIN model
  * @use_mc:		use media controller instead of controlling subdevice
+ * @nv12:		support outputing NV12 pixel format
  * @max_width:		max input width the VIN supports
  * @max_height:		max input height the VIN supports
  * @routes:		list of possible routes from the CSI-2 recivers to
  *			all VINs. The list mush be NULL terminated.
+ * @scalers:		List of available scalers, must be NULL terminated.
  */
 struct rvin_info {
 	enum model_id model;
 	bool use_mc;
+	bool nv12;
 
 	unsigned int max_width;
 	unsigned int max_height;
 	const struct rvin_group_route *routes;
+	const struct rvin_group_scaler *scalers;
 };
 
 /**
@@ -174,7 +204,8 @@ struct rvin_info {
  * @v4l2_dev:		V4L2 device
  * @ctrl_handler:	V4L2 control handler
  * @notifier:		V4L2 asynchronous subdevs notifier
- * @digital:		entity in the DT for local digital subdevice
+ *
+ * @parallel:		parallel input subdevice descriptor
  * @rstc:		CPG reset/release control
  * @clk:		CPG clock control
  *
@@ -187,28 +218,29 @@ struct rvin_info {
  * @scratch:		cpu address for scratch buffer
  * @scratch_phys:	physical address of the scratch buffer
  *
- * @qlock:		protects @queue_buf, @buf_list, @continuous, @sequence
- *			@state
- * @queue_buf:		Keeps track of buffers given to HW slot
+ * @qlock:		protects @buf_hw, @buf_list, @sequence and @state
+ * @buf_hw:		Keeps track of buffers given to HW slot
  * @buf_list:		list of queued buffers
- * @continuous:		tracks if active operation is continuous or single mode
  * @sequence:		V4L2 buffers sequence number
  * @state:		keeps track of operation state
  *
- * @mbus_cfg:		media bus configuration from DT
+ * @is_csi:		flag to mark the VIN as using a CSI-2 subdevice
+ *
  * @mbus_code:		media bus format code
  * @format:		active V4L2 pixel format
  *
  * @crop:		active cropping
  * @compose:		active composing
- * @source:		active size of the video source
+ * @src_rect:		active size of the video source
  * @std:		active video standard of the video source
+ *
+ * @alpha:		Alpha component to fill in for supported pixel formats
+ *
  * @work_queue:		work queue at resuming
  * @rvin_resume:	delayed work at resuming
  * @chsel:		channel selection
  * @setup_wait:		wait queue used to setup VIN
  * @suspend:		suspend flag
- * @chip_info:         chip information by each device
  */
 struct rvin_dev {
 	struct device *dev;
@@ -219,7 +251,8 @@ struct rvin_dev {
 	struct v4l2_device v4l2_dev;
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_async_notifier notifier;
-	struct rvin_graph_entity *digital;
+
+	struct rvin_parallel_entity *parallel;
 	struct reset_control *rstc;
 	struct clk *clk;
 
@@ -233,30 +266,35 @@ struct rvin_dev {
 	dma_addr_t scratch_phys;
 
 	spinlock_t qlock;
-	struct vb2_v4l2_buffer *queue_buf[HW_BUFFER_NUM];
+	struct {
+		struct vb2_v4l2_buffer *buffer;
+		enum rvin_buffer_type type;
+		dma_addr_t phys;
+	} buf_hw[HW_BUFFER_NUM];
 	struct list_head buf_list;
-	bool continuous;
 	unsigned int sequence;
 	enum rvin_dma_state state;
 
-	struct v4l2_mbus_config mbus_cfg;
+	bool is_csi;
+
 	u32 mbus_code;
 	struct v4l2_pix_format format;
 
 	struct v4l2_rect crop;
 	struct v4l2_rect compose;
-	struct v4l2_rect source;
+	struct v4l2_rect src_rect;
 	v4l2_std_id std;
+
+	unsigned int alpha;
 
 	struct workqueue_struct *work_queue;
 	struct delayed_work rvin_resume;
 	unsigned int chsel;
 	wait_queue_head_t setup_wait;
 	bool suspend;
-	u32 chip_info;
 };
 
-#define vin_to_source(vin)		((vin)->digital->subdev)
+#define vin_to_source(vin)		((vin)->parallel->subdev)
 
 /* Debug */
 #define vin_dbg(d, fmt, arg...)		dev_dbg(d->dev, fmt, ##arg)
@@ -272,8 +310,7 @@ struct rvin_dev {
  *
  * @lock:		protects the count, notifier, vin and csi members
  * @count:		number of enabled VIN instances found in DT
- * @notifier:		pointer to the notifier of a VIN which handles the
- *			groups async sub-devices.
+ * @notifier:		group notifier for CSI-2 async subdevices
  * @vin:		VIN instances which are part of the group
  * @csi:		array of pairs of fwnode and subdev pointers
  *			to all CSI-2 subdevices.
@@ -285,7 +322,7 @@ struct rvin_group {
 
 	struct mutex lock;
 	unsigned int count;
-	struct v4l2_async_notifier *notifier;
+	struct v4l2_async_notifier notifier;
 	struct rvin_dev *vin[RCAR_VIN_NUM];
 
 	struct {
@@ -300,10 +337,12 @@ void rvin_dma_unregister(struct rvin_dev *vin);
 int rvin_v4l2_register(struct rvin_dev *vin);
 void rvin_v4l2_unregister(struct rvin_dev *vin);
 
-const struct rvin_video_format *rvin_format_from_pixel(u32 pixelformat);
+const struct rvin_video_format *rvin_format_from_pixel(struct rvin_dev *vin,
+						       u32 pixelformat);
+
 
 int rvin_set_channel_routing(struct rvin_dev *vin, u8 chsel);
-u32 rvin_get_chsel(struct rvin_dev *vin);
+void rvin_set_alpha(struct rvin_dev *vin, unsigned int alpha);
 
 void rvin_resume_start_streaming(struct work_struct *work);
 void rvin_suspend_stop_streaming(struct rvin_dev *vin);

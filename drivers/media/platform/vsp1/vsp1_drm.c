@@ -2,7 +2,7 @@
 /*
  * vsp1_drm.c  --  R-Car VSP1 DRM/KMS Interface
  *
- * Copyright (C) 2015-2018 Renesas Electronics Corporation
+ * Copyright (C) 2015 Renesas Electronics Corporation
  *
  * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
  */
@@ -38,9 +38,8 @@ void vsp1_drm_display_start(struct vsp1_device *vsp1, unsigned int pipe_index,
 		wake_up_interruptible(&pipe->event_wait);
 	} else if (pipe->completed) {
 		bool writeback;
-		u32 offset = 0x100 * pipe_index;
 
-		if ((vsp1_read(vsp1, VI6_WPF_WRBCK_CTRL + offset) &
+		if ((vsp1_read(vsp1, VI6_WPF_WRBCK_CTRL(pipe_index)) &
 		    VI6_WPF_WRBCK_CTRL_WBMD) == VI6_WPF_WRBCK_CTRL_WBMD)
 			writeback = true;
 		else
@@ -64,14 +63,16 @@ static void vsp1_du_pipeline_frame_end(struct vsp1_pipeline *pipe,
 				       unsigned int completion)
 {
 	struct vsp1_drm_pipeline *drm_pipe = to_vsp1_drm_pipeline(pipe);
-	bool complete = completion == VSP1_DL_FRAME_END_COMPLETED;
 
 	if (drm_pipe->du_complete) {
 		struct vsp1_entity *uif = drm_pipe->uif;
+		unsigned int status = completion
+				    & (VSP1_DU_STATUS_COMPLETE |
+				       VSP1_DU_STATUS_WRITEBACK);
 		u32 crc;
 
 		crc = uif ? vsp1_uif_get_crc(to_uif(&uif->subdev)) : 0;
-		drm_pipe->du_complete(drm_pipe->du_private, complete, crc);
+		drm_pipe->du_complete(drm_pipe->du_private, status, crc);
 	}
 
 	if (completion & VSP1_DL_FRAME_END_INTERNAL) {
@@ -273,7 +274,7 @@ static int vsp1_du_pipeline_setup_brx(struct vsp1_device *vsp1,
 		brx = &vsp1->bru->entity;
 	else if (pipe->brx && !drm_pipe->force_brx_release)
 		brx = pipe->brx;
-	else if (!vsp1->bru->entity.pipe)
+	else if (vsp1_feature(vsp1, VSP1_HAS_BRU) && !vsp1->bru->entity.pipe)
 		brx = &vsp1->bru->entity;
 	else
 		brx = &vsp1->brs->entity;
@@ -363,19 +364,19 @@ static int vsp1_du_pipeline_setup_brx(struct vsp1_device *vsp1,
 	 * on the BRx sink pad 0 and propagated inside the entity, not on the
 	 * source pad.
 	 */
-	format.pad = pipe->brx->source_pad;
+	format.pad = brx->source_pad;
 	format.format.width = drm_pipe->width;
 	format.format.height = drm_pipe->height;
 	format.format.field = V4L2_FIELD_NONE;
 
-	ret = v4l2_subdev_call(&pipe->brx->subdev, pad, set_fmt, NULL,
+	ret = v4l2_subdev_call(&brx->subdev, pad, set_fmt, NULL,
 			       &format);
 	if (ret < 0)
 		return ret;
 
 	dev_dbg(vsp1->dev, "%s: set format %ux%u (%x) on %s pad %u\n",
 		__func__, format.format.width, format.format.height,
-		format.format.code, BRX_NAME(pipe->brx), pipe->brx->source_pad);
+		format.format.code, BRX_NAME(brx), brx->source_pad);
 
 	if (format.format.width != drm_pipe->width ||
 	    format.format.height != drm_pipe->height) {
@@ -490,9 +491,9 @@ static int vsp1_du_pipeline_setup_inputs(struct vsp1_device *vsp1,
 	 * make sure it is present in the pipeline's list of entities if it
 	 * wasn't already.
 	 */
-	if (!use_uif) {
+	if (drm_pipe->uif && !use_uif) {
 		drm_pipe->uif->pipe = NULL;
-	} else if (!drm_pipe->uif->pipe) {
+	} else if (drm_pipe->uif && !drm_pipe->uif->pipe) {
 		drm_pipe->uif->pipe = pipe;
 		list_add_tail(&drm_pipe->uif->list_pipe, &pipe->entities);
 	}
@@ -567,6 +568,12 @@ static void vsp1_du_pipeline_configure(struct vsp1_pipeline *pipe)
 	struct vsp1_entity *next;
 	struct vsp1_dl_list *dl;
 	struct vsp1_dl_body *dlb;
+	unsigned int dl_flags = 0;
+
+	if (drm_pipe->force_brx_release)
+		dl_flags |= VSP1_DL_FRAME_END_INTERNAL;
+	if (pipe->output->writeback)
+		dl_flags |= VSP1_DL_FRAME_END_WRITEBACK;
 
 	dl = vsp1_dl_list_get(pipe->output->dlm);
 	dlb = vsp1_dl_list_get_body0(dl);
@@ -584,12 +591,42 @@ static void vsp1_du_pipeline_configure(struct vsp1_pipeline *pipe)
 		}
 
 		vsp1_entity_route_setup(entity, pipe, dlb);
-		vsp1_entity_configure_stream(entity, pipe, dlb);
+		vsp1_entity_configure_stream(entity, pipe, dl, dlb);
 		vsp1_entity_configure_frame(entity, pipe, dl, dlb);
 		vsp1_entity_configure_partition(entity, pipe, dl, dlb);
 	}
 
-	vsp1_dl_list_commit(dl, drm_pipe->force_brx_release, pipe->lif->index);
+	vsp1_dl_list_commit(dl, dl_flags);
+}
+
+static int vsp1_du_pipeline_set_rwpf_format(struct vsp1_device *vsp1,
+					    struct vsp1_rwpf *rwpf,
+					    u32 pixelformat, unsigned int pitch)
+{
+	const struct vsp1_format_info *fmtinfo;
+	unsigned int chroma_hsub;
+
+	fmtinfo = vsp1_get_format_info(vsp1, pixelformat);
+	if (!fmtinfo) {
+		dev_dbg(vsp1->dev, "Unsupported pixel format %08x\n",
+			pixelformat);
+		return -EINVAL;
+	}
+
+	/*
+	 * Only formats with three planes can affect the chroma planes pitch.
+	 * All formats with two planes have a horizontal subsampling value of 2,
+	 * but combine U and V in a single chroma plane, which thus results in
+	 * the luma plane and chroma plane having the same pitch.
+	 */
+	chroma_hsub = (fmtinfo->planes == 3) ? fmtinfo->hsub : 1;
+
+	rwpf->fmtinfo = fmtinfo;
+	rwpf->format.num_planes = fmtinfo->planes;
+	rwpf->format.plane_fmt[0].bytesperline = pitch;
+	rwpf->format.plane_fmt[1].bytesperline = pitch / chroma_hsub;
+
+	return 0;
 }
 
 /* -----------------------------------------------------------------------------
@@ -718,9 +755,11 @@ int vsp1_du_setup_lif(struct device *dev, unsigned int pipe_index,
 
 	drm_pipe->width = cfg->width;
 	drm_pipe->height = cfg->height;
+	pipe->interlaced = cfg->interlaced;
 
-	dev_dbg(vsp1->dev, "%s: configuring LIF%u with format %ux%u\n",
-		__func__, pipe_index, cfg->width, cfg->height);
+	dev_dbg(vsp1->dev, "%s: configuring LIF%u with format %ux%u%s\n",
+		__func__, pipe_index, cfg->width, cfg->height,
+		pipe->interlaced ? "i" : "");
 
 	mutex_lock(&vsp1->drm->lock);
 
@@ -823,8 +862,8 @@ int vsp1_du_atomic_update(struct device *dev, unsigned int pipe_index,
 {
 	struct vsp1_device *vsp1 = dev_get_drvdata(dev);
 	struct vsp1_drm_pipeline *drm_pipe = &vsp1->drm->pipe[pipe_index];
-	const struct vsp1_format_info *fmtinfo;
 	struct vsp1_rwpf *rpf;
+	int ret;
 
 	if (rpf_index >= vsp1->info->rpf_count)
 		return -EINVAL;
@@ -857,35 +896,15 @@ int vsp1_du_atomic_update(struct device *dev, unsigned int pipe_index,
 	 * Store the format, stride, memory buffer address, crop and compose
 	 * rectangles and Z-order position and for the input.
 	 */
-	fmtinfo = vsp1_get_format_info(vsp1, cfg->pixelformat);
-	if (!fmtinfo) {
-		dev_dbg(vsp1->dev, "Unsupport pixel format %08x for RPF\n",
-			cfg->pixelformat);
-		return -EINVAL;
-	}
+	ret = vsp1_du_pipeline_set_rwpf_format(vsp1, rpf, cfg->pixelformat,
+					       cfg->pitch);
+	if (ret < 0)
+		return ret;
 
-	rpf->fmtinfo = fmtinfo;
-	rpf->format.num_planes = fmtinfo->planes;
-	rpf->format.plane_fmt[0].bytesperline = cfg->pitch;
-	if (rpf->fmtinfo->fourcc == V4L2_PIX_FMT_YUV420M ||
-	    rpf->fmtinfo->fourcc == V4L2_PIX_FMT_YVU420M ||
-	    rpf->fmtinfo->fourcc == V4L2_PIX_FMT_YUV422M ||
-	    rpf->fmtinfo->fourcc == V4L2_PIX_FMT_YVU422M)
-		rpf->format.plane_fmt[1].bytesperline = cfg->pitch / 2;
-	else
-		rpf->format.plane_fmt[1].bytesperline = cfg->pitch;
 	rpf->alpha = cfg->alpha;
 	rpf->colorkey = cfg->colorkey;
 	rpf->colorkey_en = cfg->colorkey_en;
 	rpf->colorkey_alpha = cfg->colorkey_alpha;
-	rpf->interlaced = cfg->interlaced;
-
-	if ((vsp1->ths_quirks & VSP1_AUTO_FLD_NOT_SUPPORT) &&
-	    rpf->interlaced) {
-		dev_err(vsp1->dev,
-			"Interlaced mode is not supported.\n");
-		return -EINVAL;
-	}
 
 	rpf->mem.addr[0] = cfg->mem[0];
 	rpf->mem.addr[1] = cfg->mem[1];
@@ -913,12 +932,31 @@ void vsp1_du_atomic_flush(struct device *dev, unsigned int pipe_index,
 	struct vsp1_device *vsp1 = dev_get_drvdata(dev);
 	struct vsp1_drm_pipeline *drm_pipe = &vsp1->drm->pipe[pipe_index];
 	struct vsp1_pipeline *pipe = &drm_pipe->pipe;
+	int ret;
 
 	drm_pipe->crc = cfg->crc;
 
 	mutex_lock(&vsp1->drm->lock);
+
+	if (cfg->writeback.pixelformat) {
+		const struct vsp1_du_writeback_config *wb_cfg = &cfg->writeback;
+
+		ret = vsp1_du_pipeline_set_rwpf_format(vsp1, pipe->output,
+						       wb_cfg->pixelformat,
+						       wb_cfg->pitch);
+		if (WARN_ON(ret < 0))
+			goto done;
+
+		pipe->output->mem.addr[0] = wb_cfg->mem[0];
+		pipe->output->mem.addr[1] = wb_cfg->mem[1];
+		pipe->output->mem.addr[2] = wb_cfg->mem[2];
+		pipe->output->writeback = true;
+	}
+
 	vsp1_du_pipeline_setup_inputs(vsp1, pipe);
 	vsp1_du_pipeline_configure(pipe);
+
+done:
 	mutex_unlock(&vsp1->drm->lock);
 }
 EXPORT_SYMBOL_GPL(vsp1_du_atomic_flush);
@@ -932,8 +970,8 @@ int vsp1_du_map_sg(struct device *dev, struct sg_table *sgt)
 	 * skip cache sync. This will need to be revisited when support for
 	 * non-coherent buffers will be added to the DU driver.
 	 */
-	return dma_map_sg_attrs(vsp1->bus_master, sgt->sgl, sgt->nents,
-				DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+	return dma_map_sgtable(vsp1->bus_master, sgt, DMA_TO_DEVICE,
+			       DMA_ATTR_SKIP_CPU_SYNC);
 }
 EXPORT_SYMBOL_GPL(vsp1_du_map_sg);
 
@@ -941,8 +979,8 @@ void vsp1_du_unmap_sg(struct device *dev, struct sg_table *sgt)
 {
 	struct vsp1_device *vsp1 = dev_get_drvdata(dev);
 
-	dma_unmap_sg_attrs(vsp1->bus_master, sgt->sgl, sgt->nents,
-			   DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+	dma_unmap_sgtable(vsp1->bus_master, sgt, DMA_TO_DEVICE,
+			  DMA_ATTR_SKIP_CPU_SYNC);
 }
 EXPORT_SYMBOL_GPL(vsp1_du_unmap_sg);
 
@@ -954,7 +992,6 @@ int vsp1_du_setup_wb(struct device *dev, u32 pixelformat, unsigned int pitch,
 	struct vsp1_pipeline *pipe = &drm_pipe->pipe;
 	struct vsp1_rwpf *wpf = pipe->output;
 	const struct vsp1_format_info *fmtinfo;
-	bool interlaced = false;
 	int i;
 
 	fmtinfo = vsp1_get_format_info(vsp1, pixelformat);
@@ -964,14 +1001,7 @@ int vsp1_du_setup_wb(struct device *dev, u32 pixelformat, unsigned int pitch,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < vsp1->info->rpf_count; ++i) {
-		if (!pipe->inputs[i])
-			continue;
-
-		interlaced = pipe->inputs[i]->interlaced;
-	}
-
-	if (interlaced) {
+	if (pipe->interlaced) {
 		dev_err(vsp1->dev, "Prohibited in interlaced mode\n");
 		return -EINVAL;
 	}

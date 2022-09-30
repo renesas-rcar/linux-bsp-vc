@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Driver for Analog Devices ADV748X HDMI receiver and Component Processor (CP)
  *
  * Copyright (C) 2017 Renesas Electronics Corp.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/module.h>
@@ -105,6 +101,9 @@ static void adv748x_hdmi_fill_format(struct adv748x_hdmi *hdmi,
 
 	fmt->width = hdmi->timings.bt.width;
 	fmt->height = hdmi->timings.bt.height;
+
+	if (fmt->field == V4L2_FIELD_ALTERNATE)
+		fmt->height /= 2;
 }
 
 static void adv748x_fill_optional_dv_timings(struct v4l2_dv_timings *timings)
@@ -359,7 +358,7 @@ static int adv748x_hdmi_s_stream(struct v4l2_subdev *sd, int enable)
 
 	mutex_lock(&state->mutex);
 
-	ret = adv748x_txa_power(state, enable);
+	ret = adv748x_tx_power(hdmi->tx, enable);
 	if (ret)
 		goto done;
 
@@ -405,8 +404,6 @@ static int adv748x_hdmi_propagate_pixelrate(struct adv748x_hdmi *hdmi)
 		return -ENOLINK;
 
 	adv748x_hdmi_query_dv_timings(&hdmi->sd, &timings);
-	if (timings.bt.pixelclock == 0)
-		return -EINVAL;
 
 	return adv748x_csi2_set_pixelrate(tx, timings.bt.pixelclock);
 }

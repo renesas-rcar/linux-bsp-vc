@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * tracing_map - lock-free map for tracing
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Copyright (C) 2015 Tom Zanussi <tom.zanussi@linux.intel.com>
  *
@@ -157,8 +148,8 @@ static int tracing_map_cmp_atomic64(void *val_a, void *val_b)
 #define DEFINE_TRACING_MAP_CMP_FN(type)					\
 static int tracing_map_cmp_##type(void *val_a, void *val_b)		\
 {									\
-	type a = *(type *)val_a;					\
-	type b = *(type *)val_b;					\
+	type a = (type)(*(u64 *)val_a);					\
+	type b = (type)(*(u64 *)val_b);					\
 									\
 	return (a > b) ? 1 : ((a < b) ? -1 : 0);			\
 }
@@ -269,7 +260,7 @@ int tracing_map_add_var(struct tracing_map *map)
  * to use cmp_fn.
  *
  * A key can be a subset of a compound key; for that purpose, the
- * offset param is used to describe where within the the compound key
+ * offset param is used to describe where within the compound key
  * the key referenced by this key field resides.
  *
  * Return: The index identifying the field in the map and associated
@@ -292,7 +283,7 @@ int tracing_map_add_key_field(struct tracing_map *map,
 	return idx;
 }
 
-void tracing_map_array_clear(struct tracing_map_array *a)
+static void tracing_map_array_clear(struct tracing_map_array *a)
 {
 	unsigned int i;
 
@@ -303,7 +294,7 @@ void tracing_map_array_clear(struct tracing_map_array *a)
 		memset(a->pages[i], 0, PAGE_SIZE);
 }
 
-void tracing_map_array_free(struct tracing_map_array *a)
+static void tracing_map_array_free(struct tracing_map_array *a)
 {
 	unsigned int i;
 
@@ -325,7 +316,7 @@ void tracing_map_array_free(struct tracing_map_array *a)
 	kfree(a);
 }
 
-struct tracing_map_array *tracing_map_array_alloc(unsigned int n_elts,
+static struct tracing_map_array *tracing_map_array_alloc(unsigned int n_elts,
 						  unsigned int entry_size)
 {
 	struct tracing_map_array *a;
@@ -522,7 +513,9 @@ static inline struct tracing_map_elt *
 __tracing_map_insert(struct tracing_map *map, void *key, bool lookup_only)
 {
 	u32 idx, key_hash, test_key;
+	int dup_try = 0;
 	struct tracing_map_entry *entry;
+	struct tracing_map_elt *val;
 
 	key_hash = jhash(key, map->key_size, 0);
 	if (key_hash == 0)
@@ -534,10 +527,33 @@ __tracing_map_insert(struct tracing_map *map, void *key, bool lookup_only)
 		entry = TRACING_MAP_ENTRY(map->map, idx);
 		test_key = entry->key;
 
-		if (test_key && test_key == key_hash && entry->val &&
-		    keys_match(key, entry->val->key, map->key_size)) {
-			atomic64_inc(&map->hits);
-			return entry->val;
+		if (test_key && test_key == key_hash) {
+			val = READ_ONCE(entry->val);
+			if (val &&
+			    keys_match(key, val->key, map->key_size)) {
+				if (!lookup_only)
+					atomic64_inc(&map->hits);
+				return val;
+			} else if (unlikely(!val)) {
+				/*
+				 * The key is present. But, val (pointer to elt
+				 * struct) is still NULL. which means some other
+				 * thread is in the process of inserting an
+				 * element.
+				 *
+				 * On top of that, it's key_hash is same as the
+				 * one being inserted right now. So, it's
+				 * possible that the element has the same
+				 * key as well.
+				 */
+
+				dup_try++;
+				if (dup_try > map->map_size) {
+					atomic64_inc(&map->drops);
+					break;
+				}
+				continue;
+			}
 		}
 
 		if (!test_key) {
@@ -559,6 +575,13 @@ __tracing_map_insert(struct tracing_map *map, void *key, bool lookup_only)
 				atomic64_inc(&map->hits);
 
 				return entry->val;
+			} else {
+				/*
+				 * cmpxchg() failed. Loop around once
+				 * more to check what key was inserted.
+				 */
+				dup_try++;
+				continue;
 			}
 		}
 
@@ -1043,7 +1066,7 @@ int tracing_map_sort_entries(struct tracing_map *map,
 	struct tracing_map_sort_entry *sort_entry, **entries;
 	int i, n_entries, ret;
 
-	entries = vmalloc(map->max_elts * sizeof(sort_entry));
+	entries = vmalloc(array_size(sizeof(sort_entry), map->max_elts));
 	if (!entries)
 		return -ENOMEM;
 

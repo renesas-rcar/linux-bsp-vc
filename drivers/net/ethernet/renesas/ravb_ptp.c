@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /* PTP 1588 clock using the Renesas Ethernet AVB
  *
  * Copyright (C) 2013-2017 Renesas Electronics Corporation
  * Copyright (C) 2015 Renesas Solutions Corp.
  * Copyright (C) 2015-2016 Cogent Embedded, Inc. <source@cogentembedded.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
  */
 
 #include "ravb.h"
@@ -186,6 +182,13 @@ static int ravb_ptp_extts(struct ptp_clock_info *ptp,
 	struct net_device *ndev = priv->ndev;
 	unsigned long flags;
 
+	/* Reject requests with unsupported flags */
+	if (req->flags & ~(PTP_ENABLE_FEATURE |
+			   PTP_RISING_EDGE |
+			   PTP_FALLING_EDGE |
+			   PTP_STRICT_FLAGS))
+		return -EOPNOTSUPP;
+
 	if (req->index)
 		return -EINVAL;
 
@@ -200,7 +203,6 @@ static int ravb_ptp_extts(struct ptp_clock_info *ptp,
 		ravb_write(ndev, GIE_PTCS, GIE);
 	else
 		ravb_write(ndev, GID_PTCD, GID);
-	mmiowb();
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return 0;
@@ -215,6 +217,10 @@ static int ravb_ptp_perout(struct ptp_clock_info *ptp,
 	struct ravb_ptp_perout *perout;
 	unsigned long flags;
 	int error = 0;
+
+	/* Reject requests with unsupported flags */
+	if (req->flags)
+		return -EOPNOTSUPP;
 
 	if (req->index)
 		return -EINVAL;
@@ -263,7 +269,6 @@ static int ravb_ptp_perout(struct ptp_clock_info *ptp,
 		else
 			ravb_write(ndev, GID_PTMD0, GID);
 	}
-	mmiowb();
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return error;
@@ -312,7 +317,7 @@ irqreturn_t ravb_ptp_interrupt(struct net_device *ndev)
 		ptp_clock_event(priv->ptp.clock, &event);
 
 		result = IRQ_HANDLED;
-		ravb_write(ndev, ~(GIS_PTCF | GIS_RESERVED_BIT), GIS);
+		ravb_write(ndev, ~GIS_PTCF, GIS);
 	}
 	if (gis & GIS_PTMF) {
 		struct ravb_ptp_perout *perout = priv->ptp.perout;
@@ -323,7 +328,7 @@ irqreturn_t ravb_ptp_interrupt(struct net_device *ndev)
 		}
 
 		result = IRQ_HANDLED;
-		ravb_write(ndev, ~(GIS_PTMF | GIS_RESERVED_BIT), GIS);
+		ravb_write(ndev, ~GIS_PTMF, GIS);
 	}
 
 	return result;
@@ -342,7 +347,6 @@ void ravb_ptp_init(struct net_device *ndev, struct platform_device *pdev)
 	spin_lock_irqsave(&priv->lock, flags);
 	ravb_wait(ndev, GCCR, GCCR_TCR, GCCR_TCR_NOREQ);
 	ravb_modify(ndev, GCCR, GCCR_TCSS, GCCR_TCSS_ADJGPTP);
-	mmiowb();
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	priv->ptp.clock = ptp_clock_register(&priv->ptp.info, &pdev->dev);

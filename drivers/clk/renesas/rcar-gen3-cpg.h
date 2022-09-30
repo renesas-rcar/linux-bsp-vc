@@ -1,12 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * R-Car Gen3 Clock Pulse Generator
  *
  * Copyright (C) 2015-2018 Glider bvba
  * Copyright (C) 2018 Renesas Electronics Corp.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
  */
 
 #ifndef __CLK_RENESAS_RCAR_GEN3_CPG_H__
@@ -23,7 +21,6 @@ enum rcar_gen3_clk_types {
 	CLK_TYPE_GEN3_R,
 	CLK_TYPE_GEN3_MDSEL,	/* Select parent/divider using mode pin */
 	CLK_TYPE_GEN3_Z,
-	CLK_TYPE_GEN3_Z2,
 	CLK_TYPE_GEN3_ZG,
 	CLK_TYPE_GEN3_OSC,	/* OSC EXTAL predivider and fixed divider */
 	CLK_TYPE_GEN3_RCKSEL,	/* Select parent/divider using RCKCR.CKSEL */
@@ -43,10 +40,10 @@ enum rcar_gen3_clk_types {
 		 (_parent0) << 16 | (_parent1),		\
 		 .div = (_div0) << 16 | (_div1), .offset = _md)
 
-#define DEF_GEN3_PE(_name, _id, _parent_sscg, _div_sscg, _parent_clean, \
-		    _div_clean) \
-	DEF_GEN3_MDSEL(_name, _id, 12, _parent_sscg, _div_sscg,	\
-		       _parent_clean, _div_clean)
+#define DEF_GEN3_PE(_name, _id, _parent_clean, _div_clean, _parent_sscg, \
+		    _div_sscg) \
+	DEF_GEN3_MDSEL(_name, _id, 12, _parent_clean, _div_clean,	\
+		       _parent_sscg, _div_sscg)
 
 #define DEF_GEN3_OSC(_name, _id, _parent, _div)		\
 	DEF_BASE(_name, _id, CLK_TYPE_GEN3_OSC, _parent, .div = _div)
@@ -55,8 +52,8 @@ enum rcar_gen3_clk_types {
 	DEF_BASE(_name, _id, CLK_TYPE_GEN3_RCKSEL,	\
 		 (_parent0) << 16 | (_parent1),	.div = (_div0) << 16 | (_div1))
 
-#define DEF_GEN3_Z(_name, _id, _type, _parent, _div)	\
-	DEF_BASE(_name, _id, _type, _parent, .div = _div)
+#define DEF_GEN3_Z(_name, _id, _type, _parent, _div, _offset)	\
+	DEF_BASE(_name, _id, _type, _parent, .div = _div, .offset = _offset)
 
 struct rcar_gen3_cpg_pll_config {
 	u8 extal_div;

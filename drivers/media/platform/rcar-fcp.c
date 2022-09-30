@@ -1,21 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * rcar-fcp.c  --  R-Car Frame Compression Processor Driver
  *
  * Copyright (C) 2016 Renesas Electronics Corporation
  *
  * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/dma-mapping.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -32,25 +30,16 @@ struct rcar_fcp_device {
 static LIST_HEAD(fcp_devices);
 static DEFINE_MUTEX(fcp_lock);
 
-#define FCP_VCR			0x00
-#define FCP_CFG0		0x04
-#define FCP_RST			0x10
-#define FCP_RST_SOFTRST		BIT(0)
-#define FCP_STA			0x18
-#define FCP_STA_ACT		BIT(0)
+#define FCP_VCR		0x00
+#define FCP_CFG0	0x04
+#define FCP_RST		0x10
+#define FCP_RST_SOFTRST	BIT(0)
+#define FCP_STA		0x18
+#define FCP_STA_ACT	BIT(0)
 
 /* -----------------------------------------------------------------------------
  * Public API
  */
-static void fcp_write(struct rcar_fcp_device *fcp, u32 value, u32 offset)
-{
-	iowrite32(value, fcp->base + offset);
-}
-
-static u32 fcp_read(struct rcar_fcp_device *fcp, u32 offset)
-{
-	return ioread32(fcp->base + offset);
-}
 
 /**
  * rcar_fcp_get - Find and acquire a reference to an FCP instance
@@ -62,6 +51,16 @@ static u32 fcp_read(struct rcar_fcp_device *fcp, u32 offset)
  * Return a pointer to the FCP instance, or an ERR_PTR if the instance can't be
  * found.
  */
+static void fcp_write(struct rcar_fcp_device *fcp, u32 value, u32 offset)
+{
+	iowrite32(value, fcp->base + offset);
+}
+
+static u32 fcp_read(struct rcar_fcp_device *fcp, u32 offset)
+{
+	return ioread32(fcp->base + offset);
+}
+
 struct rcar_fcp_device *rcar_fcp_get(const struct device_node *np)
 {
 	struct rcar_fcp_device *fcp;
@@ -123,8 +122,10 @@ int rcar_fcp_enable(struct rcar_fcp_device *fcp)
 		return 0;
 
 	ret = pm_runtime_get_sync(fcp->dev);
-	if (ret < 0)
+	if (ret < 0) {
+		pm_runtime_put_noidle(fcp->dev);
 		return ret;
+	}
 
 	return 0;
 }
@@ -182,6 +183,8 @@ static int rcar_fcp_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	fcp->dev = &pdev->dev;
+
+	dma_set_max_seg_size(fcp->dev, UINT_MAX);
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!mem)

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ST M48T59 RTC driver
  *
  * Copyright (c) 2007 Wind River Systems, Inc.
  *
  * Author: Mark Zhan <rongkai.zhan@windriver.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -99,10 +96,8 @@ static int m48t59_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	M48T59_CLEAR_BITS(M48T59_CNTL_READ, M48T59_CNTL);
 	spin_unlock_irqrestore(&m48t59->lock, flags);
 
-	dev_dbg(dev, "RTC read time %04d-%02d-%02d %02d/%02d/%02d\n",
-		tm->tm_year + 1900, tm->tm_mon, tm->tm_mday,
-		tm->tm_hour, tm->tm_min, tm->tm_sec);
-	return rtc_valid_tm(tm);
+	dev_dbg(dev, "RTC read time %ptR\n", tm);
+	return 0;
 }
 
 static int m48t59_rtc_set_time(struct device *dev, struct rtc_time *tm)
@@ -188,9 +183,7 @@ static int m48t59_rtc_readalarm(struct device *dev, struct rtc_wkalrm *alrm)
 	M48T59_CLEAR_BITS(M48T59_CNTL_READ, M48T59_CNTL);
 	spin_unlock_irqrestore(&m48t59->lock, flags);
 
-	dev_dbg(dev, "RTC read alarm time %04d-%02d-%02d %02d/%02d/%02d\n",
-		tm->tm_year + 1900, tm->tm_mon, tm->tm_mday,
-		tm->tm_hour, tm->tm_min, tm->tm_sec);
+	dev_dbg(dev, "RTC read alarm time %ptR\n", tm);
 	return rtc_valid_tm(tm);
 }
 
@@ -325,16 +318,16 @@ static const struct rtc_class_ops m48t02_rtc_ops = {
 	.set_time	= m48t59_rtc_set_time,
 };
 
-static ssize_t m48t59_nvram_read(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *bin_attr,
-				char *buf, loff_t pos, size_t size)
+static int m48t59_nvram_read(void *priv, unsigned int offset, void *val,
+			     size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
-	struct platform_device *pdev = to_platform_device(dev);
+	struct platform_device *pdev = priv;
+	struct device *dev = &pdev->dev;
 	struct m48t59_plat_data *pdata = dev_get_platdata(&pdev->dev);
 	struct m48t59_private *m48t59 = platform_get_drvdata(pdev);
 	ssize_t cnt = 0;
 	unsigned long flags;
+	u8 *buf = val;
 
 	spin_lock_irqsave(&m48t59->lock, flags);
 
@@ -343,19 +336,19 @@ static ssize_t m48t59_nvram_read(struct file *filp, struct kobject *kobj,
 
 	spin_unlock_irqrestore(&m48t59->lock, flags);
 
-	return cnt;
+	return 0;
 }
 
-static ssize_t m48t59_nvram_write(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *bin_attr,
-				char *buf, loff_t pos, size_t size)
+static int m48t59_nvram_write(void *priv, unsigned int offset, void *val,
+			      size_t size)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
-	struct platform_device *pdev = to_platform_device(dev);
+	struct platform_device *pdev = priv;
+	struct device *dev = &pdev->dev;
 	struct m48t59_plat_data *pdata = dev_get_platdata(&pdev->dev);
 	struct m48t59_private *m48t59 = platform_get_drvdata(pdev);
 	ssize_t cnt = 0;
 	unsigned long flags;
+	u8 *buf = val;
 
 	spin_lock_irqsave(&m48t59->lock, flags);
 
@@ -364,17 +357,8 @@ static ssize_t m48t59_nvram_write(struct file *filp, struct kobject *kobj,
 
 	spin_unlock_irqrestore(&m48t59->lock, flags);
 
-	return cnt;
+	return 0;
 }
-
-static struct bin_attribute m48t59_nvram_attr = {
-	.attr = {
-		.name = "nvram",
-		.mode = S_IRUGO | S_IWUSR,
-	},
-	.read = m48t59_nvram_read,
-	.write = m48t59_nvram_write,
-};
 
 static int m48t59_rtc_probe(struct platform_device *pdev)
 {
@@ -382,8 +366,15 @@ static int m48t59_rtc_probe(struct platform_device *pdev)
 	struct m48t59_private *m48t59 = NULL;
 	struct resource *res;
 	int ret = -ENOMEM;
-	char *name;
 	const struct rtc_class_ops *ops;
+	struct nvmem_config nvmem_cfg = {
+		.name = "m48t59-",
+		.word_size = 1,
+		.stride = 1,
+		.reg_read = m48t59_nvram_read,
+		.reg_write = m48t59_nvram_write,
+		.priv = pdev,
+	};
 
 	/* This chip could be memory-mapped or I/O-mapped */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -449,17 +440,14 @@ static int m48t59_rtc_probe(struct platform_device *pdev)
 	}
 	switch (pdata->type) {
 	case M48T59RTC_TYPE_M48T59:
-		name = "m48t59";
 		ops = &m48t59_rtc_ops;
 		pdata->offset = 0x1ff0;
 		break;
 	case M48T59RTC_TYPE_M48T02:
-		name = "m48t02";
 		ops = &m48t02_rtc_ops;
 		pdata->offset = 0x7f0;
 		break;
 	case M48T59RTC_TYPE_M48T08:
-		name = "m48t08";
 		ops = &m48t02_rtc_ops;
 		pdata->offset = 0x1ff0;
 		break;
@@ -471,23 +459,22 @@ static int m48t59_rtc_probe(struct platform_device *pdev)
 	spin_lock_init(&m48t59->lock);
 	platform_set_drvdata(pdev, m48t59);
 
-	m48t59->rtc = devm_rtc_device_register(&pdev->dev, name, ops,
-						THIS_MODULE);
+	m48t59->rtc = devm_rtc_allocate_device(&pdev->dev);
 	if (IS_ERR(m48t59->rtc))
 		return PTR_ERR(m48t59->rtc);
 
-	m48t59_nvram_attr.size = pdata->offset;
+	m48t59->rtc->nvram_old_abi = true;
+	m48t59->rtc->ops = ops;
 
-	ret = sysfs_create_bin_file(&pdev->dev.kobj, &m48t59_nvram_attr);
+	nvmem_cfg.size = pdata->offset;
+	ret = rtc_nvmem_register(m48t59->rtc, &nvmem_cfg);
 	if (ret)
 		return ret;
 
-	return 0;
-}
+	ret = rtc_register_device(m48t59->rtc);
+	if (ret)
+		return ret;
 
-static int m48t59_rtc_remove(struct platform_device *pdev)
-{
-	sysfs_remove_bin_file(&pdev->dev.kobj, &m48t59_nvram_attr);
 	return 0;
 }
 
@@ -499,7 +486,6 @@ static struct platform_driver m48t59_rtc_driver = {
 		.name	= "rtc-m48t59",
 	},
 	.probe		= m48t59_rtc_probe,
-	.remove		= m48t59_rtc_remove,
 };
 
 module_platform_driver(m48t59_rtc_driver);

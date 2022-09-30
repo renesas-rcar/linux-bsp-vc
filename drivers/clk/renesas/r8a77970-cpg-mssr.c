@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * r8a77970 Clock Pulse Generator / Module Standby and Software Reset
  *
@@ -6,10 +7,6 @@
  * Based on r8a7795-cpg-mssr.c
  *
  * Copyright (C) 2015 Glider bvba
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
  */
 
 #include <linux/clk-provider.h>
@@ -32,7 +29,7 @@ enum r8a77970_clk_types {
 
 enum clk_ids {
 	/* Core Clock Outputs exported to DT */
-	LAST_DT_CORE_CLK = R8A77970_CLK_OSC,
+	LAST_DT_CORE_CLK = R8A77970_CLK_POST2,
 
 	/* External Input Clocks */
 	CLK_EXTAL,
@@ -79,6 +76,7 @@ static const struct cpg_core_clk r8a77970_core_clks[] __initconst = {
 	DEF_FIXED(".pll1_div4",	CLK_PLL1_DIV4,	CLK_PLL1_DIV2,	2, 1),
 
 	/* Core Clock Outputs */
+	DEF_GEN3_Z("z2",	R8A77970_CLK_Z2,    CLK_TYPE_GEN3_Z, CLK_PLL1_DIV4, 1, 0),
 	DEF_FIXED("ztr",	R8A77970_CLK_ZTR,   CLK_PLL1_DIV2,  6, 1),
 	DEF_FIXED("ztrd2",	R8A77970_CLK_ZTRD2, CLK_PLL1_DIV2, 12, 1),
 	DEF_FIXED("zt",		R8A77970_CLK_ZT,    CLK_PLL1_DIV2,  4, 1),
@@ -94,18 +92,29 @@ static const struct cpg_core_clk r8a77970_core_clks[] __initconst = {
 		 CLK_PLL1_DIV2),
 	DEF_BASE("sd0",	R8A77970_CLK_SD0, CLK_TYPE_R8A77970_SD0, CLK_PLL1_DIV2),
 
+	DEF_FIXED("rpc",	R8A77970_CLK_RPC,   CLK_PLL1_DIV2,  5, 1),
+	DEF_FIXED("rpcd2",	R8A77970_CLK_RPCD2, CLK_PLL1_DIV2, 10, 1),
+
 	DEF_FIXED("cl",		R8A77970_CLK_CL,    CLK_PLL1_DIV2, 48, 1),
 	DEF_FIXED("cp",		R8A77970_CLK_CP,    CLK_EXTAL,	    2, 1),
+	DEF_FIXED("cpex",	R8A77970_CLK_CPEX,  CLK_EXTAL,	    2, 1),
 
 	DEF_DIV6P1("canfd",	R8A77970_CLK_CANFD, CLK_PLL1_DIV4, 0x244),
 	DEF_DIV6P1("mso",	R8A77970_CLK_MSO,   CLK_PLL1_DIV4, 0x014),
 	DEF_DIV6P1("csi0",	R8A77970_CLK_CSI0,  CLK_PLL1_DIV4, 0x00c),
+	DEF_DIV6P1("post",	R8A77970_CLK_POST,  CLK_PLL1_DIV4, 0x08c),
+	DEF_DIV6P1("post2",	R8A77970_CLK_POST2, CLK_PLL1_DIV4, 0x09c),
 
 	DEF_FIXED("osc",	R8A77970_CLK_OSC,   CLK_PLL1_DIV2, 12*1024, 1),
 	DEF_FIXED("r",		R8A77970_CLK_R,	    CLK_EXTALR,	   1, 1),
 };
 
 static const struct mssr_mod_clk r8a77970_mod_clks[] __initconst = {
+	DEF_MOD("tmu4",			 121,	R8A77970_CLK_S2D2),
+	DEF_MOD("tmu3",			 122,	R8A77970_CLK_S2D2),
+	DEF_MOD("tmu2",			 123,	R8A77970_CLK_S2D2),
+	DEF_MOD("tmu1",			 124,	R8A77970_CLK_S2D2),
+	DEF_MOD("tmu0",			 125,	R8A77970_CLK_CP),
 	DEF_MOD("ivcp1e",		 127,	R8A77970_CLK_S2D1),
 	DEF_MOD("scif4",		 203,	R8A77970_CLK_S2D4),
 	DEF_MOD("scif3",		 204,	R8A77970_CLK_S2D4),
@@ -118,6 +127,11 @@ static const struct mssr_mod_clk r8a77970_mod_clks[] __initconst = {
 	DEF_MOD("mfis",			 213,	R8A77970_CLK_S2D2),
 	DEF_MOD("sys-dmac2",		 217,	R8A77970_CLK_S2D1),
 	DEF_MOD("sys-dmac1",		 218,	R8A77970_CLK_S2D1),
+	DEF_MOD("cmt3",			 300,	R8A77970_CLK_R),
+	DEF_MOD("cmt2",			 301,	R8A77970_CLK_R),
+	DEF_MOD("cmt1",			 302,	R8A77970_CLK_R),
+	DEF_MOD("cmt0",			 303,	R8A77970_CLK_R),
+	DEF_MOD("tpu0",			 304,	R8A77970_CLK_S2D4),
 	DEF_MOD("sd-if",		 314,	R8A77970_CLK_SD0),
 	DEF_MOD("rwdt",			 402,	R8A77970_CLK_R),
 	DEF_MOD("intc-ex",		 407,	R8A77970_CLK_CP),
@@ -138,6 +152,18 @@ static const struct mssr_mod_clk r8a77970_mod_clks[] __initconst = {
 	DEF_MOD("vin1",			 810,	R8A77970_CLK_S2D1),
 	DEF_MOD("vin0",			 811,	R8A77970_CLK_S2D1),
 	DEF_MOD("etheravb",		 812,	R8A77970_CLK_S2D2),
+	DEF_MOD("isp",			 817,	R8A77970_CLK_S2D1),
+	DEF_MOD("imr3",			 820,	R8A77970_CLK_S2D1),
+	DEF_MOD("imr2",			 821,	R8A77970_CLK_S2D1),
+	DEF_MOD("imr1",			 822,	R8A77970_CLK_S2D1),
+	DEF_MOD("imr0",			 823,	R8A77970_CLK_S2D1),
+	DEF_MOD("imp3",			 824,	R8A77970_CLK_S1D1),
+	DEF_MOD("imp2",			 825,	R8A77970_CLK_S1D1),
+	DEF_MOD("imp1",			 826,	R8A77970_CLK_S1D1),
+	DEF_MOD("imp0",			 827,	R8A77970_CLK_S1D1),
+	DEF_MOD("imp-ocv1",		 828,	R8A77970_CLK_S1D1),
+	DEF_MOD("imp-ocv0",		 829,	R8A77970_CLK_S1D1),
+	DEF_MOD("impram",		 830,	R8A77970_CLK_S1D1),
 	DEF_MOD("gpio5",		 907,	R8A77970_CLK_CP),
 	DEF_MOD("gpio4",		 908,	R8A77970_CLK_CP),
 	DEF_MOD("gpio3",		 909,	R8A77970_CLK_CP),
@@ -145,6 +171,7 @@ static const struct mssr_mod_clk r8a77970_mod_clks[] __initconst = {
 	DEF_MOD("gpio1",		 911,	R8A77970_CLK_CP),
 	DEF_MOD("gpio0",		 912,	R8A77970_CLK_CP),
 	DEF_MOD("can-fd",		 914,	R8A77970_CLK_S2D2),
+	DEF_MOD("rpc-if",		 917,	R8A77970_CLK_RPC),
 	DEF_MOD("i2c4",			 927,	R8A77970_CLK_S2D2),
 	DEF_MOD("i2c3",			 928,	R8A77970_CLK_S2D2),
 	DEF_MOD("i2c2",			 929,	R8A77970_CLK_S2D2),
@@ -153,9 +180,9 @@ static const struct mssr_mod_clk r8a77970_mod_clks[] __initconst = {
 };
 
 static const unsigned int r8a77970_crit_mod_clks[] __initconst = {
+	MOD_CLK_ID(402),	/* RWDT */
 	MOD_CLK_ID(408),	/* INTC-AP (GIC) */
 };
-
 
 /*
  * CPG Clock Data

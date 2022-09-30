@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux driver for M2Tech hiFace compatible devices
  *
@@ -7,11 +8,6 @@
  *           Antonio Ospite <ao2@amarulasolutions.com>
  *
  * The driver is based on the work done in TerraTec DMX 6Fire USB
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -84,12 +80,12 @@ static int hiface_chip_create(struct usb_interface *intf,
 		return ret;
 	}
 
-	strlcpy(card->driver, DRIVER_NAME, sizeof(card->driver));
+	strscpy(card->driver, DRIVER_NAME, sizeof(card->driver));
 
 	if (quirk && quirk->device_name)
-		strlcpy(card->shortname, quirk->device_name, sizeof(card->shortname));
+		strscpy(card->shortname, quirk->device_name, sizeof(card->shortname));
 	else
-		strlcpy(card->shortname, "M2Tech generic audio", sizeof(card->shortname));
+		strscpy(card->shortname, "M2Tech generic audio", sizeof(card->shortname));
 
 	strlcat(card->longname, card->shortname, sizeof(card->longname));
 	len = strlcat(card->longname, " at ", sizeof(card->longname));

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef __RCAR_EMS_CTRL_H__
 #define __RCAR_EMS_CTRL_H__
 

@@ -6,6 +6,14 @@
  * Copyright (C) 2016 Cogent Embedded, Inc.
  */
 
+/*
+ * SSI-AK4613
+ *	aplay   -D plughw:0,0 xxx.wav
+ *	arecord -D plughw:0,0 xxx.wav
+ * SSI-HDMI
+ *	aplay   -D plughw:0,1 xxx.wav
+ */
+
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 
@@ -15,10 +23,12 @@
 	aliases {
 		serial0 = &scif2;
 		ethernet0 = &avb;
+		mmc0 = &sdhi2;
+		mmc1 = &sdhi0;
 	};
 
 	chosen {
-		bootargs = "ignore_loglevel rw root=/dev/nfs ip=dhcp";
+		bootargs = "ignore_loglevel rw root=/dev/nfs ip=on";
 		stdout-path = "serial0:115200n8";
 	};
 
@@ -32,7 +42,7 @@
 		clock-frequency = <12288000>;
 	};
 
-	avb-mch@ec5a0100 {
+	avb-mch {
 		compatible = "renesas,avb-mch-gen3";
 		reg = <0 0xec5a0100 0 0x100>; /* ADG_AVB */
 		reg-name = "adg_avb";
@@ -96,10 +106,11 @@
 
 	sound_card: sound {
 		compatible = "audio-graph-card";
+		label = "ak4613";
 
-		label = "rcar-sound";
-
-		dais = <&rsnd_port0>;
+		dais = <&rsnd_port0	/* ak4613 */
+			&rsnd_port1	/* HDMI0  */
+			>;
 	};
 
 	vcc_sdhi0: regulator-vcc-sdhi0 {
@@ -122,8 +133,7 @@
 
 		gpios = <&gpio5 1 GPIO_ACTIVE_HIGH>;
 		gpios-states = <1>;
-		states = <3300000 1
-			  1800000 0>;
+		states = <3300000 1>, <1800000 0>;
 	};
 
 	x12_clk: x12 {
@@ -147,7 +157,7 @@
 	pinctrl-0 = <&avb_pins>;
 	pinctrl-names = "default";
 	phy-handle = <&phy0>;
-	phy-mode = "rgmii-txid";
+	tx-internal-delay-ps = <2000>;
 	status = "okay";
 
 	phy0: ethernet-phy@0 {
@@ -189,6 +199,12 @@
 				remote-endpoint = <&hdmi0_con>;
 			};
 		};
+		port@2 {
+			reg = <2>;
+			dw_hdmi0_snd_in: endpoint {
+				remote-endpoint = <&rsnd_for_hdmi>;
+			};
+		};
 	};
 };
 
@@ -221,7 +237,7 @@
 
 		port {
 			ak4613_endpoint: endpoint {
-				remote-endpoint = <&rsnd_endpoint0>;
+				remote-endpoint = <&rsnd_for_ak4613>;
 			};
 		};
 	};
@@ -345,12 +361,6 @@
 	sdhi2_pins: sd2 {
 		groups = "sdhi2_data8", "sdhi2_ctrl", "sdhi2_ds";
 		function = "sdhi2";
-		power-source = <3300>;
-	};
-
-	sdhi2_pins_uhs: sd2_uhs {
-		groups = "sdhi2_data8", "sdhi2_ctrl", "sdhi2_ds";
-		function = "sdhi2";
 		power-source = <1800>;
 	};
 
@@ -372,7 +382,7 @@
 };
 
 &rcar_sound {
-	pinctrl-0 = <&sound_pins &sound_clk_pins>;
+	pinctrl-0 = <&sound_pins>, <&sound_clk_pins>;
 	pinctrl-names = "default";
 
 	/* Single DAI */
@@ -408,15 +418,80 @@
 		#size-cells = <0>;
 		rsnd_port0: port@0 {
 			reg = <0>;
-			rsnd_endpoint0: endpoint {
+			rsnd_for_ak4613: endpoint {
 				remote-endpoint = <&ak4613_endpoint>;
 
 				dai-format = "left_j";
-				bitclock-master = <&rsnd_endpoint0>;
-				frame-master = <&rsnd_endpoint0>;
+				bitclock-master = <&rsnd_for_ak4613>;
+				frame-master = <&rsnd_for_ak4613>;
 
-				playback = <&ssi0 &src0 &dvc0>;
-				capture  = <&ssi1 &src1 &dvc1>;
+				playback = <&ssi0>, <&src0>, <&dvc0>;
+				capture  = <&ssi1>, <&src1>, <&dvc1>;
+			};
+		};
+		rsnd_port1: port@1 {
+			reg = <1>;
+			rsnd_for_hdmi: endpoint {
+				remote-endpoint = <&dw_hdmi0_snd_in>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_for_hdmi>;
+				frame-master = <&rsnd_for_hdmi>;
+
+				playback = <&ssi2>;
+			};
+		};
+	};
+};
+
+&rpc0 {
+	status = "okay";
+
+	flash@0 {
+		compatible = "cfi-flash";
+		reg = <0>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			bootparam@0 {
+				reg = <0x00000000 0x040000>;
+				read-only;
+			};
+			bl2@00040000 {
+				reg = <0x00040000 0x140000>;
+				read-only;
+			};
+			cert_header_sa6@00180000 {
+				reg = <0x00180000 0x040000>;
+				read-only;
+			};
+			bl31@001C0000 {
+				reg = <0x001C0000 0x040000>;
+				read-only;
+			};
+			tee@00200000 {
+				reg = <0x00200000 0x440000>;
+				read-only;
+			};
+			uboot@00640000 {
+				reg = <0x00640000 0x0C0000>;
+				read-only;
+			};
+			uboot-env@00700000 {
+				reg = <0x00700000 0x040000>;
+				read-only;
+			};
+			dtb@00740000 {
+				reg = <0x00740000 0x080000>;
+			};
+			kernel@007C0000 {
+				reg = <0x007C0000 0x1400000>;
+			};
+			user@01BC0000 {
+				reg = <0x01BC0000 0x2440000>;
 			};
 		};
 	};
@@ -455,15 +530,20 @@
 &sdhi2 {
 	/* used for on-board 8bit eMMC */
 	pinctrl-0 = <&sdhi2_pins>;
-	pinctrl-1 = <&sdhi2_pins_uhs>;
+	pinctrl-1 = <&sdhi2_pins>;
 	pinctrl-names = "default", "state_uhs";
+
+	iommus = <&ipmmu_ds1 34>;
 
 	vmmc-supply = <&reg_3p3v>;
 	vqmmc-supply = <&reg_1p8v>;
 	bus-width = <8>;
 	mmc-hs200-1_8v;
 	mmc-hs400-1_8v;
+	no-sd;
+	no-sdio;
 	non-removable;
+	full-pwr-cycle-in-suspend;
 	status = "okay";
 };
 

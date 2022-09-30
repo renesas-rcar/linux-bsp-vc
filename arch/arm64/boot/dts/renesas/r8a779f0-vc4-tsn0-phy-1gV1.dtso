@@ -1,0 +1,30 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+&gpio3 {
+	tsn0-pre-mux {
+		gpio-hog;
+		gpios = <8 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN0-PRE-MUX";
+	};
+};
+
+&gpio4 {
+	tsn0-mux {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN0-MUX";
+	};
+};
+
+&tsn0 {
+	phy-handle = <&tsn0_phy_1g>;
+};
+
+&tsn0_phy_1g {
+	status = "okay";
+};

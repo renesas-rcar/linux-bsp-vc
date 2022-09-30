@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Renesas R-Car AVS Support
  *
- *  Copyright (C) 2016 Renesas Electronics Corporation
+ *  Copyright (C) 2021 Renesas Electronics Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +19,8 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
+#include <linux/clk.h>
+#include <linux/clk-provider.h>
 
 /* Change the default opp_table pattern in device tree.
  * Set opp_pattern_num is default.
@@ -56,7 +59,7 @@ static int change_default_opp_pattern(struct device_node *avs_node,
 		pr_info("rcar-avs: %s is running with: %s\n",
 			of_node_full_name(dev_node),
 			of_node_full_name(of_find_node_by_phandle(
-				be32_to_cpup(pp->value))));
+					be32_to_cpup(pp->value))));
 	}
 
 	return 0;
@@ -68,15 +71,20 @@ static int change_default_opp_pattern(struct device_node *avs_node,
 #define AVS_MAX_VALUE	7
 
 static const struct of_device_id rcar_avs_matches[] = {
-#if defined(CONFIG_ARCH_R8A7795) || \
-	defined(CONFIG_ARCH_R8A7796)
+#if defined(CONFIG_ARCH_R8A77951) || \
+	defined(CONFIG_ARCH_R8A77960) || \
+	defined(CONFIG_ARCH_R8A77961)
 	{ .compatible = "renesas,rcar-gen3-avs" },
+	{ .compatible = "renesas,r8a77951-avs" },
+	{ .compatible = "renesas,r8a77960-avs" },
+	{ .compatible = "renesas,r8a77961-avs" },
 #endif
 	{ /* sentinel */ }
 };
 
 static int __init rcar_avs_init(void)
 {
+	struct clk *clk;
 	u32 avs_val, volcond_val;
 	struct device_node *np;
 	void __iomem *advadjp;
@@ -89,17 +97,28 @@ static int __init rcar_avs_init(void)
 		return -ENODEV;
 	}
 
+	clk = of_clk_get(np, 0);
+
+	if (IS_ERR(clk)) {
+		pr_err("avs could not get clk\n");
+		ret = PTR_ERR(clk);
+		goto err;
+	}
+
 	advadjp = of_iomap(np, 0); /* ADVADJP register from dts */
 	if (!advadjp) {
 		pr_warn("%s: Cannot map regs\n", np->full_name);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err;
 	}
 
 	/* Get and check avs value */
 	avs_val = 0; /* default avs table value */
 
+	clk_prepare_enable(clk);
 	volcond_val = ioread32(advadjp);
 	volcond_val &= VOLCOND_MASK;
+	clk_disable_unprepare(clk);
 
 	iounmap(advadjp);
 
@@ -114,6 +133,8 @@ static int __init rcar_avs_init(void)
 
 	/* Apply avs value */
 	ret = change_default_opp_pattern(np, avs_val);
+err:
+	of_node_put(np);
 
 	return ret;
 }

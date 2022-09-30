@@ -4,10 +4,6 @@
  *
  * Copyright (C) 2006 Greg Kroah-Hartman <gregkh@suse.de>
  *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	version 2 as published by the Free Software Foundation.
- *
  * TODO:
  *	Add termios method that uses copy_hw but also kills all echo
  *	flags as the navman is rx only so cannot echo.
@@ -116,4 +112,4 @@ static struct usb_serial_driver * const serial_drivers[] = {
 
 module_usb_serial_driver(serial_drivers, id_table);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

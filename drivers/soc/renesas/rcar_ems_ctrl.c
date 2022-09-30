@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  R-Car Gen3 Emergency shutdown for thermal management
  *
@@ -173,7 +174,7 @@ static struct cpumask freq_scaled_cpus;
 static int rcar_ems_cpufreq_notifier_call(struct notifier_block *nb,
 	unsigned long event, void *data)
 {
-	struct cpufreq_policy *policy = data;
+	struct cpufreq_policy_data *policy = data;
 	int mode;
 
 	if (!cpumask_test_cpu(policy->cpu, &freq_scaled_cpus))
@@ -211,7 +212,7 @@ static int rcar_ems_thermal_notifier_call(struct notifier_block *nb,
 		for_each_cpu(cpu, &target_cpus) {
 			if (cpu_online(cpu)) {
 				cpumask_set_cpu(cpu, &runtime_cpus);
-				cpu_down(cpu);
+				remove_cpu(cpu);
 			}
 		}
 		break;
@@ -219,7 +220,7 @@ static int rcar_ems_thermal_notifier_call(struct notifier_block *nb,
 	case RCAR_EMS_MODE_OFF:
 		for_each_cpu(cpu, &runtime_cpus) {
 			if  (!cpu_online(cpu))
-				cpu_up(cpu);
+				add_cpu(cpu);
 		}
 		break;
 

@@ -1,100 +1,267 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* Renesas R-Switch2 Ethernet (RSWITCH) Device Driver
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Renesas RSwitch2 Gateway Common Agent device driver
  *
- * Copyright (C) 2020 Renesas Electronics Corporation
+ * Copyright (C) 2021 Renesas Electronics Corporation
+ *
  */
 
-#ifndef __RSWITCH2_ETH_H__
-#define __RSWITCH2_ETH_H__
-#include "rswitch2_ptp.h"
+#ifndef _RSWITCH2_ETH_H
+#define _RSWITCH2_ETH_H
+
 #include <linux/phy.h>
+#include <linux/netdevice.h>
+#include <linux/timer.h>
 
-#define RSWITCH2ETH_BASE_PORTNAME "tsn"
-#define RSWITCH2_ETH_CLASS "rswitch2eth"
-#define RSWITCH2_RXTSTAMP_TYPE_V2_L2_EVENT 0x00000002
-#define RSWITCH2_TSN_RXTSTAMP_TYPE 0x00000006
-#define RSWITCH2_TSN_TXTSTAMP_ENABLED 1
-#define RSWITCH2_TSN_RXTSTAMP_ENABLED 0x10
-#define RSWITCH2_RXTSTAMP_TYPE_ALL 0x06
-#define RENESAS_RSWITCH2_PHYS 4
-#define NUM_TX_QUEUE 2
-#define INTERNAL_GW 1
-#define RSWITCH2_RX_GW_QUEUE_NUM 0
-#define NUM_RX_QUEUE (2 + INTERNAL_GW)
-#define NUM_TS_DESC 1
-#define RENESAS_RSWITCH2_BASE_PORT_MAC { 0x02, 0x00, 0x00, 0x88, 0x88, 0x00 }
-#define PORT_BITMASK GENMASK(RENESAS_RSWITCH2_MAX_ETHERNET_PORTS, 0)
-#define PORTGWCA_BITMASK GENMASK(RENESAS_RSWITCH2_MAX_ETHERNET_PORTS + 1, 0)
-#define RCE_BIT (1 << 16)
-#define RX_DBAT_ENTRY_NUM 64
-#define TX_DBAT_ENTRY_NUM 1024
-#define DBAT_ENTRY_NUM ((RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE) + \
-			NUM_RX_QUEUE + INTERNAL_GW)
-#define RX_QUEUE_OFFSET ((RENESAS_RSWITCH2_MAX_ETHERNET_PORTS * NUM_TX_QUEUE) + \
-			INTERNAL_GW)
-#define RSWITCH2_BE 0
-#define RSWITCH2_NC 1
-#define RSWITCH2_DESC_NC 2
-#define TS_RING_SIZE 32
-#define TX_RING_SIZE0 1024	/* TX ring size for Best Effort */
-#define TX_RING_SIZE1 1024	/* TX ring size for Network Control */
-#define RX_RING_SIZE0 1024	/* RX ring size for Best Effort */
-#define RX_RING_SIZE1 1024	/* RX ring size for Network Control */
-#define RX_RING_SIZE2 1024
-#define DPTR_ALIGN 4
-#define RSWITCH2_QUEUE_NC 1
-#define RENESAS_RSWITCH2_RX_GW_QUEUE 2
-#define RIS_BITMASK GENMASK(DBAT_ENTRY_NUM, RX_QUEUE_OFFSET)
-#define TIS_BITMASK GENMASK(RX_QUEUE_OFFSET - 1, 0)
-#define RSWITCH2_COM_BPIOG 0x01
-#define RSWITCH2_COM_BPR 0x02
-#define RSWITCH2_VLAN_EGRESS_SCTAG_MODE (3 << 16)
-#define RSWITCH2_DEF_CTAG_VLAN_ID 1
-#define RSWITCH2_DEF_CTAG_PCP 0
-#define RSWITCH2_DEF_CTAG_DEI 0
-#define RSWITCH2_DEF_STAG_VLAN_ID 1
-#define RSWITCH2_DEF_STAG_PCP 0
-#define RSWITCH2_DEF_STAG_DEI 0
-#define RSWITCH2_DRIVER_VERSION "RSWITCH2-1.2.0"
-/* Use 2 Tx Descriptor per frame */
-#define NUM_TX_DESC 2
-#define RSWITCH2_DEF_MSG_ENABLE (NETIF_MSG_LINK | NETIF_MSG_TIMER | \
-				 NETIF_MSG_RX_ERR | NETIF_MSG_TX_ERR)
 
-#define RSWITCH2_ALIGN 128
-#define PKT_BUF_SZ 1538
-#define GWTRC_TSRQ0 0x01
+#define RSW2_NETDEV_BASENAME	"sw%d"
+#define RSW2_PORT_BASENAME	    "etha%d"
 
-/* The Ethernet Basic descriptor definitions. */
-struct rswitch2_desc {
+/* Maximum different Q types per port */
+#define MAX_Q_TYPES_PER_PORT			4
+
+/* Maximum timestamp descriptor Q entries */
+#define MAX_TS_Q_ENTRIES_PER_PORT	256
+
+
+/* Queues use for link local data start at 8 */
+#define RSW2_LL_RX_Q_OFFSET		8
+
+/* Reserve 8 queues use for link local data */
+#define RSW2_LINK_LOCAL_RX_Q_NUM	8
+#define RSW2_LINK_LOCAL_TX_Q_NUM	8
+
+/* Pre-defined link local RX queues */
+enum rsw2_link_local_rx_queues {
+	rsw2_ll_rx_q_port0	= RSW2_LL_RX_Q_OFFSET,
+	rsw2_ll_rx_q_port1,
+	rsw2_ll_rx_q_port2,
+	rsw2_ll_rx_q_port3,
+	rsw2_ll_rx_q_port4,
+	rsw2_ll_rx_q_port5,
+	rsw2_ll_rx_q_port6,
+	rsw2_ll_rx_q_port7,
+	rsw2_ll_rx_q_max_entry,
+};
+#define RSW2_LL_RX_RING_SIZE 128
+
+#define RSW2_LL_TX_Q_OFFSET (rsw2_ll_rx_q_max_entry)
+
+/* Pre-defined link local TX queues */
+enum rsw2_link_local_tx_queues {
+	rsw2_ll_tx_q_port0	= RSW2_LL_TX_Q_OFFSET,
+	rsw2_ll_tx_q_port1,
+	rsw2_ll_tx_q_port2,
+	rsw2_ll_tx_q_port3,
+	rsw2_ll_tx_q_port4,
+	rsw2_ll_tx_q_port5,
+	rsw2_ll_tx_q_port6,
+	rsw2_ll_tx_q_port7,
+	rsw2_ll_tx_q_max_entry,
+};
+#define RSW2_LL_TX_RING_SIZE 64
+
+#define RSW2_LL_RX_PER_PORT_QUEUES 1
+#define RSW2_LL_TX_PER_PORT_QUEUES 1
+
+#define RSW2_BE_RX_Q_OFFSET (rsw2_ll_tx_q_max_entry)
+
+/* Pre-defined best effort RX queues */
+enum rsw2_rx_queues {
+	rsw2_be_rx_q_0		= RSW2_BE_RX_Q_OFFSET,
+	rsw2_be_rx_q_1,
+	rsw2_be_rx_q_2,
+	rsw2_be_rx_q_3,
+	rsw2_be_rx_q_4,
+	rsw2_be_rx_q_5,
+	rsw2_be_rx_q_6,
+	rsw2_be_rx_q_7,
+	rsw2_be_rx_q_8,
+	rsw2_be_rx_q_9,
+	rsw2_be_rx_q_10,
+	rsw2_be_rx_q_11,
+	rsw2_be_rx_q_12,
+	rsw2_be_rx_q_13,
+	rsw2_be_rx_q_14,
+	rsw2_be_rx_q_15,
+	rsw2_be_rx_q_max_entry,
+};
+
+#define RSW2_BE_RX_RING_SIZE 1024
+
+
+
+#define RSW2_BE_TX_Q_OFFSET 96
+
+/* Pre-defined best effort TX queues */
+enum rsw2_tx_queues {
+	rsw2_be_tx_q_0		= RSW2_BE_TX_Q_OFFSET,
+	rsw2_be_tx_q_1,
+	rsw2_be_tx_q_2,
+	rsw2_be_tx_q_3,
+	rsw2_be_tx_q_4,
+	rsw2_be_tx_q_5,
+	rsw2_be_tx_q_6,
+	rsw2_be_tx_q_7,
+	rsw2_be_tx_q_max_entry,
+};
+#define RSW2_BE_TX_RING_SIZE 512
+
+#define RX_BAT_START		RSW2_BE_RX_Q_OFFSET
+#define TX_BAT_START		RSW2_BE_TX_Q_OFFSET
+
+#define BAT_ENTRIES			128
+
+#define NUM_BE_RX_QUEUES	(rsw2_be_rx_q_max_entry - RSW2_BE_RX_Q_OFFSET)
+#define NUM_BE_TX_QUEUES	(rsw2_be_tx_q_max_entry - RSW2_BE_TX_Q_OFFSET)
+
+#define NUM_ALL_QUEUES (NUM_BE_TX_QUEUES + NUM_BE_RX_QUEUES)
+
+/* Queues after the pre-defined once, can be used for dynamic allocation */
+#define DYNAMIC_QUEUE_OFFSET	NUM_ALL_QUEUES
+
+/* Max. descriptor per frame */
+#define RX_MAX_DESC_PER_FRAME 16
+#define TX_MAX_DESC_PER_FRAME 16
+
+//#define RX_MAX_DESC_PER_FRAME 32
+//#define TX_MAX_DESC_PER_FRAME 32
+
+/* If set too small packets from the the stack lead to too many descriptor per frame
+ * This will let the driver stall as there is currently no recovery. Other values than
+ * 4095 should be only used for debugging split descriptor behavior
+ */
+#define RSWITCH2_MAX_DESC_SIZE 4095
+
+
+#define RSW2_BUF_ALIGN	128
+#define RSW2_PKT_BUF_SZ 1538
+
+
+/* Default VLAN settings */
+#define RSWITCH2_DEF_CTAG_VLAN_ID	1
+#define RSWITCH2_DEF_CTAG_PCP		0
+#define RSWITCH2_DEF_CTAG_DEI		0
+#define RSWITCH2_DEF_STAG_VLAN_ID	1
+#define RSWITCH2_DEF_STAG_PCP		0
+#define RSWITCH2_DEF_STAG_DEI		0
+
+
+
+enum rsw2_desc_dt {
+	/* Empty data descriptors */
+	DT_FEMPTY_IS	= 1,
+	DT_FEMPTY_IC	= 2,
+	DT_FEMPTY_ND	= 3,
+	DT_FEMPTY		= 4,
+	DT_FEMPTY_START	= 5,
+	DT_FEMPTY_MID	= 6,
+	DT_FEMPTY_END	= 7,
+	/* Data descriptors */
+	DT_FSINGLE		= 8,
+	DT_FSTART		= 9,
+	DT_FMID			= 10,
+	DT_FEND			= 11,
+	/* Chain control */
+	DT_LINKFIX		= 0,
+	DT_LEMPTY		= 12,
+	DT_EEMPTY		= 13,
+	DT_LINK			= 14,
+	DT_EOS			= 15
+};
+
+
+struct rswitch2_dma_desc {
 	__le16 info_ds;		/* Descriptor size */
-	u8 die_dt;		/* Descriptor interrupt enable and type */
+	u8 die_dt;			/* Descriptor interrupt enable and type */
 	__u8  dptrh;		/* Descriptor pointer MSB */
 	__le32 dptrl;		/* Descriptor pointer LSW */
 } __packed;
 
+#if 0
 /* The Ethernet TS descriptor definitions. */
-struct rswitch2_ts_desc {
+struct rswitch2_dma_ts_desc {
 	__le16 info_ds;		/* Descriptor size */
-	u8 die_dt;		/* Descriptor interrupt enable and type */
+	u8 die_dt;			/* Descriptor interrupt enable and type */
 	__u8  dptrh;		/* Descriptor pointer MSB */
 	__le32 dptrl;		/* Descriptor pointer LSW */
 	__le32 ts_nsec;
 	__le32 ts_sec;
 } __packed;
-
-struct rswitch2_ext_desc {
+#endif
+struct rswitch2_dma_ts_desc {
 	__le16 info_ds;		/* Descriptor size */
-	u8 die_dt;		/* Descriptor interrupt enable and type */
-	__u8  dptrh;		/* Descriptor pointer MSB */
-	__le32 dptrl;		/* Descriptor pointer LSW */
-	__le32 info1l;		/* Descriptor pointer */
-	__le32 info1h;
+	u8 die_dt;			/* Descriptor interrupt enable and type */
+	__u8  : 8;			/* Unused */
+	__u8  tsun;			/* Timestamp unified number */
+	__u8  src_port_num;
+	__u8  dest_port_num;
+	__u8  tn;			/* Timer number */
+	__le32 ts_nsec;
+	__le32 ts_sec;
 } __packed;
 
-struct rswitch2_ext_ts_desc {
+struct rswitch2_dma_ext_desc {
+	__le16 info_ds;		/* Descriptor size & INFO0*/
+	u8 die_dt;			/* Descriptor interrupt enable and type */
+	u8  dptrh;			/* Descriptor pointer MSB */
+	__le32 dptrl;		/* Descriptor pointer LSW */
+	__le64 info1;		/* Descriptor INFO1  */
+} __packed;
+
+struct rswitch2_dma_ext_ts_desc {
+	__le16 info_ds;	/* Descriptor size */
+	u8 die_dt;	/* Descriptor interrupt enable and type */
+	__u8  dptrh;	/* Descriptor pointer MSB */
+	__le32 dptrl;	/* Descriptor pointer LSW */
+	__le64 info1;
+	__le32 ts_nsec;
+	__le32 ts_sec;
+} __packed;
+
+
+
+#define RSW2_DESC_DS	GENMASK(11, 0)
+#define RSW2_DESC_INFO0	GENMASK(15, 12)
+#define RSW2_DESC_INFO0_SEC	BIT_MASK(13)
+#define RSW2_DESC_INFO0_FI	BIT_MASK(12)
+
+#define RSW2_DESC_DT	GENMASK(7, 4)
+#define RSW2_DESC_DIE	BIT_MASK(3)
+#define RSW2_DESC_AXIE	BIT_MASK(2)
+#define RSW2_DESC_DSE	BIT_MASK(1)
+#define RSW2_DESC_ERR	BIT_MASK(0)
+
+#define RSW2_DESC_INFO1_SEC	BIT_MASK(0)
+#define RSW2_DESC_INFO1_FI	BIT_MASK(1)
+#define RSW2_DESC_INFO1_FMT	BIT_MASK(2) /* Descriptor format */
+enum rsw2_info1_format {
+	direct_desc = 1
+};
+#define RSW2_DESC_INFO1_TXC		BIT_MASK(3)		/* TX Timestamp capture */
+#define RSW2_DESC_INFO1_IET		BIT_MASK(4)		/* Timestamp insertion request */
+#define RSW2_DESC_INFO1_CRT		BIT_MASK(5)		/* Residence time calculation request */
+#define RSW2_DESC_INFO1_TN		BIT_MASK(6)		/* Timer utilized for capture/insertion */
+#define RSW2_DESC_INFO1_TSUN	GENMASK(15, 8)	/* Timestamp unique number*/
+#define RSW2_DESC_INFO1_RN		GENMASK(23, 16) /* Routing valid */
+#define RSW2_DESC_INFO1_RV		BIT_MASK(27)	/* Routing valid */
+#define RSW2_DESC_INFO1_IPV		GENMASK(30, 28)	/* Internal priority value / Target priority of the frame */
+#define RSW2_DESC_INFO1_FW		BIT_MASK(31)	/* The FCS contained in the frame is wrong */
+#define RSW2_DESC_INFO1_CSD0	GENMASK(38, 32)/* CPU sub destination for GWCA0 */
+#define RSW2_DESC_INFO1_CSD1	GENMASK(46, 40)/* CPU sub destination for GWCA1 */
+#define RSW2_DESC_INFO1_DV		GENMASK(54, 48)/* Destination vector */
+
+
+#define RSW2_STAT_TIMER_INTERVALL (3000)
+#define RSW2_SERDES_OP_TIMER_INTERVALL (500)
+#define RSW2_SERDES_OP_TIMER_INTERVALL_FIRST (1500)
+#define RSW2_SERDES_OP_RETRIES (5)
+
+#define RSW2_RX_TS_DESC 1
+
+
+struct rswitch2_dma_extts_desc {
 	__le16 info_ds;		/* Descriptor size */
-	u8 die_dt;		/* Descriptor interrupt enable and type */
+	u8 die_dt;			/* Descriptor interrupt enable and type */
 	__u8  dptrh;		/* Descriptor pointer MSB */
 	__le32 dptrl;		/* Descriptor pointer LSW */
 	__le64 info1;		/* Descriptor pointer */
@@ -102,155 +269,222 @@ struct rswitch2_ext_ts_desc {
 	__le32 ts_sec;
 } __packed;
 
-enum {
-	EDMAC_LITTLE_ENDIAN,
-	EDMAC_BIG_ENDIAN
-};
-
-enum RX_DS_CC_BIT {
-	RX_DS = 0x0fff, /* Data size */
-	RX_TR = 0x1000, /* Truncation indication */
-	RX_EI = 0x2000, /* Error indication */
-	RX_PS = 0xc000, /* Padding selection */
-};
-
-enum TX_DS_TAGL_BIT {
-	TX_DS = 0x0fff, /* Data size */
-	TX_TAGL = 0xf000, /* Frame tag LSBs */
-};
-
-struct rswitch2_tstamp_skb {
-	struct list_head list;
-	struct sk_buff *skb;
-	u8 tag;
-};
-
-enum DIE_DT {
-	/* Frame data */
-	DT_FSINGLE = 0x80,
-	DT_FSTART = 0x90,
-	DT_FMID = 0xA0,
-	DT_FEND = 0xB8,
-
-	/* Chain control */
-	DT_LEMPTY = 0xC8, // May be same as linkfix
-	DT_EEMPTY = 0xD0,
-	DT_LINKFIX = 0x00,
-	DT_LINK = 0xE0,
-	DT_EOS = 0xF0,
-
-	/* HW/SW arbitration */
-	DT_FEMPTY = 0x48,
-	DT_FEMPTY_IS = 0x10,
-	DT_FEMPTY_IC = 0x20,
-	DT_FEMPTY_ND = 0x38,
-	DT_FEMPTY_START = 0x50,
-	DT_FEMPTY_MID = 0x60,
-	DT_FEMPTY_END = 0x70,
-};
-
-/* Port Register's bits*/
-enum ETH_TSN_CCC_BIT {
-	ETH_TSN_EAMC_OPC		= 0x00000003,
-	ETH_TSN_EAMC_OPC_RESET		= 0x00000000,
-	ETH_TSN_EAMC_OPC_MASK		= 0x00000003,
-	ETH_TSN_EAMC_OPC_DISABLE	= 0x00000001,
-	ETH_TSN_EAMC_OPC_CONFIG		= 0x00000002,
-	ETH_TSN_EAMC_OPC_OPERATION	= 0x00000003,
-};
-
-enum ETH_TSN_EAMS_BIT {
-	ETH_TSN_EAMS_OPS		= 0x0000000F,
-	ETH_TSN_EAMS_OPS_MASK		= 0x0000000F,
-	ETH_TSN_EAMS_OPS_RESET		= 0x00000000,
-	ETH_TSN_EAMS_OPS_DISABLE	= 0x00000001,
-	ETH_TSN_EAMS_OPS_CONFIG		= 0x00000002,
-	ETH_TSN_EAMS_OPS_OPERATION	= 0x00000003,
-};
-
-/* Request/Current state of AVB switching Block & Port */
-enum rswitch2_portstate {
-	rswitch2_portstate_unknown = 0,	/* Undetected/Unknown */
-	rswitch2_portstate_startreset,	/* RESET mode has been requested, not yet completed */
-	rswitch2_portstate_reset,	/* Port is RESET */
-	rswitch2_portstate_startdisable, /* RESET mode has been requested, not yet completed */
-	rswitch2_portstate_disable,
-	rswitch2_portstate_startconfig,	/* CONFIG mode has been requested, not yet completed */
-	rswitch2_portstate_config,	/* Port is in CONFIG mode */
-	rswitch2_portstate_startoperate, /* OPERATE mode has been requested, not yet completed */
-	rswitch2_portstate_operate,	/* Port is in OPERATE mode */
-	rswitch2_portstate_failed	/* Port is not operational */
-};
-
-struct rswitch2_phy_mux {
-	u32 mux;
-	u32 gpio;
-};
-
-enum renesas_Board_Type {
-	RENESAS_VC1,
-	RENESAS_VC2,
-	RENESAS_VC3,
-};
-
-/* Private data held in network-device (One per AVB/TSN port) */
-struct port_private {
-	struct sk_buff **rx_skb[NUM_RX_QUEUE];
-	struct sk_buff **tx_skb[NUM_TX_QUEUE];
-	struct net_device *ndev;
-	struct device_node *node;
-	u32 portnumber;			/* Port number (0 .. n) */
-	enum rswitch2_portstate portstate;
-	struct platform_device *pdev;
-	u32 phy_addr;
-	struct sk_buff *skb;
-	const u32 *portReg_offset;	/* table of register offsets - per port */
-	void __iomem *port_base_addr;	/* Remapped memory base for port */
-	void *streaming_private;
-	int edmac_endian;		/* EDMAC Little, or Big-Endian */
-	bool opened;
-	struct rswitch2_phy_mux phy_mux;
-	struct net_device_stats stats;
-	dma_addr_t tx_desc_dma[NUM_TX_QUEUE];
-	int msg_enable;			/* ethtool debug level */
-
-	u32 vrr;			/* Version and Release register */
-	u32 tstamp_tx_ctrl;
-	u32 tstamp_rx_ctrl;
-	struct list_head ts_skb_list;
-
-	u32 ts_skb_tsun;
-	struct ptp_rswitch2 ptp;
-	u32 num_rx_ring[NUM_RX_QUEUE];
-	u32 num_tx_ring[NUM_TX_QUEUE];
-	struct rswitch2_ext_desc *tx_ring[NUM_TX_QUEUE];
-	void *tx_align[NUM_TX_QUEUE];
-	u32 desc_bat_size;
-	u32 portindex;
-	dma_addr_t desc_bat_dma;
-	/* MII transceiver section. */
-	struct mii_bus *mii_bus;	/* MDIO bus control */
-
-	/* PHY */
-	u32 phy_id;			/* ID on MDIO bus */
-	struct phy_device *phydev;	/* PHY device control */
-	enum phy_state link;		/* PHY state (Up, down etc) */
-	phy_interface_t phy_interface;	/* PHY Interface (MII etc) */
-	int phy_id1;			/* PHY register 2 */
-	int phy_id2;			/* PHY register 3 */
-	int speed;			/* Port speed 10, 100, 1000 */
-	int duplex;			/* 1 (TRUE) is FULL and always set, HALF not supported. */
-	unsigned ether_link_active_low:1;
-	struct napi_struct napi[NUM_RX_QUEUE];
-	u32 cur_rx[NUM_RX_QUEUE];	/* Consumer ring indices */
-	u32 dirty_rx[NUM_RX_QUEUE];	/* Producer ring indices */
-	u32 cur_tx[NUM_TX_QUEUE];
-	u32 dirty_tx[NUM_TX_QUEUE];
-	u32 ts_skb_tag;
-	/* RGMII Controller */
-	u32 rgmii_present;		/* 1 (TRUE) is RGMII Controller on MDIO bus is present */
-	u32 rgmii_id;			/* ID on MDIO bus */
-	spinlock_t lock;
-	u32 priv_flags;
-};
+struct rsw2_rx_q_data {
+#ifdef RSW2_RX_TS_DESC
+	struct rswitch2_dma_ext_ts_desc *desc_ring;
+#else
+	struct rswitch2_dma_ext_desc *desc_ring;
 #endif
+
+	dma_addr_t desc_dma;
+	//u32 bat_entry;
+	size_t entries;
+	u32 cur_desc;	/* Consumer ring indices */
+	u32 dirty_desc;	/* Producer ring indices */
+	struct sk_buff **skb;
+	struct napi_struct napi;
+	uint offset;
+};
+
+struct rsw2_tx_q_data {
+	/* FIXME: check if there better type then rswitch2_dma_ext_desc */
+	struct rswitch2_dma_ext_desc *desc_ring;
+	dma_addr_t desc_dma;
+	//u32 bat_entry;
+	size_t entries;
+	u32 cur_desc;	/* Consumer ring indices */
+	u32 dirty_desc;	/* Producer ring indices */
+	struct sk_buff **skb;
+	uint offset;
+};
+
+
+struct rswitch2_physical_port {
+	void __iomem *rmac_base_addr;
+	void __iomem *serdes_chan_addr;
+	struct mii_bus *mii_bus;
+	phy_interface_t phy_iface;
+	struct rsw2_rx_q_data rx_q[RSW2_LL_RX_PER_PORT_QUEUES];
+	struct rsw2_tx_q_data tx_q[RSW2_LL_TX_PER_PORT_QUEUES];
+	u8 ts_tag;
+	struct sk_buff *ts_skb[MAX_TS_Q_ENTRIES_PER_PORT];
+	u64 rx_pkt_cnt;
+	u64 rx_byte_cnt;
+	u64 tx_pkt_cnt;
+	u64 tx_byte_cnt;
+	struct timer_list serdes_usxgmii_op_timer;
+	u32 serdes_usxgmii_op_cnt;
+
+};
+
+struct rswitch2_internal_port {
+	/*	u32 num_rx_ring;
+	u32 num_tx_ring;
+	struct napi_struct napi_tx[NUM_TX_QUEUES];
+	struct napi_struct napi_rx[NUM_RX_QUEUES];
+*/
+	struct rsw2_rx_q_data rx_q[NUM_BE_RX_QUEUES];
+	struct rsw2_tx_q_data tx_q[NUM_BE_TX_QUEUES];
+	u64 rx_pkt_cnt;
+	u64 rx_byte_cnt;
+	u64 tx_pkt_cnt;
+	u64 tx_byte_cnt;
+	u32 rx_over_errors;
+	u32 rx_fifo_errors;
+	struct work_struct work;
+};
+
+struct rswitch2_eth_port {
+	struct net_device *ndev;
+	struct rswitch2_drv *rsw2;
+
+	/* FIXME */
+	struct net_device_stats stats[NUM_BE_RX_QUEUES];
+	struct timer_list stat_timer;
+
+	uint lock_count;
+
+
+
+	unsigned int port_num;
+	struct rswitch2_physical_port *phy_port;
+	struct rswitch2_internal_port *intern_port;
+
+};
+
+int rswitch2_eth_init(struct rswitch2_drv *rsw2);
+void rswitch2_eth_exit(struct rswitch2_drv *rsw2);
+
+/* Register definitions */
+
+#define RSW2_ETHA_EAMC		0x0000 /* Ethernet Agent Mode Configuration */
+#define EAMC_OPC		GENMASK(1, 0)
+
+#define RSW2_ETHA_EAMS		0x0004 /* Ethernet Agent Mode Status */
+#define EAMS_OPS		GENMASK(1, 0)
+
+enum emac_op {
+	emac_reset		= 0,
+	emac_disable	= 1,
+	emac_config		= 2,
+	emac_operation	= 3,
+};
+
+#define RSW2_ETHA_EAMC		0x0000 /* Ethernet Agent Mode Configuration */
+
+#define RSW2_ETHA_EATDQSC	0x0014 /* Ethernet Agent TX Descriptor Queue Security Configuration */
+
+#define RSW2_ETHA_EATDQC	0x0018 /* Ethernet Agent TX Descriptor Queue Configuration */
+
+#define RSW2_ETHA_EATDQAC	0x001C /* Ethernet Agent TX Descriptor Queue Arbitration Configuration */
+
+#define RSW2_ETHA_EATPEC	0x0020 /* Ethernet Agent TX Pre-Emption Configuration */
+
+#define RSW2_ETHA_EATMFSC(q)	(0x0040 + 0x4 * (q)) /* Ethernet Agent Transmission Maximum Frame Size Configuration q */
+
+#define RSW2_ETHA_EATDQDC(q)	(0x0060 + 0x4 * (q)) /* Ethernet Agent Transmission Descriptor Queue Depth Configuration q */
+
+#define RSW2_ETHA_EATDQM(q)		(0x0080 + 0x4 * (q)) /* Ethernet Agent Transmission Descriptor Queue q Monitoring */
+
+#define RSW2_ETHA_EATDQMLM(q)	(0x00A0 + 0x4 * (q)) /* Ethernet Agent Transmission Descriptor Queue q Max Level Monitoring */
+#define RSW2_ETHA_EATDQMLME(q)	(0x00C0 + 0x4 * (q)) /* Ethernet Agent Transmission Descriptor Queue q Max Level Monitoring Emu */
+
+#define RSW2_ETHA_EAVCC		0x0130 /* Ethernet Agent VLAN control configuration */
+
+#define RSW2_ETHA_EAVTC		0x0134 /* Ethernet Agent VLAN TAG configuration */
+
+#define RSW2_ETHA_EARTFC	0x0138 /* Ethernet Agent Reception TAG Filtering Configuration */
+
+#define RSW2_ETHA_EACAEC	0x0200 /* Ethernet Agent CBS Admin Enable Configuration */
+
+#define RSW2_ETHA_EACC		0x0204 /* Ethernet Agent CBS Configuration */
+
+#define RSW2_ETHA_EACAIVC(q)	(0x0220 + 0x4 * (q)) /* Ethernet Agent CBS Admin Increment Value Configuration q */
+
+#define RSW2_ETHA_EACAULC(q)	(0x0240 + 0x4 * (q)) /* Ethernet Agent CBS Admin Upper Limit Configuration q */
+
+#define RSW2_ETHA_EACOEM		0x0260 /* Ethernet Agent CBS Oper Enable Monitoring */
+
+#define RSW2_ETHA_EACOIVM(q)	(0x0280 + 0x4 * (q)) /* Ethernet Agent CBS Oper Increment Value Monitoring q */
+
+#define RSW2_ETHA_EACOULM(q)	(0x02A0 + 0x4 * (q)) /* Ethernet Agent CBS Oper Upper Limit Monitoring q */
+
+#define RSW2_ETHA_EACGSM		0x02C0 /* Ethernet Agent CBS Gate State Monitoring */
+
+#define RSW2_ETHA_EATASC		0x0300 /* Ethernet Agent TAS Configuration */
+
+#define RSW2_ETHA_EATASIGSC		0x0304 /* Ethernet Agent TAS Initial Gate State Configuration */
+
+#define RSW2_ETHA_EATASENC(i)	(0x0320 + 0x4 * (i)) /* Ethernet Agent TAS Entry Number Configuration i */
+
+#define RSW2_ETHA_EATASENM(i)	(0x0360 + 0x4 * (i)) /* Ethernet Agent TAS Entry Number Monitoring i */
+
+#define RSW2_ETHA_EATASCSTC0	0x03A0 /* Ethernet Agent TAS Cycle Start Time Configuration 0 */
+
+#define RSW2_ETHA_EATASCSTC1	0x03A4 /* Ethernet Agent TAS Cycle Start Time Configuration 1 */
+
+#define RSW2_ETHA_EATASCSTM0	0x03A8 /* Ethernet Agent TAS Cycle Start Time Monitoring 0 */
+
+#define RSW2_ETHA_EATASCSTM1	0x03AC /* Ethernet Agent TAS Cycle Start Time Monitoring 1 */
+
+#define RSW2_ETHA_EATASCTC	0x03B0 /* Ethernet Agent TAS Cycle Time Configuration */
+
+#define RSW2_ETHA_EATASCTM	0x03B4 /* Ethernet Agent TAS Cycle Time Monitoring */
+
+#define RSW2_ETHA_EATASGL0	0x03C0 /* Ethernet Agent TAS Gate Learn 0 */
+
+#define RSW2_ETHA_EATASGL1	0x03C4 /* Ethernet Agent TAS Gate Learn 1 */
+
+#define RSW2_ETHA_EATASGLR	0x03C8 /* Ethernet Agent TAS Gate Learn Result */
+
+#define RSW2_ETHA_EATASGR	0x03D0 /* Ethernet Agent TAS Gate Read */
+
+#define RSW2_ETHA_EATASGRR	0x03D4 /* Ethernet Agent TAS Gate Read Result */
+
+#define RSW2_ETHA_EATASHCC	0x03E0 /* Ethernet Agent TAS Hardware Calibration Configuration */
+
+#define RSW2_ETHA_EATASRIRM	0x03E4 /* Ethernet Agent TAS RAM Initialization Register Monitoring */
+
+#define RSW2_ETHA_EATASSM	0x03E8 /* Ethernet Agent TAS Status Monitoring */
+
+#define RSW2_ETHA_EAUSMFSECN	0x0400 /* Ethernet Agent Switch Minimum Frame Size Error CouNter */
+#define RSW2_ETHA_EAUSMFSECNE	0x0480 /* Ethernet Agent Switch Minimum Frame Size Error CouNter Emu */
+
+#define RSW2_ETHA_EATFECN		0x0404 /* Ethernet Agent TAG Filtering Error CouNter */
+#define RSW2_ETHA_EATFECNE		0x0484 /* Ethernet Agent TAG Filtering Error CouNter Emu */
+
+#define RSW2_ETHA_EAFSECN		0x0408 /* Ethernet Agent Frame Size Error CouNter */
+#define RSW2_ETHA_EAFSECNE		0x0488 /* Ethernet Agent Frame Size Error CouNter Emu */
+
+#define RSW2_ETHA_EADQOECN		0x040C /* Ethernet Agent Descriptor Queue Overflow Error CouNter */
+#define RSW2_ETHA_EADQOECNE		0x048C /* Ethernet Agent Descriptor Queue Overflow Error CouNter Emu */
+
+#define RSW2_ETHA_EADQSECN		0x0410 /* Ethernet Agent Descriptor Queue Security Error CouNter */
+#define RSW2_ETHA_EADQSECNE		0x0490 /* Ethernet Agent Descriptor Queue Security Error CouNter Emu */
+
+#define RSW2_ETHA_EAEIS0	0x0500 /* Ethernet Agent Error Interrupt Status 0 */
+
+#define RSW2_ETHA_EAEIE0	0x0504 /* Ethernet Agent Error Interrupt Enable 0 */
+
+#define RSW2_ETHA_EAEID0	0x0508 /* Ethernet Agent Error Interrupt Disable 0 */
+
+#define RSW2_ETHA_EAEIS1	0x0510 /* Ethernet Agent Error Interrupt Status 1 */
+
+#define RSW2_ETHA_EAEIE1	0x0514 /* Ethernet Agent Error Interrupt Enable 1 */
+
+#define RSW2_ETHA_EAEID1	0x0518 /* Ethernet Agent Error Interrupt Disable 1 */
+
+#define RSW2_ETHA_EAEIS2	0x0520 /* Ethernet Agent Error Interrupt Status 2 */
+
+#define RSW2_ETHA_EAEIE2	0x0524 /* Ethernet Agent Error Interrupt Enable 2 */
+
+#define RSW2_ETHA_EAEID2	0x0528 /* Ethernet Agent Error Interrupt Disable 2 */
+
+#define RSW2_ETHA_EASCR		0x0580 /* Ethernet Agent Security Configuration Register */
+
+
+
+
+
+
+#endif /* _RSWITCH2_ETH_H */
