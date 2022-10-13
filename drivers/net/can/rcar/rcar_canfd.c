@@ -1993,7 +1993,7 @@ static int rcar_canfd_channel_probe(struct rcar_canfd_global *gpriv, u32 ch,
 		for (i = 0; i < priv->gpiod_count; i++) {
 			priv->gpiod[i] = devm_fwnode_gpiod_get_index(&pdev->dev,
 				of_fwnode_handle(np), NULL, i, GPIOD_OUT_LOW,
-				netdev_name(ndev));
+				NULL);
 			if (IS_ERR(priv->gpiod[i])) {
 				err = PTR_ERR(priv->gpiod[i]);
 				goto fail;
@@ -2090,6 +2090,24 @@ static int rcar_canfd_channel_probe(struct rcar_canfd_global *gpriv, u32 ch,
 			"register_candev() failed, error %d\n", err);
 		goto fail_candev;
 	}
+
+	/* At this point, netdev name becomes known; push it to gpiod's for
+	 * better debugfs output */
+	for (i = 0; i < priv->gpiod_count; i++) {
+		const char *ndev_name = netdev_name(ndev);
+		const char *gpio_name;
+		char buf[32];
+
+		if (of_property_read_string_index(np, "gpio-names", i,
+					&gpio_name) == 0) {
+			snprintf(buf, sizeof(buf),
+				 "%s.%s", ndev_name, gpio_name);
+			gpiod_set_consumer_name(priv->gpiod[i], buf);
+		} else {
+			gpiod_set_consumer_name(priv->gpiod[i], ndev_name);
+		}
+	}
+
 	dev_info(&pdev->dev, "device registered (channel %u)\n", priv->channel);
 	return 0;
 
