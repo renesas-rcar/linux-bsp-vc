@@ -1246,7 +1246,7 @@ static void rcar_canfd_handle_global_receive(struct rcar_canfd_global *gpriv, u3
 	struct rcar_canfd_channel *priv = gpriv->ch[ch];
 	u32 ridx = ch + RCANFD_RFFIFO_IDX;
 	u32 stsreg, ccreg;
-	u32 sts;
+	u32 sts, cc;
 
 	/* Handle Rx interrupts */
 	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
@@ -1257,7 +1257,9 @@ static void rcar_canfd_handle_global_receive(struct rcar_canfd_global *gpriv, u3
 		ccreg = RCANFD_RFCC(ridx);
 	}
 	sts = rcar_canfd_read(priv->base, stsreg);
-	if (likely(sts & RCANFD_RFSTS_RFIF)) {
+	cc = rcar_canfd_read(priv->base, ccreg);
+	if (likely(sts & RCANFD_RFSTS_RFIF &&
+		   cc & RCANFD_RFCC_RFIE)) {
 		if (napi_schedule_prep(&priv->napi)) {
 			/* Disable Rx FIFO interrupts */
 			rcar_canfd_clear_bit(priv->base, ccreg,
