@@ -1419,6 +1419,243 @@ static const unsigned int intc_ex_irq3_mux[] = {
 	IRQ3_MARK,
 };
 
+/* - INTP ------------------------------------------------------------------- */
+
+static const unsigned int intp0_pins[] = {
+	RCAR_GP_PIN(7, 1),
+};
+static const unsigned int intp0_mux[] = {
+	CAN0RX_INTP0_MARK,
+};
+static const unsigned int intp1_pins[] = {
+	RCAR_GP_PIN(7, 3),
+};
+static const unsigned int intp1_mux[] = {
+	CAN1RX_INTP1_MARK,
+};
+static const unsigned int intp2_pins[] = {
+	RCAR_GP_PIN(7, 5),
+};
+static const unsigned int intp2_mux[] = {
+	CAN2RX_INTP2_MARK,
+};
+static const unsigned int intp3_pins[] = {
+	RCAR_GP_PIN(7, 7),
+};
+static const unsigned int intp3_mux[] = {
+	CAN3RX_INTP3_MARK,
+};
+static const unsigned int intp4_pins[] = {
+	RCAR_GP_PIN(7, 9),
+};
+static const unsigned int intp4_mux[] = {
+	CAN4RX_INTP4_MARK,
+};
+static const unsigned int intp5_pins[] = {
+	RCAR_GP_PIN(7, 11),
+};
+static const unsigned int intp5_mux[] = {
+	CAN5RX_INTP5_MARK,
+};
+static const unsigned int intp6_pins[] = {
+	RCAR_GP_PIN(7, 13),
+};
+static const unsigned int intp6_mux[] = {
+	CAN6RX_INTP6_MARK,
+};
+static const unsigned int intp7_pins[] = {
+	RCAR_GP_PIN(7, 15),
+};
+static const unsigned int intp7_mux[] = {
+	CAN7RX_INTP7_MARK,
+};
+static const unsigned int intp8_pins[] = {
+	RCAR_GP_PIN(7, 17),
+};
+static const unsigned int intp8_mux[] = {
+	CAN8RX_INTP8_MARK,
+};
+static const unsigned int intp9_pins[] = {
+	RCAR_GP_PIN(7, 19),
+};
+static const unsigned int intp9_mux[] = {
+	CAN9RX_INTP9_MARK,
+};
+static const unsigned int intp10_pins[] = {
+	RCAR_GP_PIN(7, 21),
+};
+static const unsigned int intp10_mux[] = {
+	CAN10RX_INTP10_MARK,
+};
+static const unsigned int intp11_pins[] = {
+	RCAR_GP_PIN(7, 23),
+};
+static const unsigned int intp11_mux[] = {
+	CAN11RX_INTP11_MARK,
+};
+static const unsigned int intp12_pins[] = {
+	RCAR_GP_PIN(7, 25),
+};
+static const unsigned int intp12_mux[] = {
+	CAN12RX_INTP12_MARK,
+};
+static const unsigned int intp13_pins[] = {
+	RCAR_GP_PIN(7, 27),
+};
+static const unsigned int intp13_mux[] = {
+	CAN13RX_INTP13_MARK,
+};
+static const unsigned int intp14_pins[] = {
+	RCAR_GP_PIN(7, 29),
+};
+static const unsigned int intp14_mux[] = {
+	CAN14RX_INTP14_MARK,
+};
+static const unsigned int intp15_pins[] = {
+	RCAR_GP_PIN(7, 31),
+};
+static const unsigned int intp15_mux[] = {
+	CAN15RX_INTP15_MARK,
+};
+static const unsigned int intp16_pins[] = {
+	RCAR_GP_PIN(6, 15),
+};
+static const unsigned int intp16_mux[] = {
+	RLIN30RX_INTP16_MARK,
+};
+static const unsigned int intp17_pins[] = {
+	RCAR_GP_PIN(6, 13),
+};
+static const unsigned int intp17_mux[] = {
+	RLIN31RX_INTP17_MARK,
+};
+static const unsigned int intp18_pins[] = {
+	RCAR_GP_PIN(6, 11),
+};
+static const unsigned int intp18_mux[] = {
+	RLIN32RX_INTP18_MARK,
+};
+static const unsigned int intp19_pins[] = {
+	RCAR_GP_PIN(6, 9),
+};
+static const unsigned int intp19_mux[] = {
+	RLIN33RX_INTP19_MARK,
+};
+static const unsigned int intp20_pins[] = {
+	RCAR_GP_PIN(6, 7),
+};
+static const unsigned int intp20_mux[] = {
+	RLIN34RX_INTP20_MARK,
+};
+static const unsigned int intp21_pins[] = {
+	RCAR_GP_PIN(6, 5),
+};
+static const unsigned int intp21_mux[] = {
+	RLIN35RX_INTP21_MARK,
+};
+static const unsigned int intp22_pins[] = {
+	RCAR_GP_PIN(6, 3),
+};
+static const unsigned int intp22_mux[] = {
+	RLIN36RX_INTP22_MARK,
+};
+static const unsigned int intp23_pins[] = {
+	RCAR_GP_PIN(6, 1),
+};
+static const unsigned int intp23_mux[] = {
+	RLIN37RX_INTP23_MARK,
+};
+static const unsigned int intp24_pins[] = {
+	RCAR_GP_PIN(7, 17),
+};
+static const unsigned int intp24_mux[] = {
+	RLIN38RX_INTP24_MARK,
+};
+static const unsigned int intp25_pins[] = {
+	RCAR_GP_PIN(7, 19),
+};
+static const unsigned int intp25_mux[] = {
+	RLIN39RX_INTP25_MARK,
+};
+static const unsigned int intp26_pins[] = {
+	RCAR_GP_PIN(7, 21),
+};
+static const unsigned int intp26_mux[] = {
+	RLIN310RX_INTP26_MARK,
+};
+static const unsigned int intp27_pins[] = {
+	RCAR_GP_PIN(7, 23),
+};
+static const unsigned int intp27_mux[] = {
+	RLIN311RX_INTP27_MARK,
+};
+static const unsigned int intp28_pins[] = {
+	RCAR_GP_PIN(7, 25),
+};
+static const unsigned int intp28_mux[] = {
+	RLIN312RX_INTP28_MARK,
+};
+static const unsigned int intp29_pins[] = {
+	RCAR_GP_PIN(7, 27),
+};
+static const unsigned int intp29_mux[] = {
+	RLIN313RX_INTP29_MARK,
+};
+static const unsigned int intp30_pins[] = {
+	RCAR_GP_PIN(7, 29),
+};
+static const unsigned int intp30_mux[] = {
+	RLIN314RX_INTP30_MARK,
+};
+static const unsigned int intp31_pins[] = {
+	RCAR_GP_PIN(7, 31),
+};
+static const unsigned int intp31_mux[] = {
+	RLIN315RX_INTP31_MARK,
+};
+static const unsigned int intp32_pins[] = {
+	RCAR_GP_PIN(6, 21),
+};
+static const unsigned int intp32_mux[] = {
+	INTP32_MARK,
+};
+static const unsigned int intp33_pins[] = {
+	RCAR_GP_PIN(6, 20),
+};
+static const unsigned int intp33_mux[] = {
+	INTP33_MARK,
+};
+static const unsigned int intp34_pins[] = {
+	RCAR_GP_PIN(6, 19),
+};
+static const unsigned int intp34_mux[] = {
+	INTP34_MARK,
+};
+static const unsigned int intp35_pins[] = {
+	RCAR_GP_PIN(6, 18),
+};
+static const unsigned int intp35_mux[] = {
+	INTP35_MARK,
+};
+static const unsigned int intp36_pins[] = {
+	RCAR_GP_PIN(6, 17),
+};
+static const unsigned int intp36_mux[] = {
+	INTP36_MARK,
+};
+static const unsigned int intp37_pins[] = {
+	RCAR_GP_PIN(6, 16),
+};
+static const unsigned int intp37_mux[] = {
+	INTP37_MARK,
+};
+static const unsigned int nmi1_pins[] = {
+	RCAR_GP_PIN(6, 22),
+};
+static const unsigned int nmi1_mux[] = {
+	NMI1_MARK,
+};
+
 /* - MMC -------------------------------------------------------------------- */
 static const unsigned int mmc_data1_pins[] = {
 	/* MMC_SD_D0 */
@@ -2011,6 +2248,46 @@ static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(intc_ex_irq2),
 	SH_PFC_PIN_GROUP(intc_ex_irq3),
 
+	SH_PFC_PIN_GROUP(intp0),
+	SH_PFC_PIN_GROUP(intp1),
+	SH_PFC_PIN_GROUP(intp2),
+	SH_PFC_PIN_GROUP(intp3),
+	SH_PFC_PIN_GROUP(intp4),
+	SH_PFC_PIN_GROUP(intp5),
+	SH_PFC_PIN_GROUP(intp6),
+	SH_PFC_PIN_GROUP(intp7),
+	SH_PFC_PIN_GROUP(intp8),
+	SH_PFC_PIN_GROUP(intp9),
+	SH_PFC_PIN_GROUP(intp10),
+	SH_PFC_PIN_GROUP(intp11),
+	SH_PFC_PIN_GROUP(intp12),
+	SH_PFC_PIN_GROUP(intp13),
+	SH_PFC_PIN_GROUP(intp14),
+	SH_PFC_PIN_GROUP(intp15),
+	SH_PFC_PIN_GROUP(intp16),
+	SH_PFC_PIN_GROUP(intp17),
+	SH_PFC_PIN_GROUP(intp18),
+	SH_PFC_PIN_GROUP(intp19),
+	SH_PFC_PIN_GROUP(intp20),
+	SH_PFC_PIN_GROUP(intp21),
+	SH_PFC_PIN_GROUP(intp22),
+	SH_PFC_PIN_GROUP(intp23),
+	SH_PFC_PIN_GROUP(intp24),
+	SH_PFC_PIN_GROUP(intp25),
+	SH_PFC_PIN_GROUP(intp26),
+	SH_PFC_PIN_GROUP(intp27),
+	SH_PFC_PIN_GROUP(intp28),
+	SH_PFC_PIN_GROUP(intp29),
+	SH_PFC_PIN_GROUP(intp30),
+	SH_PFC_PIN_GROUP(intp31),
+	SH_PFC_PIN_GROUP(intp32),
+	SH_PFC_PIN_GROUP(intp33),
+	SH_PFC_PIN_GROUP(intp34),
+	SH_PFC_PIN_GROUP(intp35),
+	SH_PFC_PIN_GROUP(intp36),
+	SH_PFC_PIN_GROUP(intp37),
+	SH_PFC_PIN_GROUP(nmi1),
+
 	SH_PFC_PIN_GROUP(mmc_data1),
 	SH_PFC_PIN_GROUP(mmc_data4),
 	SH_PFC_PIN_GROUP(mmc_data8),
@@ -2164,6 +2441,48 @@ static const char * const intc_ex_groups[] = {
 	"intc_ex_irq1",
 	"intc_ex_irq2",
 	"intc_ex_irq3",
+};
+
+static const char * const intp_groups[] = {
+	"intp0",
+	"intp1",
+	"intp2",
+	"intp3",
+	"intp4",
+	"intp5",
+	"intp6",
+	"intp7",
+	"intp8",
+	"intp9",
+	"intp10",
+	"intp11",
+	"intp12",
+	"intp13",
+	"intp14",
+	"intp15",
+	"intp16",
+	"intp17",
+	"intp18",
+	"intp19",
+	"intp20",
+	"intp21",
+	"intp22",
+	"intp23",
+	"intp24",
+	"intp25",
+	"intp26",
+	"intp27",
+	"intp28",
+	"intp29",
+	"intp30",
+	"intp31",
+	"intp32",
+	"intp33",
+	"intp34",
+	"intp35",
+	"intp36",
+	"intp37",
+	"nmi1",
 };
 
 static const char * const mmc_groups[] = {
@@ -2344,6 +2663,7 @@ static const struct sh_pfc_function pinmux_functions[] = {
 	SH_PFC_FUNCTION(i2c5),
 
 	SH_PFC_FUNCTION(intc_ex),
+	SH_PFC_FUNCTION(intp),
 
 	SH_PFC_FUNCTION(mmc),
 
