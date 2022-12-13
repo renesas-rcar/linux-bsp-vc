@@ -640,6 +640,17 @@ static const struct can_bittiming_const rcar_canfd_bittiming_const = {
 };
 
 /* Helper functions */
+static inline bool is_gen4(struct rcar_canfd_global *gpriv)
+{
+	switch (gpriv->chip_id) {
+	case R8A779G0:
+	case R8A779A0:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static inline void rcar_canfd_update(u32 mask, u32 val, u32 __iomem *reg)
 {
 	u32 data = readl(reg);
@@ -737,7 +748,7 @@ static int rcar_canfd_reset_controller(struct rcar_canfd_global *gpriv)
 	rcar_canfd_write(gpriv->base, RCANFD_GERFL, 0x0);
 
 	/* Set the controller into appropriate mode */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		if (gpriv->fdmode)
 			rcar_canfd_set_bit(gpriv->base, RCANFD_V3U_CFDCFG,
 					   RCANFD_FDCFG_FDOE);
@@ -815,7 +826,7 @@ static void rcar_canfd_configure_afl_rules(struct rcar_canfd_global *gpriv,
 	} else {
 		/* Get number of Channel 0 rules and adjust */
 		cfg = rcar_canfd_read(gpriv->base, RCANFD_V3U_GAFLCFG(ch));
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+		if (is_gen4(gpriv))
 			start = ch * num_rules;
 		else
 			start = RCANFD_GAFLCFG_GETRNC(0, cfg);
@@ -824,7 +835,7 @@ static void rcar_canfd_configure_afl_rules(struct rcar_canfd_global *gpriv,
 	/* Enable write access to entry */
 	page = RCANFD_GAFL_PAGENUM(start);
 
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+	if (is_gen4(gpriv))
 		rcar_canfd_set_bit(gpriv->base, RCANFD_GAFLECTR,
 				   (RCANFD_V3U_GAFLECTR_AFLPN(page) |
 					RCANFD_GAFLECTR_AFLDAE));
@@ -834,14 +845,14 @@ static void rcar_canfd_configure_afl_rules(struct rcar_canfd_global *gpriv,
 					RCANFD_GAFLECTR_AFLDAE));
 
 	/* Write number of rules for channel */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+	if (is_gen4(gpriv))
 		rcar_canfd_set_bit(gpriv->base, RCANFD_V3U_GAFLCFG(ch),
 				   RCANFD_V3U_GAFLCFG_SETRNC(ch, num_rules));
 	else
 		rcar_canfd_set_bit(gpriv->base, RCANFD_GAFLCFG0,
 				   RCANFD_GAFLCFG_SETRNC(ch, num_rules));
 
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		offset = RCANFD_V3U_GAFL_OFFSET;
 	} else {
 		if (gpriv->fdmode)
@@ -882,7 +893,7 @@ static void rcar_canfd_configure_rx(struct rcar_canfd_global *gpriv, u32 ch)
 
 	cfg = (RCANFD_RFCC_RFIM | RCANFD_RFCC_RFDC(rfdc) |
 		RCANFD_RFCC_RFPLS(rfpls) | RCANFD_RFCC_RFIE);
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+	if (is_gen4(gpriv))
 		rcar_canfd_write(gpriv->base, RCANFD_V3U_RFCC(ridx), cfg);
 	else
 		rcar_canfd_write(gpriv->base, RCANFD_RFCC(ridx), cfg);
@@ -907,7 +918,7 @@ static void rcar_canfd_configure_tx(struct rcar_canfd_global *gpriv, u32 ch)
 	else
 		cfpls = 0;	/* b000 - Max 8 bytes payload */
 
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		cfg = (RCANFD_V3U_CFCC_CFTML(cftml) | RCANFD_V3U_CFCC_CFM(cfm) |
 			RCANFD_V3U_CFCC_CFIM | RCANFD_V3U_CFCC_CFDC(cfdc) |
 			RCANFD_V3U_CFCC_CFPLS(cfpls) | RCANFD_V3U_CFCC_CFTXIE);
@@ -922,7 +933,7 @@ static void rcar_canfd_configure_tx(struct rcar_canfd_global *gpriv, u32 ch)
 	}
 	if (gpriv->fdmode) {
 		/* Clear FD mode specific control/status register */
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+		if (is_gen4(gpriv))
 			addr = RCANFD_V3U_CFFDCSTS(ch, RCANFD_CFFIFO_IDX);
 		else
 			addr = RCANFD_F_CFFDCSTS(ch, RCANFD_CFFIFO_IDX);
@@ -1004,7 +1015,7 @@ static void rcar_canfd_global_error(struct net_device *ndev)
 		stats->tx_dropped++;
 	}
 	if (gerfl & RCANFD_GERFL_MES) {
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+		if (is_gen4(gpriv))
 			addr = RCANFD_V3U_CFSTS(ch, RCANFD_CFFIFO_IDX);
 		else
 			addr = RCANFD_CFSTS(ch, RCANFD_CFFIFO_IDX);
@@ -1017,7 +1028,7 @@ static void rcar_canfd_global_error(struct net_device *ndev)
 			rcar_canfd_write(priv->base, addr,
 					 sts & ~RCANFD_CFSTS_CFMLT);
 		}
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+		if (is_gen4(gpriv))
 			addr = RCANFD_V3U_RFSTS(ridx);
 		else
 			addr = RCANFD_RFSTS(ridx);
@@ -1170,7 +1181,7 @@ static void rcar_canfd_tx_done(struct net_device *ndev)
 	u32 ch = priv->channel;
 	struct rcar_canfd_global *gpriv = priv->gpriv;
 
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+	if (is_gen4(gpriv))
 		addr = RCANFD_V3U_CFSTS(ch, RCANFD_CFFIFO_IDX);
 	else
 		addr = RCANFD_CFSTS(ch, RCANFD_CFFIFO_IDX);
@@ -1216,7 +1227,7 @@ static void rcar_canfd_handle_global_err(struct rcar_canfd_global *gpriv, u32 ch
 
 	/* Handle global error interrupts */
 	gerfl = rcar_canfd_read(priv->base, RCANFD_GERFL);
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		if (unlikely(RCANFD_V3U_GERFL_ERR(gpriv, gerfl)))
 			rcar_canfd_global_error(ndev);
 	} else {
@@ -1244,7 +1255,7 @@ static void rcar_canfd_handle_global_receive(struct rcar_canfd_global *gpriv, u3
 	u32 sts, cc;
 
 	/* Handle Rx interrupts */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		stsreg = RCANFD_V3U_RFSTS(ridx);
 		ccreg = RCANFD_V3U_RFCC(ridx);
 	} else {
@@ -1331,7 +1342,7 @@ static void rcar_canfd_handle_channel_tx(struct rcar_canfd_global *gpriv, u32 ch
 	u32 sts;
 
 	/* Handle Tx interrupts */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+	if (is_gen4(gpriv))
 		stsreg = RCANFD_V3U_CFSTS(ch, RCANFD_CFFIFO_IDX);
 	else
 		sts = RCANFD_CFSTS(ch, RCANFD_CFFIFO_IDX);
@@ -1413,7 +1424,7 @@ static void rcar_canfd_set_bittiming(struct net_device *dev)
 
 	if (priv->can.ctrlmode & CAN_CTRLMODE_FD) {
 		/* CAN FD only mode */
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+		if (is_gen4(gpriv))
 			cfg = (RCANFD_V3U_NCFG_NTSEG1(tseg1) |
 			       RCANFD_V3U_NCFG_NBRP(brp) |
 			       RCANFD_V3U_NCFG_NSJW(sjw) |
@@ -1434,7 +1445,7 @@ static void rcar_canfd_set_bittiming(struct net_device *dev)
 		tseg1 = dbt->prop_seg + dbt->phase_seg1 - 1;
 		tseg2 = dbt->phase_seg2 - 1;
 
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+		if (is_gen4(gpriv)) {
 			cfg = (RCANFD_V3U_DCFG_DTSEG1(tseg1) |
 			       RCANFD_V3U_DCFG_DBRP(brp) |
 			       RCANFD_V3U_DCFG_DSJW(sjw) |
@@ -1453,7 +1464,7 @@ static void rcar_canfd_set_bittiming(struct net_device *dev)
 			   brp, sjw, tseg1, tseg2);
 	} else {
 		/* Classical CAN only mode */
-		if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+		if (is_gen4(gpriv))
 			cfg = (RCANFD_V3U_NCFG_NTSEG1(tseg1) |
 			       RCANFD_V3U_NCFG_NBRP(brp) |
 			       RCANFD_V3U_NCFG_NSJW(sjw) |
@@ -1496,7 +1507,7 @@ static int rcar_canfd_start(struct net_device *ndev)
 	}
 
 	/* Enable Common & Rx FIFO */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		addr1 = RCANFD_V3U_CFCC(ch, RCANFD_CFFIFO_IDX);
 		addr2 = RCANFD_V3U_RFCC(ridx);
 	} else {
@@ -1571,7 +1582,7 @@ static void rcar_canfd_stop(struct net_device *ndev)
 	rcar_canfd_disable_channel_interrupts(priv);
 
 	/* Disable Common & Rx FIFO */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		addr1 = RCANFD_V3U_CFCC(ch, RCANFD_CFFIFO_IDX);
 		addr2 = RCANFD_V3U_RFCC(ridx);
 	} else {
@@ -1624,7 +1635,7 @@ static netdev_tx_t rcar_canfd_start_xmit(struct sk_buff *skb,
 
 	dlc = RCANFD_CFPTR_CFDLC(can_len2dlc(cf->len));
 
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		rcar_canfd_write(priv->base,
 				 RCANFD_V3U_CFID(ch, RCANFD_CFFIFO_IDX), id);
 		rcar_canfd_write(priv->base,
@@ -1688,7 +1699,7 @@ static netdev_tx_t rcar_canfd_start_xmit(struct sk_buff *skb,
 	/* Start Tx: Write 0xff to CFPC to increment the CPU-side
 	 * pointer for the Common FIFO
 	 */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+	if (is_gen4(gpriv))
 		addr = RCANFD_V3U_CFPCTR(ch, RCANFD_CFFIFO_IDX);
 	else
 		addr = RCANFD_CFPCTR(ch, RCANFD_CFFIFO_IDX);
@@ -1709,7 +1720,7 @@ static void rcar_canfd_rx_pkt(struct rcar_canfd_channel *priv)
 	u32 ridx = ch + RCANFD_RFFIFO_IDX;
 	struct rcar_canfd_global *gpriv = priv->gpriv;
 
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		id = rcar_canfd_read(priv->base, RCANFD_V3U_RFID(ridx));
 		dlc = rcar_canfd_read(priv->base, RCANFD_V3U_RFPTR(ridx));
 		if (priv->can.ctrlmode & CAN_CTRLMODE_FD) {
@@ -1773,7 +1784,7 @@ static void rcar_canfd_rx_pkt(struct rcar_canfd_channel *priv)
 			if (sts & RCANFD_RFFDSTS_RFBRS)
 				cf->flags |= CANFD_BRS;
 
-			if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+			if (is_gen4(gpriv))
 				rcar_canfd_get_data(priv, cf,
 						    RCANFD_V3U_RFDF(ridx, 0));
 			else
@@ -1785,7 +1796,7 @@ static void rcar_canfd_rx_pkt(struct rcar_canfd_channel *priv)
 		if (id & RCANFD_RFID_RFRTR)
 			cf->can_id |= CAN_RTR_FLAG;
 		else
-			if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+			if (is_gen4(gpriv))
 				rcar_canfd_get_data(priv, cf,
 						    RCANFD_V3U_RFDF(ridx, 0));
 			else
@@ -1796,7 +1807,7 @@ static void rcar_canfd_rx_pkt(struct rcar_canfd_channel *priv)
 	/* Write 0xff to RFPC to increment the CPU-side
 	 * pointer of the Rx FIFO
 	 */
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0))
+	if (is_gen4(gpriv))
 		rcar_canfd_write(priv->base, RCANFD_V3U_RFPCTR(ridx), 0xff);
 	else
 		rcar_canfd_write(priv->base, RCANFD_RFPCTR(ridx), 0xff);
@@ -1818,7 +1829,7 @@ static int rcar_canfd_rx_poll(struct napi_struct *napi, int quota)
 	u32 ridx = ch + RCANFD_RFFIFO_IDX, addr1, addr2;
 	struct rcar_canfd_global *gpriv = priv->gpriv;
 
-	if ((gpriv->chip_id == R8A779A0) || (gpriv->chip_id == R8A779G0)) {
+	if (is_gen4(gpriv)) {
 		addr1 = RCANFD_V3U_RFSTS(ridx);
 		addr2 = RCANFD_V3U_RFCC(ridx);
 	} else {
