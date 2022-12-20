@@ -57,7 +57,7 @@ static int rswitch2_init_buffer_pool(struct rswitch2_drv *rsw2)
 
 	reg_val = ioread32(rsw2->coma_base_addr + RSW2_COMA_CABPIRM);
 	if ((reg_val & CABPIRM_BPR) == CABPIRM_BPR) {
-		pr_err("Buffer pool: Invalid state\n");
+		rsw2_err(MSG_GEN, "Buffer pool: Invalid state\n");
 		return -EINVAL;
 	}
 
@@ -67,7 +67,7 @@ static int rswitch2_init_buffer_pool(struct rswitch2_drv *rsw2)
 							reg_val & CABPIRM_BPR,
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		pr_err("Initialization of buffer pools timed out\n");
+		rsw2_err(MSG_GEN, "Initialization of buffer pools timed out\n");
 		return ret;
 	}
 
@@ -88,14 +88,14 @@ int rswitch2_init(struct rswitch2_drv *rsw2)
 
 	rsw2->ptp_drv = rtsn_ptp_alloc(rsw2->dev);
 	if (!rsw2->ptp_drv) {
-		pr_err("Failed to allocate PTP driver struct\n");
+		rsw2_err(MSG_GEN, "Failed to allocate PTP driver struct\n");
 		goto err_ptp_init;
 	}
 	rsw2->ptp_drv->addr = rsw2->ptp_base_addr;
 
 	ret = rtsn_ptp_init(rsw2->ptp_drv, RTSN_PTP_REG_LAYOUT_S4, RTSN_PTP_CLOCK_S4);
 	if(ret != 0) {
-		pr_err("Failed to initialize PTP clock: %d\n", ret);
+		rsw2_err(MSG_GEN, "Failed to initialize PTP clock: %d\n", ret);
 		goto err_ptp_init;
 	}
 
@@ -103,7 +103,7 @@ int rswitch2_init(struct rswitch2_drv *rsw2)
 	iowrite32(0, rsw2->sram_base_addr + RSW2_RSW0PPS0R0);  //1st output relates to timer 0
 	iowrite32(1, rsw2->sram_base_addr + RSW2_RSW0PPS1R0);  //2nd output relates to timer 1
 
-	pr_info("PTP clock initialized\n");
+	rsw2_notice(MSG_GEN, "PTP clock initialized\n");
 
 
 	ret = rswitch2_fwd_init(rsw2);
@@ -112,7 +112,7 @@ int rswitch2_init(struct rswitch2_drv *rsw2)
 
 	ret = rswitch2_eth_init(rsw2);
 	if (ret < 0) {
-		pr_err("Failed to init ethernet driver: %d\n", ret);
+		rsw2_err(MSG_GEN, "Failed to init ethernet driver: %d\n", ret);
 		goto err_eth_init;
 	}
 

@@ -12,9 +12,13 @@
 #include <linux/netdevice.h>
 #include <linux/timer.h>
 
+#define RSW2_DEF_MSG_ENABLE \
+		(NETIF_MSG_LINK	  | \
+		 NETIF_MSG_TIMER  | \
+		 NETIF_MSG_RX_ERR | \
+		 NETIF_MSG_TX_ERR)
 
 #define RSW2_NETDEV_BASENAME	"sw%d"
-#define RSW2_PORT_BASENAME	    "etha%d"
 
 /* Maximum different Q types per port */
 #define MAX_Q_TYPES_PER_PORT			4
@@ -303,7 +307,9 @@ struct rswitch2_physical_port {
 	void __iomem *rmac_base_addr;
 	void __iomem *serdes_chan_addr;
 	struct mii_bus *mii_bus;
+	struct phy_device *phy;
 	phy_interface_t phy_iface;
+
 	struct rsw2_rx_q_data rx_q[RSW2_LL_RX_PER_PORT_QUEUES];
 	struct rsw2_tx_q_data tx_q[RSW2_LL_TX_PER_PORT_QUEUES];
 	u8 ts_tag;
@@ -318,11 +324,6 @@ struct rswitch2_physical_port {
 };
 
 struct rswitch2_internal_port {
-	/*	u32 num_rx_ring;
-	u32 num_tx_ring;
-	struct napi_struct napi_tx[NUM_TX_QUEUES];
-	struct napi_struct napi_rx[NUM_RX_QUEUES];
-*/
 	struct rsw2_rx_q_data rx_q[NUM_BE_RX_QUEUES];
 	struct rsw2_tx_q_data tx_q[NUM_BE_TX_QUEUES];
 	u64 rx_pkt_cnt;

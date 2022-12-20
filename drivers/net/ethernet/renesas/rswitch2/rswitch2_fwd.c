@@ -20,7 +20,7 @@ static int rsw2_fwd_find_free_cascade_filter_slot(struct rswitch2_drv *rsw2) {
 		filter_conf = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWCFC(slot_num));
 
 		if(filter_conf == 0) {
-			printk("Cascade filter slot %d is unused\n", slot_num);
+			rsw2_info(MSG_FWD, "Cascade filter slot %d is unused\n", slot_num);
 
 			break;
 		}
@@ -46,7 +46,7 @@ static int rsw2_fwd_find_free_3byte_filter_slot(struct rswitch2_drv *rsw2) {
 		filter_val1 = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWTHBFV1C(slot_num));
 
 		if((filter_conf == 0) && (filter_val0 == 0) && (filter_val1 == 0)) {
-			printk("3byte filter slot %d is unused\n", slot_num);
+			//printk("3byte filter slot %d is unused\n", slot_num);
 
 			break;
 		}
@@ -127,17 +127,17 @@ static int rsw2_fwd_add_3byte_filter(struct rswitch2_drv *rsw2, struct three_byt
 
 	case pf_expand_mode:
 		filter_val0  = FIELD_PREP(FWTHBFV0C_THBFV0B0, filter->e.val[2]);
-		printk("filter->e.val[0]: 0x%2x filter_val0: 0x%8x\n", filter->e.val[0], filter_val0);
+		rsw2_dbg(MSG_FWD, "filter->e.val[0]: 0x%2x filter_val0: 0x%8x\n", filter->e.val[0], filter_val0);
 		filter_val0 |= FIELD_PREP(FWTHBFV0C_THBFV0B1, filter->e.val[1]);
-		printk("filter->e.val[1]: 0x%2x filter_val0: 0x%8x\n", filter->e.val[1], filter_val0);
+		rsw2_dbg(MSG_FWD, "filter->e.val[1]: 0x%2x filter_val0: 0x%8x\n", filter->e.val[1], filter_val0);
 		filter_val0 |= FIELD_PREP(FWTHBFV0C_THBFV0B2, filter->e.val[0]);
-		printk("filter->e.val[2]: 0x%2x filter_val0: 0x%8x\n", filter->e.val[2], filter_val0);
+		rsw2_dbg(MSG_FWD, "filter->e.val[2]: 0x%2x filter_val0: 0x%8x\n", filter->e.val[2], filter_val0);
 		filter_val1  = FIELD_PREP(FWTHBFV0C_THBFV1B0, filter->e.val[5]);
-		printk("filter->e.val[3]: 0x%2x filter_val1: 0x%8x\n", filter->e.val[3], filter_val1);
+		rsw2_dbg(MSG_FWD, "filter->e.val[3]: 0x%2x filter_val1: 0x%8x\n", filter->e.val[3], filter_val1);
 		filter_val1 |= FIELD_PREP(FWTHBFV0C_THBFV1B1, filter->e.val[4]);
-		printk("filter->e.val[4]: 0x%2x filter_val1: 0x%8x\n", filter->e.val[4], filter_val1);
+		rsw2_dbg(MSG_FWD, "filter->e.val[4]: 0x%2x filter_val1: 0x%8x\n", filter->e.val[4], filter_val1);
 		filter_val1 |= FIELD_PREP(FWTHBFV0C_THBFV1B2, filter->e.val[3]);
-		printk("filter->e.val[5]: 0x%2x filter_val1: 0x%8x\n", filter->e.val[5], filter_val1);
+		rsw2_dbg(MSG_FWD, "filter->e.val[5]: 0x%2x filter_val1: 0x%8x\n", filter->e.val[5], filter_val1);
 
 		filter->e.id = 2 * (filter_slot + RSW2_FWD_TWBF_N);
 		break;
@@ -206,10 +206,10 @@ static int rsw2_fwd_add_l3_entry(struct rswitch2_drv *rsw2, u32 stream_id, u32 s
 	reg_val = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWLTHTLR);
 	if(FIELD_GET(FWLTHTLR_LTHLF, reg_val)) {
 		/* FIXME: Check others error bits */
-		pr_err("Learning failed\n");
+		rsw2_err(MSG_FWD, "Learning failed\n");
 	}
 	else {
-		printk("Learning succeeded\n");
+		rsw2_info(MSG_FWD, "Learning succeeded\n");
 	}
 	return ret;
 }
@@ -247,10 +247,10 @@ int rsw2_fwd_add_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr, u32 src_
 							(FIELD_GET(FWMACTLR_MACTL, reg_val) == 0),
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		pr_err("MAC Table Learn timed out\n");
+		rsw2_err(MSG_FWD, "MAC Table Learn timed out\n");
 		return ret;
 	} else {
-		pr_err("MAC Table entry learned: 0x%.8x\n", reg_val);
+		rsw2_info(MSG_FWD, "MAC Table entry learned: 0x%.8x\n", reg_val);
 	}
 
 	return 0;
@@ -279,10 +279,10 @@ int rsw2_fwd_del_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr) {
 							(FIELD_GET(FWMACTLR_MACTL, reg_val) == 0),
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		pr_err("MAC Table delete timed out\n");
+		rsw2_err(MSG_FWD, "MAC Table delete timed out\n");
 		return ret;
 	} else {
-		pr_err("MAC Table entry deleted: 0x%.8x\n", reg_val);
+		rsw2_info(MSG_FWD, "MAC Table entry deleted: 0x%.8x\n", reg_val);
 	}
 
 	return 0;
@@ -356,7 +356,7 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 						FIELD_GET(FWMACTIM_MACTR, reg_val),
 						RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		pr_err("Initialization of MAC table timed out\n");
+		rsw2_err(MSG_FWD, "Initialization of MAC table timed out\n");
 		return ret;
 	}
 
@@ -421,7 +421,7 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 							FIELD_GET(FWVLANTIM_VLANTR, reg_val),
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		pr_err("Initialization of VLAN table timed out\n");
+		rsw2_err(MSG_FWD, "Initialization of VLAN table timed out\n");
 		return ret;
 	}
 
@@ -449,7 +449,7 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 						FIELD_GET(FWLTHTIM_LTHTR, reg_val),
 						RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		pr_err("Initialization of L3 table timed out\n");
+		rsw2_err(MSG_FWD, "Initialization of L3 table timed out\n");
 		return ret;
 	}
 
@@ -468,7 +468,7 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 			printk("mac_pton() failed\n");
 
 		lret = rsw2_fwd_add_3byte_filter(rsw2, &filter);
-		printk("lret = %d filter.e.id = %d\n", lret, filter.e.id);
+		//printk("lret = %d filter.e.id = %d\n", lret, filter.e.id);
 
 		memset(cc_filter, 0 , sizeof(cc_filter));
 
@@ -501,7 +501,7 @@ void rswitch2_fwd_exit(struct rswitch2_drv *rsw2)
 			reg_val & FWMACTIM_MACTR,
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0)
-		pr_err("Initialization of MAC table timed out\n");
+		rsw2_err(MSG_FWD, "Initialization of MAC table timed out\n");
 
 	reg_val = FWVLANTIM_VLANTIOG;
 	iowrite32(reg_val, rsw2->fwd_base_addr + RSW2_FWD_FWVLANTIM);
@@ -510,6 +510,6 @@ void rswitch2_fwd_exit(struct rswitch2_drv *rsw2)
 							reg_val & FWVLANTIM_VLANTR,
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0)
-		pr_err("Initialization of VLAN table timed out\n");
+		rsw2_err(MSG_FWD, "Initialization of VLAN table timed out\n");
 
 }

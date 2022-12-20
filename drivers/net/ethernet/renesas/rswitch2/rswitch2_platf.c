@@ -26,6 +26,21 @@ static const u8 rsw2_default_mac[ETH_ALEN] __aligned(2) = {
 
 #define RSW2_INTERNAL_PORT_MARKER 0xCC
 
+static int log_level_gen = LOGLEVEL_ERR;
+module_param(log_level_gen,int,0660);
+
+static int log_level_desc = LOGLEVEL_ERR;
+module_param(log_level_desc,int,0660);
+
+static int log_level_rxtx = LOGLEVEL_ERR;
+module_param(log_level_rxtx,int,0660);
+
+static int log_level_fwd = LOGLEVEL_ERR;
+module_param(log_level_fwd,int,0660);
+
+static int log_level_serdes = LOGLEVEL_ERR;
+module_param(log_level_serdes,int,0660);
+
 
 /* Device driver's private data structure */
 struct rswitch2_platf_driver_priv {
@@ -145,11 +160,11 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 
 	dn_irqs = of_get_property(rsw2->dev->of_node, "interrupt-names", &dt_prop_len);
 	if (!dn_irqs) {
-		dev_err(rsw2->dev, "No irqs specified in device tree\n");
+		rsw2_err(MSG_GEN, "No irqs specified in device tree\n");
 		return -EINVAL;
 	}
 	else {
-		dev_err(rsw2->dev, "Got irq array of len %d  from device tree nodes\n", dt_prop_len);
+		rsw2_dbg(MSG_GEN, "Got irq array of len %d  from device tree nodes\n", dt_prop_len);
 	}
 
 	irq_names = devm_kcalloc(&pdev->dev, RSWITCH2_MAX_IRQS,
@@ -170,7 +185,7 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 
 		prop_str_len = strlen(irq_names[dt_cur_irq]);
 
-		dev_info(rsw2->dev, "Got irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
+		rsw2_info(MSG_GEN, "Got irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
 
 		/* FIXME: Check if DT string is shorter than sizeof(RSW2_GWCA0_NAME) - 1 */
 		if(prop_str_len > sizeof(RSW2_GWCA0_NAME)) {
@@ -181,16 +196,16 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 
 				irq = platform_get_irq_byname(pdev, irq_names[dt_cur_irq]);
 				if (irq < 0) {
-					dev_err(rsw2->dev, "Failed to get IRQ\n");
+					rsw2_err(MSG_GEN, "Failed to get IRQ\n");
 					return -EINVAL; /* FIXME: error handling / memory */
 				}
-				dev_err(rsw2->dev, "Got irq %d '%s' from DT index %d\n", irq, irq_names[dt_cur_irq], dt_cur_irq);
+				rsw2_dbg(MSG_GEN, "Got irq %d '%s' from DT index %d\n", irq, irq_names[dt_cur_irq], dt_cur_irq);
 
 				ret = strncmp(irq_type_str, "rxtx", 4);
 				if(ret == 0) {
-					dev_info(rsw2->dev, "Registering RXTX irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
+					rsw2_info(MSG_GEN, "Registering RXTX irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
 					if(rsw2->num_of_rxtx_irqs >=  RSWITCH2_MAX_RXTX_IRQS) {
-						dev_err(rsw2->dev, "Too many RXTX interrupts\n");
+						rsw2_err(MSG_GEN, "Too many RXTX interrupts\n");
 						// FIXME: free memory
 						return -EINVAL;
 
@@ -200,9 +215,9 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 
 				}
 				else {
-					dev_info(rsw2->dev, "Registering status irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
+					rsw2_info(MSG_GEN, "Registering status irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
 					if(rsw2->num_of_status_irqs >=  RSWITCH2_MAX_STATUS_IRQS) {
-						dev_err(rsw2->dev, "Too many status interrupts\n");
+						rsw2_err(MSG_GEN, "Too many status interrupts\n");
 
 						// FIXME: free memory
 						return -EINVAL;
@@ -214,7 +229,8 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 			}
 		}
 	}
-	kfree(irq_names);
+
+	devm_kfree(&pdev->dev, irq_names);
 
 	return 0;
 }
@@ -245,21 +261,22 @@ static phy_interface_t rswitch2_get_phy_inferface(const char *phy_mode_str) {
 
 static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 {
-	int dt_port_num;
-	unsigned int cur_port_num;
-	unsigned int total_ports;
+//	int dt_port_num;
+//	unsigned int cur_port_num;
+//	unsigned int total_ports;
 	struct platform_device *pdev;
-	struct rswitch2_port_data *cur_port_data;
-	struct device_node *ports, *port;
+//	struct rswitch2_port_data *cur_port_data;
+//	struct device_node *ports, *port;
 
 	int ret = 0;
 
 
 	pdev = container_of(rsw2->dev, struct platform_device, dev);
-	dev_err(&pdev->dev, "rswitch2_platf_set_port_data(): pdev is at 0x%px\n", pdev);
+	rsw2_dbg(MSG_GEN, "rswitch2_platf_set_port_data(): pdev is at 0x%px\n", pdev);
 
 
-	total_ports = rsw2->num_of_cpu_ports + rsw2->num_of_tsn_ports;
+	//total_ports = rsw2->num_of_cpu_ports + rsw2->num_of_tsn_ports;
+#ifdef  RSW2_DEPRECATED
 	rsw2->port_data = kcalloc(total_ports, sizeof(*cur_port_data), GFP_KERNEL);
 	if (!rsw2->port_data)
 		return -ENOMEM;
@@ -285,7 +302,7 @@ static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 				cur_port_data->mac_addr[4], cur_port_data->mac_addr[5]
 						);
 	}
-
+#endif /* RSW2_DEPRECATED */
 #ifdef OLD_STUFF
 
 	/* etha0 --> PHY 0x04 */
@@ -312,7 +329,6 @@ static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 						"e6800000.ethernet-ffffffff", 0x00);
 	pr_info("Port 3 PHY ID: '%s'\n", cur_port_data->phy_id);
 
-#endif
 
 
 	ports = of_get_child_by_name(rsw2->dev->of_node, "ports");
@@ -371,6 +387,7 @@ static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 	}
 
 	of_node_put(ports);
+#endif
 
 // FIXME: Free port data on error
 
@@ -391,10 +408,11 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 	res_serdes = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	res_sram = platform_get_resource(pdev, IORESOURCE_MEM, 2);
 	if (!res_rsw2 || !res_serdes || !res_sram) {
-		dev_err(&pdev->dev, "invalid resource\n");
+		dev_err(&pdev->dev, "Invalid resources, check device tree\n");
 		return -EINVAL;
 	}
-	printk("pdev: 0x%px\n", pdev);
+
+
 	drv_priv = devm_kzalloc(&pdev->dev, sizeof(*drv_priv), GFP_KERNEL);
 	if (!drv_priv) {
 		return -ENOMEM;
@@ -421,6 +439,12 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 	}
 	drv_priv->rsw2 = rsw2;
 
+	/* Set default logging levels */
+	rsw2->sec_log_lvl[MSG_GEN] = log_level_gen;
+	rsw2->sec_log_lvl[MSG_DESC] = log_level_desc;
+	rsw2->sec_log_lvl[MSG_RXTX] = log_level_rxtx;
+	rsw2->sec_log_lvl[MSG_FWD] = log_level_fwd;
+	rsw2->sec_log_lvl[MSG_SERDES] = log_level_serdes;
 
 	/* Set driver private data */
 	platform_set_drvdata(pdev, drv_priv);
@@ -446,6 +470,7 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 	}
 
 	array_size = sizeof(*rsw2->gwca_base_addrs) * RSWITCH2_CPU_PORTS;
+
 	rsw2->gwca_base_addrs = kzalloc(array_size, GFP_KERNEL);
 	if (!rsw2->gwca_base_addrs) {
 		ret = -ENOMEM;
@@ -472,14 +497,14 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 		goto out_port_mem;
 	}
 
-	dev_err(&pdev->dev, "dev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
+	rsw2_dbg(MSG_GEN, "pdev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
 
 	pm_runtime_enable(&pdev->dev);
 	pm_runtime_get_sync(&pdev->dev);
 	clk_prepare(drv_priv->phy_clk);
 	clk_enable(drv_priv->phy_clk);
 
-	dev_err(&pdev->dev, "dev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
+	rsw2_dbg(MSG_GEN,"pdev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
 
 
 	device_set_wakeup_capable(&pdev->dev, 1);
@@ -487,7 +512,7 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 	/* Init RSwitch2 core */
 	ret = rswitch2_init(rsw2);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to initialized RSwitch2 driver: %d\n", ret);
+		rsw2_err(MSG_GEN, "Failed to initialized RSwitch2 driver: %d\n", ret);
 		goto out_req_irq;
 	}
 
@@ -497,7 +522,7 @@ out_req_irq:
 	rswitch2_platf_release_irqs(drv_priv->rsw2);
 
 out_port_mem:
-	kfree(rsw2->port_data);
+//	kfree(rsw2->port_data);
 
 out_gwca_mem:
 	kfree(rsw2->gwca_base_addrs);
@@ -509,7 +534,7 @@ out_rsw2_mem:
 	kfree(rsw2);
 
 out_drv_priv_mem:
-	kfree(drv_priv);
+	devm_kfree(&pdev->dev, drv_priv);
 
 	return ret;
 }
@@ -520,36 +545,30 @@ static int rswitch2_platf_remove(struct platform_device *pdev)
 {
 	struct rswitch2_platf_driver_priv *drv_priv = platform_get_drvdata(pdev);
 
-	dev_err(&pdev->dev, "drv_priv: 0x%px\n", drv_priv);
 
-	if (drv_priv)
+	if (drv_priv) {
 		if (drv_priv->rsw2) {
+			struct rswitch2_drv *rsw2 = drv_priv->rsw2;
 
-			dev_err(&pdev->dev, "rsw2: 0x%px\n", drv_priv->rsw2);
-			dev_err(&pdev->dev, "rsw2->dev: 0x%px\n", drv_priv->rsw2->dev);
 
 			rswitch2_exit(drv_priv->rsw2);
 
 			rswitch2_platf_release_irqs(drv_priv->rsw2);
 
-			dev_err(&pdev->dev, "dev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
-
+			rsw2_dbg(MSG_GEN, "pdev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
 
 			pm_runtime_put(&pdev->dev);
 			pm_runtime_disable(&pdev->dev);
 			clk_disable(drv_priv->phy_clk);
 
-			dev_err(&pdev->dev, "dev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
+			rsw2_dbg(MSG_GEN, "pdev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
 
 		}
-
-
+	}
 	if (drv_priv) {
 		if (drv_priv->rsw2) {
 //			iounmap(drv_priv->rsw2->base_addr);
 //			iounmap(drv_priv->rsw2->serdes_base_addr);
-
-
 
 			kfree(drv_priv->rsw2->gwca_base_addrs);
 			kfree(drv_priv->rsw2->etha_base_addrs);
@@ -557,9 +576,7 @@ static int rswitch2_platf_remove(struct platform_device *pdev)
 		}
 
 
-
-
-		//kfree(drv_priv);
+		devm_kfree(&pdev->dev, drv_priv);
 		platform_set_drvdata(pdev, NULL);
 	}
 
@@ -671,4 +688,4 @@ module_platform_driver(rswitch2_platf_drv);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Dennis Ostermann <dennis.ostermann@renesas.com>");
 MODULE_DESCRIPTION("RSwitch2 platform driver");
-MODULE_VERSION("0.14");
+MODULE_VERSION("0.20");

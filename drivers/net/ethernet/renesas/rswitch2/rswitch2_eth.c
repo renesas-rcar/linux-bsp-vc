@@ -39,14 +39,14 @@ static int rswitch2_gwca_set_state(struct rswitch2_drv *rsw2, enum gwmc_op state
 	int ret;
 	u32 reg_val;
 
-	reg_val = FIELD_PREP(EAMC_OPC, state);
-	iowrite32(reg_val, rsw2->gwca_base_addrs[0] + RSW2_ETHA_EAMC);
+	reg_val = FIELD_PREP(GWMC_OPC, state);
+	iowrite32(reg_val, rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWMC);
 
-	ret = readl_poll_timeout(rsw2->gwca_base_addrs[0] + RSW2_ETHA_EAMS, reg_val,
-						reg_val == FIELD_PREP(EAMS_OPS, state),
+	ret = readl_poll_timeout(rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWMS, reg_val,
+						reg_val == FIELD_PREP(GWMS_OPS, state),
 						RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		dev_err(rsw2->dev, "Setting GWCA state timed out\n");
+		rsw2_err(MSG_GEN, "Setting GWCA state timed out\n");
 		return ret;
 	}
 	return 0;
@@ -56,24 +56,24 @@ static int rswitch2_emac_set_state(struct net_device *ndev, enum emac_op state)
 {
 	int ret;
 	u32 reg_val;
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
 	void __iomem *etha_base_addr;
 
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
 	etha_base_addr = (void __iomem *)ndev->base_addr;
 
 	reg_val = FIELD_PREP(EAMC_OPC, state);
 	iowrite32(reg_val, etha_base_addr + RSW2_ETHA_EAMC);
 
-	ret = readl_poll_timeout(etha_base_addr + RSW2_ETHA_EAMS, reg_val,
+	ret = readl_poll_timeout_atomic(etha_base_addr + RSW2_ETHA_EAMS, reg_val,
 						(reg_val == FIELD_PREP(EAMS_OPS, state)),
 						RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		netdev_err(ndev, "Setting EMAC state from %d to %d timed out\n", reg_val, state);
+		rsw2_err(MSG_GEN, "Setting EMAC state from %d to %d timed out\n", reg_val, state);
 		return ret;
 	}
-
-	/* FIXME: #159 */
-	printk("New ETHA mode is EAMC=%x  EMAS=%x  expected=%x\n",
-	ioread32(etha_base_addr + RSW2_ETHA_EAMC), ioread32(etha_base_addr + RSW2_ETHA_EAMS), state);
 
 	return 0;
 }
@@ -87,29 +87,28 @@ static int rswitch2_gwca_init(struct rswitch2_drv *rsw2)
 
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_disable);
 	if (ret != 0) {
-		dev_err(rsw2->dev, "Failed to set GWCA disable state\n");
+		rsw2_err(MSG_GEN, "Failed to set GWCA disable state\n");
 		goto err_out;
 	}
 
 
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_reset);
 		if (ret != 0) {
-			dev_err(rsw2->dev, "Failed to set GWCA reset state\n");
+			rsw2_err(MSG_GEN, "Failed to set GWCA reset state\n");
 			goto err_out;
 		}
 
 
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_disable);
 		if (ret != 0) {
-			dev_err(rsw2->dev, "Failed to set GWCA disable state\n");
+			rsw2_err(MSG_GEN, "Failed to set GWCA disable state\n");
 			goto err_out;
 		}
 
 
-
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_config);
 	if (ret != 0) {
-		dev_err(rsw2->dev, "Failed to set GWCA config state\n");
+		rsw2_err(MSG_GEN, "Failed to set GWCA config state\n");
 		goto err_out;
 	}
 
@@ -121,7 +120,7 @@ static int rswitch2_gwca_init(struct rswitch2_drv *rsw2)
 							(reg_val == GWMTIRM_MTR),
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		dev_err(rsw2->dev, "Failed to reset multicast table\n");
+		rsw2_err(MSG_GEN, "Failed to reset multicast table\n");
 		goto err_out;
 	}
 
@@ -133,7 +132,7 @@ static int rswitch2_gwca_init(struct rswitch2_drv *rsw2)
 							(reg_val == GWARIRM_ARR),
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		dev_err(rsw2->dev, "Failed to reset AXI RAM table\n");
+		rsw2_err(MSG_GEN, "Failed to reset AXI RAM table\n");
 		goto err_out;
 	}
 
@@ -160,191 +159,15 @@ err_out:
 	return ret;
 }
 
-static void rswitch2_phy_state_change(struct net_device *ndev)
-{
-	struct rswitch2_drv *rsw2;
-	struct rswitch2_eth_port *eth_port;
 
-	eth_port = netdev_priv(ndev);
-	rsw2 = eth_port->rsw2;
-
-	if (netif_msg_link(rsw2)) {
-		struct phy_device *phydev;
-
-		phydev = ndev->phydev;
-
-		phy_print_status(phydev);
-
-		netdev_info(ndev, "Link status changed. PHY %d UID 0x%08x Link = %d Speed = %d\n",
-					phydev->mdio.addr, phydev->phy_id, phydev->link, phydev->speed);
-	}
-}
-
-static int rswitch2_phy_init(struct net_device *ndev, unsigned int port_num)
-{
-	struct rswitch2_drv *rsw2;
-	struct rswitch2_eth_port *eth_port;
-	struct rswitch2_physical_port *phy_port;
-	struct phy_device *phydev = NULL;
-	struct device_node *np = ndev->dev.parent->of_node;
-	int ret;
-
-	eth_port = netdev_priv(ndev);
-	phy_port = eth_port->phy_port;
-
-	/* Only physical ports have PHYs attached */
-	BUG_ON(phy_port == NULL);
-	rsw2 = eth_port->rsw2;
-
-	if (np) {
-		struct device_node *pn;
-		int dt_port_num;
-		unsigned int cur_port_num;
-		struct device_node *ports, *port;
-
-		dev_info(rsw2->dev, "Using device node: '%s'\n", np->name);
-		ports = of_get_child_by_name(rsw2->dev->of_node, "ports");
-		if (!ports) {
-			dev_err(rsw2->dev, "No ports specified in device tree\n");
-		//		return -EINVAL;
-		}
-		else {
-			dev_err(rsw2->dev, "Got ports from node\n");
-		}
-
-
-
-		dt_port_num = of_get_child_count(ports);
-		if(dt_port_num > rsw2->num_of_tsn_ports) {
-			dev_err(rsw2->dev, "%d ports specified in device tree, but maximum %d ports supported.\n",
-					dt_port_num, rsw2->num_of_tsn_ports);
-			return -EINVAL;
-		}
-		else {
-			dev_info(rsw2->dev, "DT specified %d ports\n", dt_port_num);
-		}
-
-		for_each_child_of_node(ports, port) {
-			u32 port_reg;
-			const char *prop_phy_mode_str;
-
-			ret = of_property_read_u32(port, "reg", &port_reg);
-			if (ret < 0) {
-				dev_err(rsw2->dev, "Failed to get register property for port %d: %d\n",
-						cur_port_num, ret);
-				break;
-			}
-			//else {
-			//	dev_info(rsw2->dev, "Got reg=%u for port %d\n", port_reg, port_num);
-			//}
-
-			ret = of_property_read_string(port, "phy-mode", &prop_phy_mode_str);
-			if(ret < 0) {
-				dev_err(rsw2->dev, "Failed to get phy mode property for port %d: %d\n",
-						cur_port_num, ret);
-				break;
-			}
-
-			if (port_reg == port_num) {
-				//dev_err(rsw2->dev, "Got matching port!\n");
-				break;
-			}
-		}
-
-		ret = of_get_phy_mode(port, &phy_port->phy_iface);
-		if (ret != 0) {
-			dev_err(rsw2->dev, "of_get_phy_mode failed\n");
-			return -ENODEV;
-		}
-		else {
-			dev_info(rsw2->dev, "Got phy_iface mode: %s (%d)\n", phy_modes(phy_port->phy_iface), phy_port->phy_iface);
-		}
-
-		/* Try connecting to PHY */
-		pn = of_parse_phandle(port, "phy-handle", 0);
-		if (!pn) {
-			/* In the case of a fixed PHY, the DT node associated
-			 * to the PHY is the Ethernet MAC DT node.
-			 */
-			if (of_phy_is_fixed_link(np)) {
-				ret = of_phy_register_fixed_link(np);
-				if (ret)  {
-					dev_err(rsw2->dev, "of_phy_register_fixed_link failed\n");
-					return -ENODEV;
-				}
-			}
-			pn = of_node_get(np);
-		} else {
-			dev_info(rsw2->dev, "Got phy-handle: 0x%px\n", pn);
-		}
-
-		// FIXME
-		{
-			struct mdio_device *mdiodev;
-			struct phy_device *phy = of_phy_find_device(pn);
-
-			if (!phy) {
-				dev_err(rsw2->dev, "of_phy_find_device(phy_np): failed\n");
-
-			}
-			mdiodev = of_mdio_find_device(pn);
-			if (!mdiodev)
-				dev_err(rsw2->dev, "No MDIO!\n");
-
-
-		}
-
-		phydev = of_phy_connect(ndev, pn, &rswitch2_phy_state_change, 0 /*flags*/,
-								phy_port->phy_iface);
-
-		if(!phydev) {
-			dev_err(rsw2->dev, "Failed to connect to Phy!\n");
-			return -EINVAL;
-		}
-		else {
-			dev_info(rsw2->dev, "Connected: phydev is at 0x%px\n", phydev);
-		}
-		of_node_put(pn);
-		//dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-		of_node_put(ports);
-		//dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-
-	} else {
-		/* In non device implementation, we get the port data passed this way */
-		struct rswitch2_port_data *port_data;
-
-		port_data = &rsw2->port_data[rsw2->num_of_cpu_ports + port_num];
-
-		netdev_dbg(ndev, "No device tree information. Getting PHY from ID\n");
-
-		phy_port->phy_iface = port_data->phy_iface;
-		dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-		phydev = phy_connect(ndev, port_data->phy_id, &rswitch2_phy_state_change,
-							phy_port->phy_iface);
-		dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-	}
-
-	if (IS_ERR(phydev)) {
-		netdev_err(ndev, "Connect to PHY failed\n");
-		ret = PTR_ERR(phydev);
-		phydev = NULL;
-		return ret;
-	}
-	/*netdev_dbg(ndev, "attached to PHY %d UID 0x%08x Link = %d IRQ = %d to '%s'\n",
-		   phydev->mdio.addr, phydev->phy_id, phydev->link, phydev->irq, ndev->name); */
-/*	netdev_info(ndev, "attached to PHY %d UID 0x%08x Link = %d IRQ = %d to '%s'\n",
-		   phydev->mdio.addr, phydev->phy_id, phydev->link, phydev->irq, ndev->name); */
-	return 0;
-
-}
 /* SerDes functionality */
 void rswitch2_serdes_write32(void __iomem *addr, u32 offs,  u32 bank, u32 data)
 {
-#ifdef DEBUG_SERDES
-	printk("%s(%d, %03x : %04x = %04x)\n", __FUNCTION__, (int)((u64)addr&0xc00)/0x400, bank, offs, data);
-#endif
 	iowrite32(bank, addr + RSWITCH_SERDES_BANK_SELECT);
 	iowrite32(data, addr + offs);
+#ifdef DEBUG_SERDES
+	printk("SERDES WR %d: %03x - %04x  <= %04x\n", (int)((u64)addr&0xc00)/0x400, bank, offs, data);
+#endif
 }
 
 u32 rswitch2_serdes_read32(void __iomem *addr, u32 offs,  u32 bank)
@@ -353,8 +176,9 @@ u32 rswitch2_serdes_read32(void __iomem *addr, u32 offs,  u32 bank)
 
 	iowrite32(bank, addr + RSWITCH_SERDES_BANK_SELECT);
 	ret = ioread32(addr + offs);
+
 #ifdef DEBUG_SERDES
-	printk("%s(%d, %03x : %04x) is %04x\n", __FUNCTION__, (int)((u64)addr&0xc00)/0x400, bank, offs, ret);
+	printk("SERDES RD %d: %03x - %04x  is %04x\n", (int)((u64)addr&0xc00)/0x400, bank, offs, ret);
 #endif
 	return ret;
 }
@@ -371,17 +195,257 @@ static int rswitch2_serdes_reg_wait(void __iomem *addr, u32 offs, u32 bank, u32 
 		ret = ioread32(addr + offs);
 		if ((ret & mask) == expected) {
 #ifdef DEBUG_SERDES
-			printk("%s(%d, %03x : %04x) is %04x after %d iterations\n", __FUNCTION__, (int)((u64)addr&0xc00)/0x400, bank, offs, ret, i);
+			printk("SERDES po %d: %03x - %04x  is %04x after %d iterations\n", (int)((u64)addr&0xc00)/0x400, bank, offs, ret, i);
 #endif
 			return 0;
 		}
 		mdelay(1);
 	}
 #ifdef DEBUG_SERDES
-	printk("%s(%d, %03x : %04x) is %04x but %04x==%04x expected\n", __FUNCTION__, (int)((u64)addr&0xc00)/0x400, bank, offs, ret, (ret&mask), expected);
+	printk("(SERDES po %d: %03x - %04x  is %04x but %04x==%04x expected\n", (int)((u64)addr&0xc00)/0x400, bank, offs, ret, (ret&mask), expected);
 #endif
 	return -ETIMEDOUT;
 }
+
+static int rswitch2_serdes_set_speed(struct rswitch2_eth_port *eth_port, int phy_speed)
+{
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_physical_port *phy_port;
+	void __iomem *addr = eth_port->phy_port->serdes_chan_addr;
+	int ret;
+
+	phy_port = eth_port->phy_port;
+	rsw2 = eth_port->rsw2;
+
+	rsw2_notice(MSG_SERDES, "Set serdes speed: %d\n", phy_speed);
+
+	switch (phy_port->phy_iface) {
+	case PHY_INTERFACE_MODE_SGMII:
+		if (phy_speed == SPEED_1000)
+			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x0140);
+		else if (phy_speed == SPEED_100)
+			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x2100);
+		else if (phy_speed == SPEED_10)
+			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x0100);
+		else
+			return -EOPNOTSUPP;
+#if 0
+		//Autoneg for 1G
+		ret = rswitch2_serdes_reg_wait(addr, 0x008, BANK_1F80, BIT(0), 1);
+		if (ret)
+			return ret;
+		rswitch2_serdes_write32(addr, 0x008, BANK_1F80, 0);
+#endif
+		break;
+
+	case PHY_INTERFACE_MODE_USXGMII:
+		if (phy_speed == SPEED_2500)
+			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x120);
+		else
+			return -EOPNOTSUPP;
+		udelay(50);
+		rswitch2_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2600);
+		ret = rswitch2_serdes_reg_wait(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(10), 0);
+		if (ret) {
+			rsw2_err(MSG_SERDES, "Speed update failed  err=%d\n", ret);
+			return ret;
+		}
+		break;
+
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
+
+
+
+static int rswitch2_serdes_init(struct net_device *ndev, bool check_op);
+static void rswitch2_phy_state_change(struct net_device *ndev)
+{
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
+	struct rswitch2_physical_port *phy_port;
+	struct phy_device *phydev;
+	u32 reg_val;
+	int ret;
+	unsigned long flags;
+
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+	phy_port = eth_port->phy_port;
+	phydev = ndev->phydev;
+
+	rsw2_info(MSG_GEN, "Link change(%d): %s uses %s at %d Mbps\n", phydev->link, ndev->name, phy_modes(phydev->interface), phydev->speed);
+	if(phydev->speed == SPEED_10000)
+		return;
+
+	if(!phydev->link) {
+
+		void __iomem *etha_base_addr;
+		phy_interface_t phy_iface;
+		int speed;
+
+		etha_base_addr = (void __iomem *)ndev->base_addr;
+		spin_lock_irqsave(&rsw2->lock, flags);
+		rsw2_notice(MSG_GEN, "================= Link Down start (%s) ===================\n", ndev->name);
+
+		/* ETHA state machine will lock up due to SerDes connection in S4 ES 1.0
+		 * Lockup can be release by switching SerDes to USXGMII */
+		if(phy_port->phy_iface != PHY_INTERFACE_MODE_USXGMII) {
+			reg_val = FIELD_PREP(EAMC_OPC, emac_disable);
+			iowrite32(reg_val, etha_base_addr + RSW2_ETHA_EAMC);
+
+			phy_iface = phy_port->phy_iface;
+			speed = phy_port->phy->speed;
+
+			phy_port->phy_iface = PHY_INTERFACE_MODE_USXGMII;
+			phy_port->phy->speed = SPEED_2500;
+			rswitch2_serdes_init(ndev, false);
+
+			rswitch2_emac_set_state(ndev, emac_disable);
+
+			phy_port->phy_iface = phy_iface;
+			phy_port->phy->speed = speed;
+		}
+
+		rsw2_notice(MSG_GEN, "===================== Link Down end =======================\n");
+		spin_unlock_irqrestore(&rsw2->lock, flags);
+
+	} else {
+		uint phy_port_num;
+		void __iomem *etha_base_addr;
+		etha_base_addr = (void __iomem *)ndev->base_addr;
+		spin_lock_irqsave(&rsw2->lock, flags);
+
+		rsw2_notice(MSG_GEN, "================= Link Up start (%s) ==================\n", ndev->name);
+
+		if(phy_port->phy_iface != PHY_INTERFACE_MODE_USXGMII) {
+			phy_port_num = eth_port->port_num - eth_port->rsw2->num_of_cpu_ports;
+
+
+		ret = rswitch2_emac_set_state(ndev, emac_config);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Port set state 'config' failed\n");
+		}
+		else {
+			rsw2_dbg(MSG_GEN, "Port set state 'config' SUCCEEDED\n");
+		}
+
+		reg_val = ioread32(phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
+		reg_val = reg_val & ~0x1Fu;
+
+		switch (phydev->speed) {
+			case SPEED_100:
+				reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_100mbps);
+				reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_gmii);
+				phy_port->phy_iface = PHY_INTERFACE_MODE_SGMII;
+				phy_port->phy->speed = SPEED_100;
+
+				break;
+
+			case SPEED_1000:
+				reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_1000mbps);
+				reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_gmii);
+				phy_port->phy_iface = PHY_INTERFACE_MODE_SGMII;
+				phy_port->phy->speed = SPEED_1000;
+
+				break;
+
+			case SPEED_2500:
+				reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_2500mbps);
+				reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_xgmii);
+				phy_port->phy_iface = PHY_INTERFACE_MODE_USXGMII;
+				phy_port->phy->speed = SPEED_2500;
+
+				break;
+
+			default:
+				rsw2_err(MSG_GEN,, "Unsupported Speed\n");
+				return;
+			}
+
+		rsw2_notice(MSG_GEN, "Link change: %s uses %s at %d Mbps\n", ndev->name, phy_modes(phydev->interface), phydev->speed);
+
+		iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
+		rsw2_dbg(MSG_GEN, "reg_val=0x%.8x (expected): 0x%.8x\n", ioread32(phy_port->rmac_base_addr + RSW2_RMAC_MPIC), reg_val);
+
+		ret = rswitch2_emac_set_state(ndev, emac_disable);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Port set state 'disable' failed\n");
+		}
+		else {
+			rsw2_dbg(MSG_GEN, "Port set state 'disable' SUCCEEDED\n");
+		}
+
+		ret = rswitch2_emac_set_state(ndev, emac_operation);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Port set state 'operation' failed\n");
+		}
+		else {
+			rsw2_dbg(MSG_GEN, "Port set state 'operation' SUCCEEDED\n");
+		}
+		}
+
+		rswitch2_serdes_init(ndev, true);
+
+		rsw2_notice(MSG_GEN, "===================== Link Up end =======================\n");
+		spin_unlock_irqrestore(&rsw2->lock, flags);
+
+	}
+
+	if (netif_msg_link(rsw2)) {
+		int phy_speed = 0;
+
+		if(phydev->link)
+			phy_speed =phydev->speed;
+
+		phy_print_status(phydev);
+
+		rsw2_info(MSG_GEN, "Link status changed. PHY %d UID 0x%08x Link = %d Speed = %d\n",
+				  phydev->mdio.addr, phydev->phy_id, phydev->link, phy_speed);
+	}
+	else {
+		rsw2_dbg(MSG_GEN,"PHY state change but no msg link!\n");
+	}
+}
+
+static struct device_node *rswitch2_get_port_node(struct net_device *ndev, unsigned int port_num)
+{
+	struct device_node *ports, *port;
+	int err = 0;
+	u32 index;
+
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
+
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+
+	ports = of_get_child_by_name(rsw2->dev->of_node, "ports");
+	if (!ports)
+		return NULL;
+
+	for_each_child_of_node(ports, port) {
+		err = of_property_read_u32(port, "reg", &index);
+		if (err < 0)
+			return NULL;
+		if (index == port_num) {
+			of_node_get(port);
+			break;
+		}
+
+	}
+	of_node_put(ports);
+
+	return port;
+}
+
+
+
+
 
 static int rswitch2_serdes_init_sram(struct rswitch2_drv *rsw2)
 {
@@ -395,10 +459,9 @@ static int rswitch2_serdes_init_sram(struct rswitch2_drv *rsw2)
 		ret = rswitch2_serdes_reg_wait(addr,
 				VR_XS_PMA_MP_12G_16G_25G_SRAM, BANK_180, BIT(0), 0x01);
 		if (ret) {
-			dev_err(rsw2->dev, "SERDES SRAM init on lane %d failed (step 1)\n", lane);
+			rsw2_err(MSG_SERDES, "SERDES SRAM init on lane %d failed (step 1)\n", lane);
 			return ret;
 		}
-break;
 	}
 
 	//Step 2 only on lane 0
@@ -410,30 +473,37 @@ break;
 		ret = rswitch2_serdes_reg_wait(addr,
 				SR_XS_PCS_CTRL1, BANK_300, BIT(15), 0);
 		if (ret) {
-			dev_err(rsw2->dev, "SERDES on lane %d does not finish reset (step 3)\n", lane);
+			rsw2_err(MSG_SERDES, "SERDES on lane %d does not finish reset (step 3)\n", lane);
 			return ret;
 		}
-break;
 	}
 	return 0;
 }
 
-static int rswitch2_serdes_common_setting(struct rswitch2_eth_port *eth_port)
+static int rswitch2_serdes_common_setting(struct rswitch2_drv *rsw2)
 {
 	int ret;
 	int lane;
 	void __iomem *addr;
-	struct rswitch2_drv *rsw2;
-	enum {UNDEF, SGMII_ONLY, USXGMII_ONLY, MIXED, ERROR} mode;
 
-	rsw2 = eth_port->rsw2;
-	//printk("%s(port=%d)\n", __FUNCTION__, eth_port->port_num);
+	enum {UNDEF, SGMII_ONLY, USXGMII_ONLY, MIXED, ERROR} mode = UNDEF;
 
-	//Check the SERDES configuration of all ports to decide which PLLs to be activated
-	mode = UNDEF;
+	/* Check if common init is already done */
+	if (!rsw2->serdes_common_init_done)
+		rsw2->serdes_common_init_done = true;
+	else
+		return 0;
+
+	/* Check the SERDES configuration of all ports to decide which
+	 * PLLs to be activated */
 	for (lane = 0; lane < rsw2->num_of_tsn_ports; lane++) {
-		phy_interface_t phy_iface = rsw2->port_data[lane].phy_iface;
-		printk("PHYiface[%d] is %s (%d)\n", lane, phy_modes(phy_iface), phy_iface);
+		phy_interface_t phy_iface;
+		uint phy_port_num = lane + rsw2->num_of_cpu_ports;
+		struct rswitch2_eth_port *cur_port = rsw2->ports[phy_port_num];
+
+		phy_iface = cur_port->phy_port->phy_iface;
+		rsw2_dbg(MSG_SERDES, "PHYiface[%d] is %s (%d)\n", lane, phy_modes(phy_iface), phy_iface);
+
 		switch (phy_iface) {
 		case PHY_INTERFACE_MODE_SGMII :
 			if (mode == UNDEF || mode == SGMII_ONLY) mode = SGMII_ONLY;
@@ -462,7 +532,6 @@ static int rswitch2_serdes_common_setting(struct rswitch2_eth_port *eth_port)
 	if (ret)
 		return ret;
 
-	//printk("Step 2\n");
 	for (lane = 0; lane < rsw2->num_of_tsn_ports; lane++) {
 		addr = rsw2->serdes_base_addr + (RSW2_SERDES_CHANNEL_OFFSET * lane);
 		rswitch2_serdes_write32(addr, VR_XS_PCS_SFTY_MR_CTRL, BANK_380, 0x443);
@@ -471,7 +540,7 @@ static int rswitch2_serdes_common_setting(struct rswitch2_eth_port *eth_port)
 	addr = rsw2->serdes_base_addr;
 	switch (mode) {
 	case SGMII_ONLY:
-		dev_err(rsw2->dev, "Configure SERDES PLLs for SGMII mode\n");
+		rsw2_notice(MSG_SERDES, "Configure SERDES PLLs for SGMII mode\n");
 		//S4.1~S4.5
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_REF_CLK_CTRL, BANK_180, 0x97);
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_MPLLB_CTRL0, BANK_180, 0x60);
@@ -481,7 +550,7 @@ static int rswitch2_serdes_common_setting(struct rswitch2_eth_port *eth_port)
 		break;
 
 	case USXGMII_ONLY:
-		dev_err(rsw2->dev, "Configure SERDES PLLs for USXGMII mode\n");
+		rsw2_notice(MSG_SERDES, "Configure SERDES PLLs for USXGMII mode\n");
 		//U4.1 ~ U4.5
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_REF_CLK_CTRL, BANK_180, 0x57);
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_10G_MPLLA_CTRL2, BANK_180, 0xc200);
@@ -491,7 +560,7 @@ static int rswitch2_serdes_common_setting(struct rswitch2_eth_port *eth_port)
 		break;
 
 	case MIXED:
-		dev_err(rsw2->dev, "Configure SERDES PLLs for mixed SGMII and USXGMII mode\n");
+		rsw2_notice(MSG_SERDES, "Configure SERDES PLLs for mixed SGMII and USXGMII mode\n");
 		//to allow mix operation SGMII and USXGMII PLLs configured both
 		//C4.1 == U4.1 | S4.1
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_REF_CLK_CTRL, BANK_180, 0x57 | 0x97);
@@ -516,11 +585,11 @@ static int rswitch2_serdes_common_setting(struct rswitch2_eth_port *eth_port)
 		break;
 
 	default:
-		netdev_err(eth_port->ndev, "Unsupported combination of MAC xMII formats\n");
+		rsw2_err(MSG_SERDES, "Unsupported combination of MAC xMII formats\n");
 		return -EOPNOTSUPP;
 	}
 
-	/* Assert softreset for SERDES PHY (step 5) */
+	/* Assert soft reset for SERDES PHY (step 5) */
 	for (lane = 0; lane < rsw2->num_of_tsn_ports; lane++) {
 		addr = rsw2->serdes_base_addr + (RSW2_SERDES_CHANNEL_OFFSET * lane);
 		rswitch2_serdes_write32(addr, 0x03d0, BANK_380, 1);
@@ -534,26 +603,28 @@ static int rswitch2_serdes_common_setting(struct rswitch2_eth_port *eth_port)
 
 	/* Check for soft reset done */
 	ret = rswitch2_serdes_reg_wait(rsw2->serdes_base_addr,
-			SR_XS_PCS_CTRL1, BANK_380, BIT(15), 0);
+			VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(15), 0);
 	if (ret) {
-		dev_err(rsw2->dev, "SERDES does not finished soft reset (step 8)\n");
+		rsw2_err(MSG_SERDES, "SERDES does not finished soft reset (step 8)\n");
 		return ret;
 	}
+
 	return 0;
 }
 
-static int rswitch2_serdes_chan_setting(struct rswitch2_eth_port *eth_port, phy_interface_t phy_iface)
+static int rswitch2_serdes_chan_setting(struct rswitch2_eth_port *eth_port)
 {
 	void __iomem *addr;
+	struct rswitch2_drv *rsw2;
 	struct rswitch2_physical_port *phy_port;
 	int ret;
 
 	phy_port = eth_port->phy_port;
-
+	rsw2 = eth_port->rsw2;
 	addr = phy_port->serdes_chan_addr;
 
 	//printk("%s(port=%d, mode=%d)\n", __FUNCTION__, eth_port->port_num, mode);
-	switch (phy_iface) {
+	switch (phy_port->phy_iface) {
 	case PHY_INTERFACE_MODE_SGMII:
 		rswitch2_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2000);
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_MPLL_CMN_CTRL, BANK_180, 0x11);
@@ -573,13 +644,13 @@ static int rswitch2_serdes_chan_setting(struct rswitch2_eth_port *eth_port, phy_
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BANK_180, 0x0101);
 		ret = rswitch2_serdes_reg_wait(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BANK_180, BIT(0), 0);
 		if (ret) {
-			printk("%s %d failed\n", __FUNCTION__, __LINE__);
+			rsw2_err(MSG_SERDES, "SerDes req wait failed\n");
 			return ret;
 		}
 		rswitch2_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BANK_180, 0x101);
 		ret = rswitch2_serdes_reg_wait(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BANK_180, BIT(0), 0);
 		if (ret) {
-			printk("%s %d failed\n", __FUNCTION__, __LINE__);
+			rsw2_err(MSG_SERDES, "SerDes req wait failed\n");
 			return ret;
 		}
 
@@ -593,16 +664,16 @@ static int rswitch2_serdes_chan_setting(struct rswitch2_eth_port *eth_port, phy_
 		rswitch2_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2100);
 		ret = rswitch2_serdes_reg_wait(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(8), 0);
 		if (ret) {
-			printk("%s %d failed\n", __FUNCTION__, __LINE__);
+			rsw2_err(MSG_SERDES, "SerDes req wait failed\n");
 			return ret;
 		}
 #if 0
 		//Enable AutoNeg
 		rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x0140);  //start from 1000
 		//rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x2100);  //start from 100
-		rswitch2_serdes_write32(addr, 0x004, BANK_1F00, 5);
-		rswitch2_serdes_write32(addr, 0x028, BANK_1F00, 0x7a1);
-		rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x208);
+		rswitch2_serdes_write32(addr, 0x004, BANK_1F80, 5);
+		rswitch2_serdes_write32(addr, 0x028, BANK_1F80, 0x7a1);
+		rswitch2_serdes_write32(addr, 0x000, BANK_1F80, 0x208);
 #endif
 		break;
 
@@ -653,7 +724,7 @@ static int rswitch2_serdes_chan_setting(struct rswitch2_eth_port *eth_port, phy_
 #if 0
 		//Enter AN_ON
 		rswitch2_serdes_write32(addr, VR_MII_AN_CTRL, BANK_1F80, 1);
-		rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F80, 0x1000);
+		rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x1000);
 		ret = rswitch2_serdes_reg_wait(addr, 8, BANK_1F80, BIT(0), 1);
 		rswitch2_serdes_write32(addr, 8, BANK_1F80, 0);
 		if (ret) {
@@ -670,64 +741,41 @@ static int rswitch2_serdes_chan_setting(struct rswitch2_eth_port *eth_port, phy_
 	return 0;
 }
 
-static int rswitch2_serdes_set_speed(struct rswitch2_eth_port *eth_port, phy_interface_t phy_iface, int speed)
-{
-	//int ret;
-	void __iomem *addr = eth_port->phy_port->serdes_chan_addr;
-
-	switch (phy_iface) {
-	case PHY_INTERFACE_MODE_SGMII:
-		if (speed == 1000)
-			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x0140);
-		else if (speed == 100)
-			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x2100);
-		else if (speed == 10)
-			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x0100);
-		else
-			return -EOPNOTSUPP;
 #if 0
-		//Autoneg for 1G
-		ret = rswitch2_serdes_reg_wait(addr, 0x008, BANK_1F00, BIT(0), 1);
-		if (ret)
-			return ret;
-		rswitch2_serdes_write32(addr, 0x008, BANK_1F00, 0);
-#endif
-		break;
-
-	case PHY_INTERFACE_MODE_USXGMII:
-		if (speed == 2500)
-			rswitch2_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x120);
-		else
-			return -EOPNOTSUPP;
-	//	udelay(50);
-	//	rswitch2_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2600);
-	//	ret = rswitch2_serdes_reg_wait(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(10), 0);
-	//	if (ret)
-	//		return ret;
-		break;
-
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	return 0;
-}
-
 static int dummy_config_aneg(struct phy_device *phydev)
 {
-	printk("%s:%d phydev=%p\n", __FUNCTION__, __LINE__, phydev);
+	struct rswitch2_drv *rsw2;
+	struct net_device *ndev = phydev->attached_dev;
+	struct rswitch2_eth_port *eth_port;
+
+	eth_port = netdev_priv(ndev);
+
+	rsw2 = eth_port->rsw2;
+	rsw2_err(MSG_GEN, "dummy_config_aneg(): Link change(%d): %s uses %s at %d Mbps\n", phydev->link, ndev->name, phy_modes(phydev->interface), phydev->speed);
+	phydev->speed = 2500;
+	phydev->link = 1;
+	linkmode_empty(phydev->supported);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_2500baseT_Full_BIT, phydev->supported);
+	//ETHTOOL_LINK_MODE_2500baseT_Full_BIT
 	return 0;
 }
-
+#endif
 static void rswitch2_serdes_check_operation(struct timer_list *t)
 {
 	struct rswitch2_physical_port *phy_port = from_timer(phy_port, t, serdes_usxgmii_op_timer);
-//	unsigned long flags;
+	unsigned long flags;
 	u32 reg_val;
 
 
-	// FIXME: phy_port should not have its own lock - pass eth_port here
-	//spin_lock_irqsave(&phy_port->lock, flags);
+	/* FIXME: May there more elegant way to get eth_port /rsw2 data? */
+	struct rswitch2_drv *rsw2;
+	struct net_device *ndev = phy_port->phy->attached_dev;
+	struct rswitch2_eth_port *eth_port;
+
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+
+	spin_lock_irqsave(&rsw2->lock, flags);
 
 
 	if (phy_port->serdes_usxgmii_op_cnt < RSW2_SERDES_OP_RETRIES) {
@@ -735,10 +783,10 @@ static void rswitch2_serdes_check_operation(struct timer_list *t)
 		rswitch2_serdes_read32(phy_port->serdes_chan_addr, SR_XS_PCS_STS1, BANK_300);
 		reg_val = rswitch2_serdes_read32(phy_port->serdes_chan_addr, SR_XS_PCS_STS1, BANK_300);
 		if (reg_val & 0x04) {
-			pr_notice("SerDes USXGMII is operational on port %s %s (retries = %d)\n", phy_port->mii_bus->name, phy_port->mii_bus->id, phy_port->serdes_usxgmii_op_cnt);
+			rsw2_notice(MSG_SERDES, "SerDes USXGMII is operational on port %s %s (retries = %d)\n", phy_port->mii_bus->name, phy_port->mii_bus->id, phy_port->serdes_usxgmii_op_cnt);
 		}
 		else {
-			pr_notice("Resetting SerDes USXGMII on port %s %s (retries = %d)\n", phy_port->mii_bus->name, phy_port->mii_bus->id, phy_port->serdes_usxgmii_op_cnt);
+			rsw2_notice(MSG_SERDES, "Resetting SerDes USXGMII on port %s %s (retries = %d)\n", phy_port->mii_bus->name, phy_port->mii_bus->id, phy_port->serdes_usxgmii_op_cnt);
 
 
 			reg_val = rswitch2_serdes_read32(phy_port->serdes_chan_addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, BANK_180);
@@ -752,20 +800,20 @@ static void rswitch2_serdes_check_operation(struct timer_list *t)
 		}
 	}
 	else {
-		pr_err("Could not bring SerDes USXGMII on port %s %s into operational state. Giving up!\n", phy_port->mii_bus->name, phy_port->mii_bus->id);
+		rsw2_err(MSG_SERDES, "Could not bring SerDes USXGMII on port %s %s into operational state. Giving up!\n", phy_port->mii_bus->name, phy_port->mii_bus->id);
 	}
 
-	//spin_unlock_irqrestore(&phy_port->lock, flags);
-
+	spin_unlock_irqrestore(&rsw2->lock, flags);
 }
 
-static int rswitch2_serdes_init(struct net_device *ndev, unsigned int port_num)
+static int rswitch2_serdes_init(struct net_device *ndev, bool check_op)
 {
 	int ret;
-	int speed;
 	struct rswitch2_drv *rsw2;
 	struct rswitch2_eth_port *eth_port;
 	struct rswitch2_physical_port *phy_port;
+	int phy_speed;
+	uint port_num;
 
 	eth_port = netdev_priv(ndev);
 	phy_port = eth_port->phy_port;
@@ -774,52 +822,53 @@ static int rswitch2_serdes_init(struct net_device *ndev, unsigned int port_num)
 	BUG_ON(phy_port == NULL);
 	rsw2 = eth_port->rsw2;
 
+	ret = rswitch2_serdes_common_setting(rsw2);
+	if (ret)
+		return ret;
+
+	port_num = eth_port->port_num - eth_port->rsw2->num_of_cpu_ports;
 
 	/* TODO: Support more modes and speed selection */
 	//printk("%s: sw0p%d  phy_mode=%d\n", __FUNCTION__, port_num, ndev->phydev->interface );
-	switch (ndev->phydev->interface) {
+	switch (phy_port->phy_iface) {
 	case PHY_INTERFACE_MODE_SGMII:
-		speed = 1000;
-		netdev_info(ndev, "port %d uses SGMII at %d Mbit/s\n", port_num, speed);
+		if((phy_port->phy->speed != SPEED_100) && (phy_port->phy->speed != SPEED_1000)) {
+			phy_speed = SPEED_100;
+			rsw2_notice(MSG_SERDES, "No valid default speed. Setting to %d Mbit/s\n", phy_speed);
+		} else
+			phy_speed = phy_port->phy->speed;
+
+		rsw2_notice(MSG_SERDES, "port %d uses SGMII at %d Mbit/s\n", port_num, phy_speed);
 		break;
+
 	case PHY_INTERFACE_MODE_USXGMII:
-		speed = 2500;
-		netdev_info(ndev, "port %d uses USXGMII at %d Mbit/s\n", port_num, speed);
-
-		//ugly hack to prevent auto neg by generic driver
-		if (ndev->phydev->drv->config_aneg == NULL)
-			ndev->phydev->drv->config_aneg = &dummy_config_aneg;
-
+		if(phy_port->phy->speed != SPEED_2500) {
+			phy_speed = SPEED_2500;
+			rsw2_notice(MSG_SERDES, "No valid default speed. Setting to %d Mbit/s\n", phy_speed);
+		} else
+			phy_speed = phy_port->phy->speed
+			;
+		rsw2_notice(MSG_SERDES, "port %d uses USXGMII at %d Mbit/s\n", port_num, phy_speed);
 		break;
+
 	default:
-		pr_debug("%s: Don't support this interface %d on port %d", __func__,
-			ndev->phydev->interface, port_num);
+		rsw2_err(MSG_SERDES, "%s: Don't support this interface %d on port %d", __func__,
+				phy_port->phy_iface, port_num);
 		return -EOPNOTSUPP;
 	}
 
 
-	if (!rsw2->serdes_common_init_done) {
-		rsw2->serdes_common_init_done = true;
-
-		/* Set common settings*/
-		//printk("Step 3 (U.4)\n");
-		ret = rswitch2_serdes_common_setting(eth_port);
-		if (ret)
-			return ret;
-	}
-
-
 	/* Set channel settings*/
-	ret = rswitch2_serdes_chan_setting(eth_port, ndev->phydev->interface);
+	ret = rswitch2_serdes_chan_setting(eth_port);
 	if (ret) {
-		netdev_err(ndev, "channel specific SERDES configuration for port %d failed. ret=%d\n", port_num, ret);
+		rsw2_err(MSG_SERDES, "channel specific SERDES configuration for port %d failed. ret=%d\n", port_num, ret);
 		return ret;
 	}
 
 	/* Set speed (bps) */
-	ret = rswitch2_serdes_set_speed(eth_port, ndev->phydev->interface, speed);
+	ret = rswitch2_serdes_set_speed(eth_port, phy_speed);
 	if (ret) {
-		netdev_err(ndev, "set initial SERDES speed for port %d failed\n", port_num);
+		rsw2_err(MSG_SERDES, "set initial SERDES speed for port %d failed\n", port_num);
 		return ret;
 	}
 
@@ -850,7 +899,8 @@ static int rswitch2_serdes_init(struct net_device *ndev, unsigned int port_num)
 	rswitch2_serdes_write32(phy_port->serdes_chan_addr, 0x03d0, BANK_380, 0);
 
 	/* USXGMII needs deferred check to proof operation */
-	if(ndev->phydev->interface == PHY_INTERFACE_MODE_USXGMII) {
+	if(check_op && (phy_port->phy_iface == PHY_INTERFACE_MODE_USXGMII)) {
+		rsw2_info(MSG_SERDES, "Starting SerDes serdes_usxgmii_op_timer for '%s'\n", ndev->name);
 		timer_setup(&phy_port->serdes_usxgmii_op_timer, rswitch2_serdes_check_operation, 0);
 		mod_timer(&phy_port->serdes_usxgmii_op_timer, jiffies + msecs_to_jiffies(RSW2_SERDES_OP_TIMER_INTERVALL_FIRST));
 	}
@@ -959,7 +1009,6 @@ static int rswitch2_eth_open(struct net_device *ndev)
 	struct rswitch2_eth_port *eth_port;
 	struct rswitch2_physical_port *phy_port;
 	struct rswitch2_internal_port *intern_port;
-	unsigned int phy_port_num;
 	int ret;
 
 	eth_port = netdev_priv(ndev);
@@ -974,10 +1023,10 @@ static int rswitch2_eth_open(struct net_device *ndev)
 
 		ret = rswitch2_gwca_set_state(rsw2, gwmc_operation);
 		if (ret != 0) {
-			dev_err(rsw2->dev, "Failed to set GWCA operation state\n");
+			rsw2_err(MSG_GEN, "Failed to set GWCA operation state\n");
 		}
 
-		netdev_dbg(ndev, "internal port open(): '%s'\n", ndev->name);
+		rsw2_notice(MSG_GEN, "internal port open(): '%s'\n", ndev->name);
 		for (cur_q = 0; cur_q < num_of_rx_q; cur_q++) {
 			u32 reg_queue = (cur_q + intern_port->rx_q[cur_q].offset) / 32;
 			u32 bit_queue = (cur_q + intern_port->rx_q[cur_q].offset) % 32;
@@ -997,7 +1046,7 @@ static int rswitch2_eth_open(struct net_device *ndev)
 		const uint 	num_of_rx_q = ARRAY_SIZE(phy_port->rx_q);
 
 
-		netdev_dbg(ndev, "physical port open(): '%s'\n", ndev->name);
+		rsw2_notice(MSG_GEN, "physical port open(): '%s'\n", ndev->name);
 		for (cur_q = 0; cur_q < num_of_rx_q; cur_q++) {
 			napi_enable(&phy_port->rx_q[cur_q].napi);
 		}
@@ -1005,32 +1054,19 @@ static int rswitch2_eth_open(struct net_device *ndev)
 		netif_tx_start_all_queues(ndev);
 
 
-		phy_port_num = eth_port->port_num - eth_port->rsw2->num_of_cpu_ports;
-
-		ret = rswitch2_phy_init(ndev, phy_port_num);
+		ret = rswitch2_serdes_init(ndev, false);
 		if (ret != 0) {
-			netdev_err(ndev, "rswitch2_phy_init failed: %d\n", ret);
-			return ret;
-		}
-
-		//ret = rswitch2_mac_set_speed(eth_port);
-		//if (ret != 0)
-		//	return ret;
-
-		ret = rswitch2_serdes_init(ndev, phy_port_num);
-		if (ret != 0) {
-			netdev_err(ndev, "rswitch2_serdes_init failed: %d\n", ret);
+			rsw2_err(MSG_SERDES, "%s: rswitch2_serdes_init failed: %d\n", ndev->name, ret);
 			return ret;
 		}
 		else {
-			netdev_err(ndev, "rswitch2_serdes_init SUCCESS\n");
+			rsw2_info(MSG_SERDES, "%s: rswitch2_serdes_init SUCCESS\n", ndev->name);
 		}
 
 		timer_setup(&eth_port->stat_timer, rswitch2_stat_timer, 0);
 		mod_timer(&eth_port->stat_timer, jiffies + msecs_to_jiffies(RSW2_STAT_TIMER_INTERVALL));
-
 		if (phy_port != NULL) {
-			netdev_dbg(ndev, "physical port open(): '%s'\n", ndev->name);
+			rsw2_info(MSG_SERDES, "physical port open(): '%s'\n", ndev->name);
 			phy_start(ndev->phydev);
 
 		}
@@ -1040,67 +1076,6 @@ static int rswitch2_eth_open(struct net_device *ndev)
 	return 0;
 }
 
-static int rswitch2_eth_close(struct net_device *ndev)
-{
-	struct rswitch2_drv *rsw2;
-	struct rswitch2_eth_port *eth_port;
-	struct rswitch2_physical_port *phy_port;
-	struct rswitch2_internal_port *intern_port;
-	int ret;
-
-	eth_port = netdev_priv(ndev);
-	rsw2 = eth_port->rsw2;
-	phy_port = eth_port->phy_port;
-	intern_port = eth_port->intern_port;
-
-	if (intern_port != NULL) {
-		int cur_q;
-		const uint 	num_of_rx_q = ARRAY_SIZE(intern_port->rx_q);
-
-		netdev_dbg(ndev, "internal port close(): '%s'\n", ndev->name);
-
-		netif_tx_stop_all_queues(ndev);
-
-		for (cur_q = 0; cur_q < num_of_rx_q; cur_q++) {
-			u32 reg_queue = (cur_q + intern_port->rx_q[cur_q].offset) / 32;
-			u32 bit_queue = (cur_q + intern_port->rx_q[cur_q].offset) % 32;
-
-			/* Disable and clear RX interrupt */
-			iowrite32(BIT(bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDID(reg_queue));
-			iowrite32(BIT(bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDIS(reg_queue));
-
-			napi_disable(&intern_port->rx_q[cur_q].napi);
-
-		}
-		ret = rswitch2_gwca_set_state(rsw2, gwmc_disable);
-		if (ret != 0) {
-			dev_err(rsw2->dev, "Failed to set GWCA disable state\n");
-		}
-		// FIXME
-		//kfree(eth_port->phy_port);
-		//eth_port->phy_port = NULL;
-	} else if (phy_port != NULL) {
-		int cur_q;
-		const uint 	num_of_rx_q = ARRAY_SIZE(phy_port->rx_q);
-
-		del_timer(&eth_port->stat_timer);
-
-		netdev_dbg(ndev, "physical port close(): '%s'\n", ndev->name);
-		del_timer(&phy_port->serdes_usxgmii_op_timer);
-
-		netif_carrier_off(ndev);
-
-		netif_tx_stop_all_queues(ndev);
-
-		for (cur_q = 0; cur_q < num_of_rx_q; cur_q++) {
-			napi_disable(&phy_port->rx_q[cur_q].napi);
-		}
-		phy_stop(ndev->phydev);
-		phy_disconnect(ndev->phydev);
-	}
-
-	return 0;
-}
 static inline struct rswitch2_eth_port *
 rswitch2_netdev_get_rx_q(struct net_device *ndev, uint q, struct rsw2_rx_q_data **rx_q) {
 
@@ -1137,6 +1112,185 @@ rswitch2_netdev_get_tx_q(struct net_device *ndev, uint q, struct rsw2_tx_q_data 
 		*tx_q = &phy_port->tx_q[q];
 
 	return eth_port;
+}
+
+
+static void rswitch2_disable_rx(struct net_device *ndev)
+{
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
+	struct rswitch2_internal_port *intern_port;
+	struct rswitch2_physical_port *phy_port;
+	uint num_of_rx_queues;
+	uint q;
+
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+
+	intern_port = eth_port->intern_port;
+	phy_port = eth_port->phy_port;
+
+	if(intern_port) {
+		num_of_rx_queues = ARRAY_SIZE(intern_port->rx_q);
+	} else {
+		num_of_rx_queues = ARRAY_SIZE(phy_port->rx_q);
+	}
+
+	for (q = 0; q < num_of_rx_queues; q++) {
+		u32 reg_queue;
+		u32 bit_queue;
+		struct rsw2_rx_q_data *rx_q;
+
+		(void)rswitch2_netdev_get_rx_q(ndev, q, &rx_q);
+
+		reg_queue = (q + rx_q->offset) / RSWITCH2_BITS_PER_REG;
+		bit_queue = (q + rx_q->offset) % RSWITCH2_BITS_PER_REG;
+
+		iowrite32(BIT(bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDID(reg_queue));
+		iowrite32(BIT(bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDIS(reg_queue));
+
+		napi_disable(&intern_port->rx_q[q].napi);
+	}
+}
+
+
+
+static int rswitch2_tx_free(struct net_device *ndev, int q)
+{
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
+	struct rswitch2_physical_port *phy_port;
+	struct rswitch2_internal_port *intern_port;
+	struct rsw2_tx_q_data *tx_q;
+	struct rswitch2_dma_ext_desc *tx_desc;
+	int free_num = 0;
+	int entry;
+	u32 data_ptr = 0;
+	unsigned int data_len = 0;
+
+
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+
+	intern_port = eth_port->intern_port;
+	phy_port = eth_port->phy_port;
+	if(intern_port) {
+		tx_q = &intern_port->tx_q[q];
+	} else {
+		tx_q = &phy_port->tx_q[q];
+	}
+
+	while (tx_q->cur_desc - tx_q->dirty_desc > 0) {
+		entry = tx_q->dirty_desc % tx_q->entries;
+		tx_desc = &tx_q->desc_ring[entry];
+
+		if (FIELD_GET(RSW2_DESC_DT, tx_desc->die_dt) != DT_FEMPTY)
+			break;
+
+		/* Descriptor type must be checked before all other reads */
+		dma_rmb();
+
+
+		/* Free the original skb */
+		if (tx_q->skb[entry]) {
+			bool txc = false;
+			uint desc_data_len;
+
+			/* FIXME: Avoid using last descriptor - Add TS pending to tx_q */
+			txc = FIELD_GET(RSW2_DESC_INFO1_TXC, tx_desc->info1);
+
+			desc_data_len = FIELD_GET(RSW2_DESC_DS, le16_to_cpu(tx_desc->info_ds));
+			data_ptr = le32_to_cpu(tx_desc->dptrl - (tx_q->skb[entry]->len - desc_data_len));
+
+			//printk("DMA unmap(): Q: %d    Entry %d   TX desc: 0x%px    0x%.8x  skb_len: %d   len: %d\n", (tx_q->offset + q), entry, tx_desc, data_ptr, tx_q->skb[entry]->len, desc_data_len);
+			dma_unmap_single(ndev->dev.parent, data_ptr, tx_q->skb[entry]->len, DMA_TO_DEVICE);
+
+			/* Timestamped TX skbs are free once the timestamp is fetched */
+			if(!txc)
+				dev_kfree_skb_any(tx_q->skb[entry]);
+
+			tx_q->skb[entry] = NULL;
+			data_ptr = 0;
+			/* TODO: stats */
+			//stats->tx_packets++;
+
+			free_num++;
+		} else {
+			tx_q->skb[entry] = NULL;
+
+			rsw2_dbg(MSG_GEN, "%s: Entry: %d Sum up length of multi frame: len=%u\n",
+					 ndev->name, entry, data_len);
+			free_num++;
+		}
+
+		/* TODO: update stats */
+		//	stats->tx_bytes += size;
+
+		tx_desc->die_dt = FIELD_PREP(RSW2_DESC_DT, DT_EEMPTY);
+		tx_q->dirty_desc++;
+		dma_wmb();
+	}
+
+	return free_num;
+}
+
+
+static int rswitch2_eth_close(struct net_device *ndev)
+{
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
+	struct rswitch2_physical_port *phy_port;
+	struct rswitch2_internal_port *intern_port;
+	int ret;
+
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+	phy_port = eth_port->phy_port;
+	intern_port = eth_port->intern_port;
+
+	if (intern_port != NULL) {
+		uint cur_q;
+		const uint num_of_tx_q = ARRAY_SIZE(intern_port->tx_q);
+
+		rsw2_info(MSG_GEN, "internal port close(): '%s'\n", ndev->name);
+
+		netif_tx_stop_all_queues(ndev);
+
+		rswitch2_disable_rx(ndev);
+
+		ret = rswitch2_gwca_set_state(rsw2, gwmc_disable);
+		if (ret != 0) {
+			rsw2_err(MSG_GEN,  "Failed to set GWCA disable state\n");
+		}
+
+		for (cur_q = 0; cur_q < num_of_tx_q; cur_q++) {
+			rswitch2_tx_free(ndev, cur_q);
+		}
+
+	} else if (phy_port != NULL) {
+		uint cur_q;
+		const uint num_of_rx_q = ARRAY_SIZE(phy_port->rx_q);
+		const uint num_of_tx_q = ARRAY_SIZE(phy_port->tx_q);
+
+		rsw2_info(MSG_GEN,  "physical port close(): '%s'\n", ndev->name);
+
+		del_timer(&eth_port->stat_timer);
+		del_timer(&phy_port->serdes_usxgmii_op_timer);
+
+		netif_carrier_off(ndev);
+		netif_tx_stop_all_queues(ndev);
+
+		for (cur_q = 0; cur_q < num_of_rx_q; cur_q++) {
+			napi_disable(&phy_port->rx_q[cur_q].napi);
+		}
+		for (cur_q = 0; cur_q < num_of_tx_q; cur_q++) {
+			rswitch2_tx_free(ndev, cur_q);
+		}
+		phy_stop(ndev->phydev);
+
+	}
+
+	return 0;
 }
 
 
@@ -1218,7 +1372,9 @@ static bool rswitch2_rx(struct net_device *ndev, int budget, int q)
 	/* Refill the RX ring buffers. */
 	for (; rx_q->cur_desc - rx_q->dirty_desc > 0; rx_q->dirty_desc++) {
 		entry = rx_q->dirty_desc % rx_q->entries;
-		//  printk("RX Refill Q: %d: RX desc. entry %d of %ld\n", q + rx_q->offset, entry, rx_q->entries);
+
+		rsw2_dbg(MSG_RXTX, "RX Refill Q: %d: RX desc. entry %d of %ld\n", q + rx_q->offset, entry, rx_q->entries);
+
 		rx_desc = &rx_q->desc_ring[entry];
 		rx_desc->info_ds = cpu_to_le16(RSW2_PKT_BUF_SZ);
 		rx_desc->info1 = 0;
@@ -1237,15 +1393,15 @@ static bool rswitch2_rx(struct net_device *ndev, int budget, int q)
 			 * should prevent DMA from happening...
 			 */
 			if (dma_mapping_error(rsw2->dev, dma_addr)) {
-				pr_err("Descriptor Mapping error\n");
+				rsw2_err(MSG_RXTX, "Descriptor Mapping error\n");
 				rx_desc->info_ds = cpu_to_le16(0);
 			}
 			rx_desc->dptrl = cpu_to_le32(dma_addr);
 			skb_checksum_none_assert(skb);
 			rx_q->skb[entry] = skb;
 		} else {
-			netdev_warn(ndev, "SKB already set: rx_desc->dptrl=0x%.8x\n",
-					rx_desc->dptrl);
+			rsw2_warn(MSG_RXTX, "%s: SKB already set: rx_desc->dptrl=0x%.8x\n",
+					ndev->name, rx_desc->dptrl);
 		}
 		/* Descriptor type must be set after all the above writes */
 		dma_wmb();
@@ -1288,7 +1444,7 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
 	reg_queue = (q + rx_q->offset) / 32;
 	bit_queue = (q + rx_q->offset) % 32;
 
-	//printk("RX poll. q: %d abs_q: %d   budget: %d reg_queue: %d bit_queue: %d\n", q, (q + rx_q->offset), budget, reg_queue, bit_queue);
+	rsw2_dbg(MSG_RXTX, "RX poll. q: %d abs_q: %d   budget: %d reg_queue: %d bit_queue: %d\n", q, (q + rx_q->offset), budget, reg_queue, bit_queue);
 
 	work_done = rswitch2_rx(ndev, budget, q);
 	rearm_irq = napi_complete_done(napi, work_done);
@@ -1301,91 +1457,10 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
 	}
 	else {
 		/* FIXME: Remove this. Just left for debugging purpose */
-		pr_debug("NAPI says: don't rearm\n");
+		rsw2_notice(MSG_RXTX, "NAPI says: don't rearm\n");
 	}
-
 
 	return work_done;
-}
-
-
-static int rswitch2_tx_free(struct net_device *ndev, int q)
-{
-	struct rswitch2_drv *rsw2;
-	struct rswitch2_eth_port *eth_port;
-	struct rswitch2_physical_port *phy_port;
-	struct rswitch2_internal_port *intern_port;
-	struct rsw2_tx_q_data *tx_q;
-	struct rswitch2_dma_ext_desc *tx_desc;
-	int free_num = 0;
-	int entry;
-	u32 data_ptr = 0;
-	unsigned int data_len = 0;
-
-
-	eth_port = netdev_priv(ndev);
-	rsw2 = eth_port->rsw2;
-
-	intern_port = eth_port->intern_port;
-	phy_port = eth_port->phy_port;
-	if(intern_port) {
-		tx_q = &intern_port->tx_q[q];
-	} else {
-		tx_q = &phy_port->tx_q[q];
-	}
-
-	while (tx_q->cur_desc - tx_q->dirty_desc > 0) {
-		entry = tx_q->dirty_desc % tx_q->entries;
-		tx_desc = &tx_q->desc_ring[entry];
-
-		if (FIELD_GET(RSW2_DESC_DT, tx_desc->die_dt) != DT_FEMPTY)
-			break;
-
-		/* Descriptor type must be checked before all other reads */
-		dma_rmb();
-
-
-		/* Free the original skb */
-		if (tx_q->skb[entry]) {
-			bool txc = false;
-			uint desc_data_len;
-
-			/* FIXME: Avoid using last descriptor - Add TS pending to tx_q */
-			txc = FIELD_GET(RSW2_DESC_INFO1_TXC, tx_desc->info1);
-
-			desc_data_len = FIELD_GET(RSW2_DESC_DS, le16_to_cpu(tx_desc->info_ds));
-			data_ptr = le32_to_cpu(tx_desc->dptrl - (tx_q->skb[entry]->len - desc_data_len));
-
-			//printk("DMA unmap(): Q: %d    Entry %d   TX desc: 0x%px    0x%.8x  skb_len: %d   len: %d\n", (tx_q->offset + q), entry, tx_desc, data_ptr, tx_q->skb[entry]->len, desc_data_len);
-			dma_unmap_single(ndev->dev.parent, data_ptr, tx_q->skb[entry]->len, DMA_TO_DEVICE);
-
-			/* Timestamped TX skbs are free once the timestamp is fetched */
-			if(!txc)
-				dev_kfree_skb_any(tx_q->skb[entry]);
-
-			tx_q->skb[entry] = NULL;
-			data_ptr = 0;
-			/* TODO: stats */
-			//stats->tx_packets++;
-
-			free_num++;
-		} else {
-			tx_q->skb[entry] = NULL;
-
-			netdev_dbg(ndev, "Entry: %d Sum up length of multi frame: len=%u\n",
-						entry, data_len);
-			free_num++;
-		}
-
-		/* TODO: update stats */
-		//	stats->tx_bytes += size;
-
-		tx_desc->die_dt = FIELD_PREP(RSW2_DESC_DT, DT_EEMPTY);
-		tx_q->dirty_desc++;
-		dma_wmb();
-	}
-
-	return free_num;
 }
 
 
@@ -1408,12 +1483,11 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 
 	/* Get current q */
 	q = skb_get_queue_mapping(skb);
-//	printk("start_xmit() on Q: %d\n", q);
-
 
 	eth_port = rswitch2_netdev_get_tx_q(ndev, q, &tx_q);
 	rsw2 = eth_port->rsw2;
-	//printk("start_xmit() on abs Q: %d  Q: %d\n", (q + tx_q->offset), q);
+	rsw2_dbg(MSG_RXTX, "start_xmit() on abs Q: %d  Q: %d\n", (q + tx_q->offset), q);
+
 	/* Free unused descriptors */
 	rswitch2_tx_free(ndev, q);
 
@@ -1425,7 +1499,7 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 
 	dma_addr = dma_map_single(rsw2->dev, skb->data, skb->len, DMA_TO_DEVICE);
 	if (dma_mapping_error(rsw2->dev, dma_addr)) {
-		pr_err("DMA mapping failed\n");
+		rsw2_err(MSG_RXTX, "DMA mapping failed\n");
 		goto unmap;
 	}
 
@@ -1438,7 +1512,7 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 		/* FIXME: atomic  ?? */
 		tx_q->cur_desc++;
 		tx_desc = &tx_q->desc_ring[entry];
-//		printk("Using TX desc. 0x%px\n", tx_desc);
+		rsw2_dbg(MSG_RXTX, "Using TX desc. 0x%px\n", tx_desc);
 
 
 		//tx_desc->info_ds = FIELD_PREP(RSW2_DESC_DS, cpu_to_le16(data_len));
@@ -1451,7 +1525,7 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 			uint port_num = eth_port->port_num - rsw2->num_of_cpu_ports;
 
 			if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) {
-				//printk("HW TS xmit(): Tag-Entry: %d port_num: %d skb: 0x%px\n", ts_tag_entry, port_num, skb);
+				rsw2_dbg(MSG_RXTX, "HW TS xmit(): Tag-Entry: %d port_num: %d skb: 0x%px\n", ts_tag_entry, port_num, skb);
 				skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 
 
@@ -1479,7 +1553,6 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 		struct rswitch2_dma_ext_desc *tx_start_desc;
 		do {
 			u8 dt_type;
-			//printk("start_xmit():3.2\n");
 
 			entry = tx_q->cur_desc % tx_q->entries;
 
@@ -1488,22 +1561,23 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 			tx_desc = &tx_q->desc_ring[entry];
 			tx_q->skb[entry] = NULL;
 
-	//		printk("Using entry: %d    TX desc. 0x%px\n", entry, tx_desc);
+			rsw2_dbg(MSG_RXTX, "Using entry: %d    TX desc. 0x%px\n", entry, tx_desc);
 			tx_desc->dptrl = cpu_to_le32(dma_addr + (skb->len - data_len));
 			tx_desc->info1 = 0;
-	//		printk("data_len: %d  skb_len: %d\n", data_len, skb->len);
+			rsw2_dbg(MSG_RXTX, "data_len: %d  skb_len: %d\n", data_len, skb->len);
 
 			if (data_len == skb->len) {
-				//printk("FSTART\n");
+				rsw2_dbg(MSG_RXTX, "FSTART\n");
 				tx_start_desc = tx_desc;
 				dt_type = FIELD_PREP(RSW2_DESC_DT, DT_FSTART);
 				tx_desc->info_ds = cpu_to_le16(RSWITCH2_MAX_DESC_SIZE);
 				data_len -= RSWITCH2_MAX_DESC_SIZE;
 				if (eth_port->phy_port) {
 					uint ts_tag_entry = eth_port->phy_port->ts_tag % MAX_TS_Q_ENTRIES_PER_PORT;
-					//uint port_num = eth_port->port_num - rsw2->num_of_cpu_ports;
+
 					if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) {
-						//printk("HW TS xmit() MULTI: Tag-Entry: %d port_num: %d skb: 0x%px\n", ts_tag_entry, port_num, skb);
+						rsw2_dbg(MSG_RXTX, "HW TS xmit() MULTI: Tag-Entry: %d port_num: %d skb: 0x%px\n", ts_tag_entry, (eth_port->port_num - rsw2->num_of_cpu_ports), skb);
+
 						skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 						tx_desc->info1 |= FIELD_PREP(RSW2_DESC_INFO1_TXC, 1);
 						tx_desc->info1 |= FIELD_PREP(RSW2_DESC_INFO1_TSUN, ts_tag_entry);
@@ -1513,8 +1587,8 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 					skb_tx_timestamp(skb);
 				}
 			} else if (data_len <= RSWITCH2_MAX_DESC_SIZE) {
-				//printk("FEND\n");
-				//printk("Multi TX: Q: %d Entry: %d    TX desc. 0x%px  DMA addr: 0x%.8x  skb_len: %d\n", (q + tx_q->offset), entry, tx_desc, dma_addr, skb->len);
+				rsw2_dbg(MSG_RXTX, "FEND\n");
+				rsw2_dbg(MSG_RXTX, "Multi TX: Q: %d Entry: %d    TX desc. 0x%px  DMA addr: 0x%.8x  skb_len: %d\n", (q + tx_q->offset), entry, tx_desc, dma_addr, skb->len);
 
 				dt_type = FIELD_PREP(RSW2_DESC_DT, DT_FEND);
 
@@ -1524,7 +1598,7 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 				tx_desc->info1 |= FIELD_PREP(RSW2_DESC_INFO1_TSUN, 0);
 				data_len = 0;
 			} else {
-				//printk("FMID\n");
+				rsw2_dbg(MSG_RXTX, "FMID\n");
 				dt_type = FIELD_PREP(RSW2_DESC_DT, DT_FMID);
 				tx_desc->info_ds = cpu_to_le16(RSWITCH2_MAX_DESC_SIZE);
 				data_len -= RSWITCH2_MAX_DESC_SIZE;
@@ -1547,7 +1621,6 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 		tx_start_desc->die_dt = FIELD_PREP(RSW2_DESC_DT, DT_FSTART);
 
 	}
-//	printk("start_xmit():4\n");
 
 	/* On multi descriptor transmit, the last entry holds the skb data */
 	tx_q->skb[entry] = skb;
@@ -1556,7 +1629,7 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 	reg_queue = (q + tx_q->offset) / 32;
 	bit_queue = (q + tx_q->offset) % 32;
 
-//	printk("Write kick to RSW2_GCWA_GWTRC(%d) bit %d\n", reg_queue, bit_queue);
+	rsw2_dbg(MSG_RXTX, "Write kick to RSW2_GCWA_GWTRC(%d) bit %d\n", reg_queue, bit_queue);
 	spin_lock_irqsave(&rsw2->lock, flags);
 	reg_val = GWTRC_TSR(bit_queue);
 	iowrite32(reg_val, rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWTRC(reg_queue));
@@ -1605,8 +1678,8 @@ static void rswitch2_get_ts(struct rswitch2_drv *rsw2) {
 		phy_port = eth_port->phy_port;
 		BUG_ON(!phy_port);
 
-		//printk("Got TS for skb: 0x%px\n", phy_port->ts_skb[tsun]);
-		//printk("Entry %d TX timestamp (%.lld:%.ld) for src port %d, dest port %d, tag; %d\n", entry, ts.tv_sec, ts.tv_nsec, src_port_num, dest_port_num, tsun);
+		rsw2_dbg(MSG_RXTX, "Got TS for skb: 0x%px\n", phy_port->ts_skb[tsun]);
+		rsw2_dbg(MSG_RXTX, "Entry %d TX timestamp (%.lld:%.ld) for src port %d, dest port %d, tag; %d\n", entry, ts.tv_sec, ts.tv_nsec, src_port_num, dest_port_num, tsun);
 
 		skb_tstamp_tx(phy_port->ts_skb[tsun], &shhwtstamps);
 
@@ -1631,13 +1704,11 @@ static irqreturn_t rswitch2_status_interrupt(int irq, void *dev_id)
 	irqreturn_t ret = IRQ_HANDLED;
 	unsigned long flags;
 
-	//printk("Status IRQ!\n");
-
-	// Read Timestamp IRQ status GWTSDIS
+	/* Read Timestamp IRQ status GWTSDIS */
 	spin_lock_irqsave(&rsw2->lock, flags);
 	reg_val = ioread32(rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWTSDIS);
 
-	//printk("GWTSDIS: 0x%.8x\n", reg_val);
+	rsw2_dbg(MSG_GEN, "GWTSDIS: 0x%.8x\n", reg_val);
 	if((reg_val & BIT(0)) == BIT(0)) {
 		/* Mask IRQ */
 		iowrite32(BIT(0), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWTSDID);
@@ -1669,7 +1740,6 @@ static irqreturn_t rswitch2_eth_interrupt(int irq, void *dev_id)
 	u32 irq_status[RSWITCH2_CHAIN_REG_NUM];
 	u32 irq_active[RSWITCH2_CHAIN_REG_NUM];
 	unsigned long flags;
-	//printk("Got IRQ\n");
 
 	spin_lock_irqsave(&rsw2->lock, flags);
 	for (reg_num = 0; reg_num < RSWITCH2_CHAIN_REG_NUM; reg_num++) {
@@ -1688,7 +1758,6 @@ static irqreturn_t rswitch2_eth_interrupt(int irq, void *dev_id)
 				uint port_num;
 				uint port_q;
 				cur_queue = (reg_num * RSWITCH2_BITS_PER_REG) + reg_bit;
-				//printk("Got IRQ for Q: %d\n", cur_queue);
 
 				port_num = rsw2->port_backref[cur_queue].port_num;
 				eth_port = rsw2->ports[port_num];
@@ -1705,7 +1774,7 @@ static irqreturn_t rswitch2_eth_interrupt(int irq, void *dev_id)
 					/* Although this is no real problem, it shouldn't happen.
 					 * It wastes CPU time with unnecessary IRQ handling
 					 */
-					netdev_warn(eth_port->ndev, "NAPI is already running Q: %d\n", cur_queue);
+					rsw2_warn(MSG_RXTX, "NAPI is already running Q: %d\n", cur_queue);
 			}
 		}
 	}
@@ -1800,7 +1869,7 @@ static int rswitch2_hwstamp_get(struct net_device *ndev, struct ifreq *req)
 
 
 	if(intern_port) {
-		printk("HW get intern port!?\n");
+		rsw2_err(MSG_GEN, "HW get intern port!?\n");
 		return -EINVAL;
 	}
 	rsw2 = eth_port->rsw2;
@@ -1842,7 +1911,7 @@ static int rswitch2_hwstamp_set(struct net_device *ndev, struct ifreq *req)
 	phy_port = eth_port->phy_port;
 
 	if(intern_port) {
-		printk("HW set intern port!?\n");
+		rsw2_err(MSG_GEN, "HW set intern port!?\n");
 		return -EINVAL;
 	}
 
@@ -1888,16 +1957,21 @@ static int rswitch2_hwstamp_set(struct net_device *ndev, struct ifreq *req)
 
 static int rswitch2_eth_do_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 {
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
 	struct phy_device *phydev = ndev->phydev;
 
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+
 	if (!netif_running(ndev)) {
-		printk("netif not running\n");
+		rsw2_warn(MSG_GEN, "netif not running\n");
 
 		return -EINVAL;
 	}
 
 	if (!phydev) {
-		printk("no phydev\n");
+		rsw2_warn(MSG_GEN, "no phydev\n");
 		return -ENODEV;
 	}
 	switch (cmd) {
@@ -1994,41 +2068,6 @@ static void rswitch2_intern_set_mac_addr(struct net_device *ndev)
 }
 
 
-
-static struct device_node *rswitch2_get_port_node(struct net_device *ndev, unsigned int port_num)
-{
-	struct device_node *ports, *port;
-	int err = 0;
-	u32 index;
-
-	struct rswitch2_drv *rsw2;
-	struct rswitch2_eth_port *eth_port;
-
-	eth_port = netdev_priv(ndev);
-	rsw2 = eth_port->rsw2;
-
-	//dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-	ports = of_get_child_by_name(rsw2->dev->of_node, "ports");
-	if (!ports)
-		return NULL;
-
-	//dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-	for_each_child_of_node(ports, port) {
-		err = of_property_read_u32(port, "reg", &index);
-		if (err < 0)
-			return NULL;
-		if (index == port_num)
-			break;
-	}
-	//dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-	of_node_put(ports);
-	//dev_info(rsw2->dev, "dbg line: %d\n", __LINE__);
-	dev_info(rsw2->dev, "Got port node: 0x%px\n", port);
-
-
-	return port;
-}
-
 static int rswitch2_eth_mac_addr(struct net_device *ndev, void *p)
 {
 	struct rswitch2_drv *rsw2;
@@ -2047,7 +2086,7 @@ static int rswitch2_eth_mac_addr(struct net_device *ndev, void *p)
 	new_macaddr = (u8 *)addr->sa_data;
 	memcpy(old_macaddr, ndev->dev_addr, ETH_ALEN);
 
-	dev_dbg(rsw2->dev, "Update MAC for '%s' from %.2X:%.2X:%.2X:%.2X:%.2X:%.2X "
+	rsw2_dbg(MSG_GEN, "Update MAC for '%s' from %.2X:%.2X:%.2X:%.2X:%.2X:%.2X "
 							                 "to %.2X:%.2X:%.2X:%.2X:%.2X:%.2X\n",
 			ndev->name,
 			old_macaddr[0], old_macaddr[1],
@@ -2113,19 +2152,19 @@ static int rswitch2_ts_ring_init(struct rswitch2_drv *rsw2)
 	}
 	rsw2->bat_ts_addr = bat_entry;
 
-	printk("BAT TS: BAT entry is at 0x%px DMA: (DMA: 0x%llx)\n", bat_entry, rsw2->bat_ts_dma_addr);
+	rsw2_info(MSG_RXTX, "BAT TS: BAT entry is at 0x%px DMA: (DMA: 0x%llx)\n", bat_entry, rsw2->bat_ts_dma_addr);
 
 
 	ring_entries = rsw2->num_of_tsn_ports * MAX_TS_Q_ENTRIES_PER_PORT;
 	ts_ring_size = sizeof(*ts_desc) * (ring_entries + 1);
 
-	printk("rswitch2_ts_ring_init(): ring_size: %ld\n", ts_ring_size);
+	rsw2_dbg(MSG_RXTX, "rswitch2_ts_ring_init(): ring_size: %ld\n", ts_ring_size);
 
 	rsw2->ts_desc_ring = dma_alloc_coherent(rsw2->dev, ts_ring_size,
 											&rsw2->ts_desc_dma, GFP_KERNEL);
 
 	if (!rsw2->ts_desc_ring) {
-		pr_err("Failed to alloc memory for TS descriptor ring\n");
+		rsw2_err(MSG_RXTX, "Failed to alloc memory for TS descriptor ring\n");
 		ret = -ENOMEM;
 		goto dma_alloc_err;
 	}
@@ -2138,7 +2177,7 @@ static int rswitch2_ts_ring_init(struct rswitch2_drv *rsw2)
 		ts_desc->die_dt |= FIELD_PREP(RSW2_DESC_DIE, 1);
 	}
 
-	printk("TS Ring is at 0x%px (DMA: 0x%llx)\n", rsw2->ts_desc_ring, rsw2->ts_desc_dma);
+	rsw2_dbg(MSG_RXTX, "TS Ring is at 0x%px (DMA: 0x%llx)\n", rsw2->ts_desc_ring, rsw2->ts_desc_dma);
 
 	/* Close the loop */
 	dma_desc = (struct rswitch2_dma_ext_desc *)ts_desc;
@@ -2187,16 +2226,13 @@ static int rswitch2_bat_init(struct rswitch2_drv *rsw2)
 	if (!rsw2->bat_addr) {
 		ret = -ENOMEM;
 		goto bat_ptr_alloc_err;
-
 	}
 	bat_entry = dma_alloc_coherent(rsw2->dev, bat_size, &rsw2->bat_dma_addr, GFP_KERNEL);
 	if (!bat_entry) {
 		ret = -ENOMEM;
 		goto dma_alloc_err;
 	}
-	printk("BAT is at 0x%px (DMA: 0x%llx)\n", rsw2->bat_addr, rsw2->bat_dma_addr);
-
-
+	rsw2_info(MSG_RXTX, "BAT is at 0x%px (DMA: 0x%llx)\n", rsw2->bat_addr, rsw2->bat_dma_addr);
 
 	/* Init BE RX BAT */
 	for (i = rsw2_be_rx_q_0; i < rsw2_be_rx_q_max_entry; i++) {
@@ -2263,12 +2299,8 @@ static int rswitch2_rx_ring_format(struct net_device *ndev, int q)
 	rsw2 = eth_port->rsw2;
 
 	ring_size = sizeof(*rx_q->desc_ring) * (rx_q->entries + 1);
-/*
-	printk("Q = %d,  absolute Q = %d\n", q, (q + rx_q->offset));
-	printk("rx_q->desc_ring = 0x%px\n", rx_q->desc_ring);
-	printk("entries = %d\n", ring_size);
-*/
 	memset(rx_q->desc_ring, 0, ring_size);
+
 	for (i = 0, rx_desc = rx_q->desc_ring; i < rx_q->entries; i++, rx_desc++) {
 		rx_desc->info_ds = cpu_to_le16(RSW2_PKT_BUF_SZ);
 
@@ -2619,6 +2651,61 @@ static int rswitch2_get_ts_info(struct net_device *ndev, struct ethtool_ts_info 
 	return 0;
 }
 
+static int rswitch2_phy_ethtool_set_link_ksettings(struct net_device *ndev,
+				   const struct ethtool_link_ksettings *cmd)
+{
+	struct phy_device *phydev = ndev->phydev;
+
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
+	u8 autoneg = cmd->base.autoneg;
+	u8 duplex = cmd->base.duplex;
+	u32 speed = cmd->base.speed;
+
+	if (!phydev)
+		return -ENODEV;
+
+
+	if (cmd->base.phy_address != phydev->mdio.addr)
+		return -EINVAL;
+
+	linkmode_copy(advertising, cmd->link_modes.advertising);
+
+	/* We make sure that we don't pass unsupported values in to the PHY */
+	linkmode_and(advertising, advertising, phydev->supported);
+
+	/* Verify the settings we care about. */
+	if (autoneg != AUTONEG_ENABLE && autoneg != AUTONEG_DISABLE)
+		return -EINVAL;
+
+	if (autoneg == AUTONEG_ENABLE && linkmode_empty(advertising))
+		return -EINVAL;
+
+	if (autoneg == AUTONEG_DISABLE &&
+	    (
+	     (duplex != DUPLEX_HALF &&
+	      duplex != DUPLEX_FULL)))
+		return -EINVAL;
+
+	phydev->autoneg = autoneg;
+
+	if (autoneg == AUTONEG_DISABLE) {
+		phydev->speed = speed;
+		phydev->duplex = duplex;
+	}
+
+	linkmode_copy(phydev->advertising, advertising);
+
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
+			 phydev->advertising, autoneg == AUTONEG_ENABLE);
+
+	phydev->master_slave_set = cmd->base.master_slave_cfg;
+	phydev->mdix_ctrl = cmd->base.eth_tp_mdix_ctrl;
+
+	/* Restart the PHY */
+	phy_start_aneg(phydev);
+
+	return 0;
+}
 
 
 static const struct ethtool_ops rswitch2_ethtool_ops = {
@@ -2633,7 +2720,7 @@ static const struct ethtool_ops rswitch2_ethtool_ops = {
 	.set_ringparam		= rswitch2_set_ringparam,
 	.get_ts_info		= rswitch2_get_ts_info,
 	.get_link_ksettings	= phy_ethtool_get_link_ksettings,
-	.set_link_ksettings	= phy_ethtool_set_link_ksettings,
+	.set_link_ksettings	= rswitch2_phy_ethtool_set_link_ksettings,
 	.get_wol			= NULL,
 	.set_wol			= NULL,
 };
@@ -2643,12 +2730,14 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 {
 	u32 reg_val;
 	int speed;
+	struct rswitch2_drv *rsw2;
 	struct rswitch2_eth_port *eth_port;
 	struct rswitch2_physical_port *phy_port;
 	phy_interface_t phy_iface;
 
 	eth_port = netdev_priv(port_ndev);
 	phy_port = eth_port->phy_port;
+	rsw2 = eth_port->rsw2;
 	BUG_ON(phy_port == NULL);
 
 	/* 1 Cycle extra hold time */
@@ -2659,7 +2748,8 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 
 	/* speed for MAC will later updated when link comes up */
 	//phy_iface = phy_port->phy_iface;  //not yet initialised here
-	phy_iface = eth_port->rsw2->port_data[eth_port->port_num-1].phy_iface;
+	//phy_iface = eth_port->rsw2->port_data[eth_port->port_num-1].phy_iface;
+	phy_iface = phy_port->phy_iface;
 	switch (phy_iface) {
 		case PHY_INTERFACE_MODE_SGMII :
 			//speed may chage during link up. MII is fixed
@@ -2674,10 +2764,9 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 			reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_xgmii);
 			break;
 		default:
-			dev_err(eth_port->rsw2->dev, "Unsupported MAC xMII format %s (%d) on port %d\n",phy_modes(phy_iface), phy_iface, eth_port->port_num-1);
+			rsw2_err(MSG_GEN, "Unsupported MAC xMII format %s (%d) on port %d\n",phy_modes(phy_iface), phy_iface, eth_port->port_num-1);
 			//return -EINVAL;
 	}
-	dev_info(eth_port->rsw2->dev, "etha%d uses %s at %d Mbps\n", eth_port->port_num-1, phy_modes(phy_iface), speed);
 
 	iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
 
@@ -2705,26 +2794,27 @@ static void rswitch2_init_mac_addr(struct net_device *ndev)
 	struct rswitch2_drv *rsw2;
 	struct rswitch2_eth_port *eth_port;
 	struct device_node *port_node;
+//	struct device_node *dev_node;
 	u8 *macaddr;
 	int ret;
 
 	eth_port = netdev_priv(ndev);
 	rsw2 = eth_port->rsw2;
 
-	//printk("MAC: Port: %d  ndev->name: %s ndev->dev:'%s'   ndev->dev.init_name:'%s'\n", eth_port->port_num, ndev->name, dev_name(&ndev->dev), ndev->dev.init_name);
 
 	port_node = rswitch2_get_port_node(ndev, (eth_port->port_num - rsw2->num_of_cpu_ports));
+//	dev_node = ndev->dev.of_node;
 	ndev->dev.of_node = port_node;
 
 	if(eth_port->intern_port) {
 		ret = eth_platform_get_mac_address(rsw2->dev, ndev->dev_addr);
 		if ((ret == 0) && is_valid_ether_addr(ndev->dev_addr)) {
 			/* device tree or NVMEM values are valid so use them */
-			printk("MAC: '%s' VALID MAC from eth_platform_get_mac_address()\n", ndev->name);
+			rsw2_info(MSG_GEN, "MAC: '%s' Got valid MAC from eth_platform_get_mac_address()\n", ndev->name);
 
 		}
 		else {
-			printk("MAC: '%s' INVALID from eth_platform_get_mac_address()\n", ndev->name);
+			rsw2_info(MSG_GEN, "MAC: '%s' INVALID from eth_platform_get_mac_address()\n", ndev->name);
 			eth_hw_addr_random(ndev);
 		}
 	}
@@ -2735,24 +2825,25 @@ static void rswitch2_init_mac_addr(struct net_device *ndev)
 		 */
 		ret = eth_platform_get_mac_address(&ndev->dev, ndev->dev_addr);
 		if((ret == 0) && is_valid_ether_addr(ndev->dev_addr)) {
-			printk("MAC: '%s' VALID MAC from eth_platform_get_mac_address()\n", ndev->name);
+			rsw2_info(MSG_GEN, "MAC: '%s' VALID MAC from eth_platform_get_mac_address()\n", ndev->name);
 		}
 		else if((nvmem_get_mac_address(&ndev->dev, ndev->dev_addr) == 0) &&
 				is_valid_ether_addr(ndev->dev_addr)) {
-				printk("MAC: '%s' VALID from nvmem_get_mac_address()\n", ndev->name);
+			rsw2_info(MSG_GEN, "MAC: '%s' VALID from nvmem_get_mac_address()\n", ndev->name);
 		}
 		else {
-			printk("MAC: '%s' using random MAC\n", ndev->name);
+			rsw2_info(MSG_GEN,"MAC: '%s' using random MAC\n", ndev->name);
 			eth_hw_addr_random(ndev);
 		}
 	}
 	macaddr = (u8 *)ndev->dev_addr;
-	dev_info(rsw2->dev, "Assigned MAC %.2X:%.2X:%.2X:%.2X:%.2X:%.2X to '%s'\n",
+	rsw2_notice(MSG_GEN,"Assigned MAC %.2X:%.2X:%.2X:%.2X:%.2X:%.2X to '%s'\n",
 			macaddr[0], macaddr[1],
 			macaddr[2], macaddr[3],
 			macaddr[4], macaddr[5],
 			ndev->name);
 
+//	ndev->dev.of_node = dev_node;
 
 }
 
@@ -2779,12 +2870,13 @@ static int rswitch2_mdio_access(struct net_device *ndev, bool read,
 	int pop = read ? MDIO_READ_C45 : MDIO_WRITE_C45;
 	u32 reg_val;
 	int ret;
-
+	struct rswitch2_drv *rsw2;
 	struct rswitch2_physical_port *phy_port;
 	struct rswitch2_eth_port *eth_port;
 
 	eth_port = netdev_priv(ndev);
 	phy_port = eth_port->phy_port;
+	rsw2 = eth_port->rsw2;
 
 	/* No match device */
 	if (devad == 0xffffffff)
@@ -2801,7 +2893,7 @@ static int rswitch2_mdio_access(struct net_device *ndev, bool read,
 						reg_val & MMIS1_PAACS,
 						RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 	if (ret != 0) {
-		netdev_err(ndev, "RMAC setting MDIO address timed out\n");
+		rsw2_err(MSG_GEN, "RMAC setting MDIO address timed out\n");
 		return ret;
 	}
 
@@ -2818,7 +2910,7 @@ static int rswitch2_mdio_access(struct net_device *ndev, bool read,
 							reg_val & MMIS1_PRACS,
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
 		if (ret != 0) {
-			netdev_err(ndev, "RMAC read MDIO timed out\n");
+			rsw2_err(MSG_GEN, "RMAC read MDIO timed out\n");
 			return ret;
 		}
 		/* Read data */
@@ -2835,7 +2927,7 @@ static int rswitch2_mdio_access(struct net_device *ndev, bool read,
 		iowrite32((data << 16) | (pop << 13) | (devad << 8) | (phyad << 3) | reg_val,
 				phy_port->rmac_base_addr + RSW2_RMAC_MPSM);
 
-		//printk("RSW2 MDIO write: phyad: %d, devad: %d, regad: %04x, data:%04x \n", phyad, devad, regad, data);
+		rsw2_dbg(MSG_GEN, "RSW2 MDIO write: phyad: %d, devad: %d, regad: %04x, data:%04x \n", phyad, devad, regad, data);
 		ret = readl_poll_timeout(phy_port->rmac_base_addr + RSW2_RMAC_MMIS1, reg_val,
 							reg_val & MMIS1_PWACS,
 							RSWITCH2_REG_POLL_DELAY, RSWITCH2_REG_POLL_TIMEOUT);
@@ -2855,8 +2947,6 @@ static int rswitch2_mdio_read(struct mii_bus *bus, int addr, int regnum)
 	struct net_device *ndev = bus->priv;
 	int mode, devad, regad;
 
-	//printk("rswitch2_mdio_read(%lx, %x, %x)\n",  (long unsigned)((struct rswitch2_eth_port *)netdev_priv(ndev))->phy_port->rmac_base_addr, addr, regnum);
-
 	mode = regnum & MII_ADDR_C45;
 	devad = (regnum >> MII_DEVADDR_C45_SHIFT) & 0x1f;
 	regad = regnum & MII_REGADDR_C45_MASK;
@@ -2864,9 +2954,11 @@ static int rswitch2_mdio_read(struct mii_bus *bus, int addr, int regnum)
 	/* Not support Clause 22 access method */
 	if (!mode) {
 		// FIXME
-		printk("%s(): NOT C45 regnum=%04x  return 0\n", __FUNCTION__, regnum);
+		//printk("NOT C45 regnum=%04x  return 0\n", regnum);
+
 		return 0;
 	}
+	//printk("rswitch2_mdio_read(): '%s' addr: 0x%.4x  devad: 0x%.4x  regad: 0x%.4x", ndev->name, addr, devad, regad);
 	return rswitch2_mdio_access(ndev, true, addr, devad, regad, 0);
 }
 
@@ -2875,8 +2967,6 @@ static int rswitch2_mdio_write(struct mii_bus *bus, int addr, int regnum, u16 va
 	struct net_device *ndev = bus->priv;
 	int mode, devad, regad;
 
-	//printk("rswitch2_mdio_write(%lx, %x, %x, %04x)\n",   (long unsigned)((struct rswitch2_eth_port *)netdev_priv(ndev))->phy_port->rmac_base_addr, addr, regnum, val);
-
 	mode = regnum & MII_ADDR_C45;
 	devad = (regnum >> MII_DEVADDR_C45_SHIFT) & 0x1f;
 	regad = regnum & MII_REGADDR_C45_MASK;
@@ -2884,10 +2974,11 @@ static int rswitch2_mdio_write(struct mii_bus *bus, int addr, int regnum, u16 va
 	/* Not support Clause 22 access method */
 	if (!mode) {
 		// FIXME
-		printk("%s(): NOT C45 ignore write\n", __FUNCTION__);
+		//printk("NOT C45 regnum=%04x  return 0\n", regnum);
+
 		return 0;
 	}
-
+	//printk("rswitch2_mdio_write(): '%s' addr: 0x%.4x  devad: 0x%.4x  regad: 0x%.4x  val: 0x%.4x", ndev->name, addr, devad, regad, val);
 	return rswitch2_mdio_access(ndev, false, addr, devad, regad, val);
 }
 
@@ -2901,6 +2992,8 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 {
 	struct mii_bus *mii_bus;
 	struct device_node *dn_port;
+	struct device_node *dn_phy;
+	int phy_addr;
 	int ret;
 
 	struct rswitch2_drv *rsw2;
@@ -2921,7 +3014,7 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 
 
 	mii_bus->name = "rswitch_mii";
-	sprintf(mii_bus->id, RSW2_PORT_BASENAME, port_num);
+	sprintf(mii_bus->id, ndev->name, port_num);
 	mii_bus->priv = ndev;
 	mii_bus->read = rswitch2_mdio_read;
 	mii_bus->write = rswitch2_mdio_write;
@@ -2929,24 +3022,77 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 	mii_bus->parent = rsw2->dev;
 
 	dn_port = rswitch2_get_port_node(ndev, port_num);
-	of_node_get(dn_port);
+	if(!dn_port) {
+		return -ENODEV;
+	}
+
+	dn_phy = of_parse_phandle(dn_port, "phy-handle", 0);
+	if(!dn_port) {
+		of_node_put(dn_port);
+		return -ENODEV;
+	}
 
 	ret = of_mdiobus_register(mii_bus, dn_port);
 	if (ret < 0) {
-		dev_info(rsw2->dev, "MDIO bus register failed: %d\n", ret);
-		mdiobus_free(mii_bus);
-		goto out;
+		rsw2_err(MSG_GEN, "MDIO bus register failed: %d\n", ret);
+		goto mdio_bus_free;
 	}
-	dev_info(rsw2->dev, "mii_bus->dev: '%s'\n", mii_bus->dev.init_name);
+	phy_addr = of_mdio_parse_addr(&mii_bus->dev, dn_phy);
+	//dev_info(rsw2->dev, "MDIO: Phy is at addr %d\n", phy_addr);
 
+	phy_port->phy = to_phy_device(&mii_bus->mdio_map[phy_addr]->dev);
+	if(!phy_port->phy) {
+		rsw2_err(MSG_GEN, "MDIO bus register, failed to get phy\n");
+		goto mdio_unreg;
+	}
+	phy_port->phy->interface = phy_port->phy_iface;
 	phy_port->mii_bus = mii_bus;
 
-out:
+	of_node_put(dn_phy);
+	of_node_put(dn_port);
+
+	return 0;
+
+
+mdio_unreg:
+	mdiobus_unregister(phy_port->mii_bus);
+
+mdio_bus_free:
+	mdiobus_free(phy_port->mii_bus);
+
+	of_node_put(dn_phy);
 	of_node_put(dn_port);
 
 	return ret;
 }
 
+static int rswitch2_get_phy_config(struct net_device *ndev)
+{
+	struct rswitch2_drv *rsw2;
+	struct rswitch2_eth_port *eth_port;
+	struct rswitch2_physical_port *phy_port;
+	struct device_node *port_node;
+	int ret;
+
+	eth_port = netdev_priv(ndev);
+	rsw2 = eth_port->rsw2;
+	phy_port = eth_port->phy_port;
+
+	port_node = rswitch2_get_port_node(ndev, (eth_port->port_num - rsw2->num_of_cpu_ports));
+	if(port_node) {
+		ret = of_get_phy_mode(port_node, &phy_port->phy_iface);
+		if (ret != 0) {
+			rsw2_err(MSG_GEN, "of_get_phy_mode failed\n");
+			return -ENODEV;
+		}
+		else {
+			rsw2_info(MSG_GEN, "Got phy_iface mode: %s (%d)\n", phy_modes(phy_port->phy_iface), phy_port->phy_iface);
+		}
+	}
+	of_node_put(port_node);
+
+	return 0;
+}
 
 static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int port_num)
 {
@@ -2960,20 +3106,13 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 	size_t num_of_tx_queues;
 	uint q;
 
-	/*
-	port_ndev = alloc_etherdev(sizeof(struct rswitch2_eth_port));
-	if (!port_ndev)
-		return -ENOMEM;
-*/
-
-
 	port_ndev = alloc_etherdev_mqs(sizeof(struct rswitch2_eth_port), 1, 1);
 	if (!port_ndev)
 		return -ENOMEM;
 
 	phy_port = kzalloc(sizeof(struct rswitch2_physical_port), GFP_KERNEL);
 	if (phy_port < 0) {
-		dev_err(rsw2->dev, "Failed to allocate physical port\n");
+		rsw2_err(MSG_GEN,  "Failed to allocate physical port\n");
 		ret = -ENOMEM;
 		goto phy_port_err;
 	}
@@ -2988,8 +3127,10 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 	eth_port->phy_port = phy_port;
 
 	port_ndev->base_addr = (unsigned long)rsw2->etha_base_addrs[port_num];
+	rsw2_dbg(MSG_GEN, "Phy port %d: rsw2->etha_base_addrs[%d] = 0x%px\n", port_num, port_num, rsw2->etha_base_addrs[port_num]);
 
-	dev_info(rsw2->dev, "Assigning irq %d to physical port %d\n", rsw2->rxtx_irqs[port_num], port_num);
+
+	/* FIXME */
 	port_ndev->irq = rsw2->rxtx_irqs[port_num];
 
 	phy_port->rmac_base_addr = rsw2->etha_base_addrs[port_num] + RSW2_RMAC_OFFSET;
@@ -3003,77 +3144,50 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 
 	ret = dev_alloc_name(port_ndev, port_ndev->name);
 	if (ret < 0) {
-		printk("Failed to alloc dev_name()\n");
+		rsw2_err(MSG_GEN, "Failed to alloc dev_name()\n");
 		goto phy_port_err;
 	}
 	dev_set_name(&port_ndev->dev, port_ndev->name);
 
-	//spin_lock_init(&eth_port->lock);
-//	eth_port->lock.rlock.magic = 0xdead4ea0 + eth_port->port_num;
-
 	ret = rswitch2_emac_set_state(port_ndev, emac_disable);
 	if (ret < 0) {
-		dev_err(rsw2->dev, "Port set state 'disable' failed\n");
+		rsw2_err(MSG_GEN, "Port set state 'disable' failed\n");
 		goto cleanup_phy_port;
 	}
 
 	ret = rswitch2_emac_set_state(port_ndev, emac_reset);
 	if (ret < 0) {
-		dev_err(rsw2->dev, "Port set state 'reset' failed\n");
+		rsw2_err(MSG_GEN, "Port set state 'reset' failed\n");
 		goto cleanup_phy_port;
 	}
-
 
 	ret = rswitch2_emac_set_state(port_ndev, emac_disable);
 	if (ret < 0) {
-		dev_err(rsw2->dev, "Port set state 'disable' failed\n");
+		rsw2_err(MSG_GEN, "Port set state 'disable' failed\n");
 		goto cleanup_phy_port;
 	}
-
-
 
 	ret = rswitch2_emac_set_state(port_ndev, emac_config);
 	if (ret < 0) {
-		netdev_err(port_ndev, "Port set state 'config' failed\n");
+		rsw2_err(MSG_GEN, "Port set state 'config' failed\n");
 		goto cleanup_phy_port;
 	}
+
+	/* FIXME: Error handling */
+	rswitch2_get_phy_config(port_ndev);
 
 	/* MAC related setup */
 	rswitch2_init_mac_addr(port_ndev);
 	rswitch2_port_set_mac_addr(port_ndev);
 	rswitch2_init_port_mac(port_ndev);
 
-	/*ret = rswitch2_emac_set_state(port_ndev, emac_disable);
-	if (ret < 0) {
-		dev_err(rsw2->dev, "Port set state 'disable' failed\n");
-		goto cleanup_phy_port;
-	}*/
-
-/* Change to OPERATION Mode */
+	/* Change to OPERATION Mode */
 	ret = rswitch2_emac_set_state(port_ndev, emac_operation);
 	if (ret < 0) {
 		netdev_err(port_ndev, "Port set state 'operation' failed\n");
 		goto cleanup_phy_port;
 	}
 
-/*
-	ret = rswitch2_emac_set_state(port_ndev, emac_disable);
-	if (ret < 0) {
-		dev_err(rsw2->dev, "Port set state 'disable' failed\n");
-		goto cleanup_phy_port;
-	}
-
-	ret = rswitch2_emac_set_state(port_ndev, emac_config);
-	if (ret < 0) {
-		netdev_err(port_ndev, "Port set state 'config' failed\n");
-		goto cleanup_phy_port;
-	}
-	ret = rswitch2_emac_set_state(port_ndev, emac_operation);
-	if (ret < 0) {
-		netdev_err(port_ndev, "Port set state 'operation' failed\n");
-		goto cleanup_phy_port;
-	}
-*/
 
 	/* Link Verification */
 	/* TODO CMARD: I'm not sure if this is the correct position. The link verification
@@ -3107,9 +3221,13 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 
 	ret = rswitch2_mdio_init(port_ndev, port_num);
 	if (ret != 0) {
-		dev_err(rsw2->dev, "rswitch2_mdio_init failed: %d\n", ret);
+		rsw2_err(MSG_GEN, "rswitch2_mdio_init failed: %d\n", ret);
 		goto cleanup_phy_port;
 	}
+
+	rswitch2_port_set_mac_addr(port_ndev);
+
+
 #if 0
 	ret = rswitch2_phy_init(port_ndev, port_num);
 	if (ret != 0) {
@@ -3140,21 +3258,16 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 		phy_port->rx_q[q].entries = RSW2_LL_RX_RING_SIZE;
 	}
 
-
-
 	netif_napi_add(port_ndev, &phy_port->rx_q[0].napi, rswitch2_poll, 64);
-	//phy_port->ll_rx_q_num = RSW2_LL_RX_Q_OFFSET + port_num;
 
-
-	ret = register_netdev(port_ndev);
-	if (ret < 0) {
-		dev_err(rsw2->dev, "register_netdev port failed: %d\n", ret);
-		goto cleanup_phy_port;
+	ret = phy_connect_direct(port_ndev, phy_port->phy, &rswitch2_phy_state_change, phy_port->phy_iface);
+	if (ret != 0) {
+		rsw2_err(MSG_GEN, "%s: phy_connect_direct() failed: %d\n", port_ndev->name, ret);
+		return ret;
+	} else {
+		rsw2_notice(MSG_GEN, "phy_connect_direct(): attached '%s' PHY driver: %d\n", port_ndev->phydev->drv->name , ret);
 	}
 
-#if 0
-	phy_attached_info(port_ndev->phydev);
-#endif
 	rsw2->ports[rsw2->ports_intialized] = eth_port;
 	rsw2->ports_intialized++;
 
@@ -3184,19 +3297,19 @@ static int rswitch2_init_internal_port(struct rswitch2_drv *rsw2, unsigned int p
 	if (!ndev)
 		return -ENOMEM;
 
-	//printk("Got new ndev @ 0x%px\n", ndev);
-
 	eth_port = netdev_priv(ndev);
 	memset(eth_port, 0, sizeof(*eth_port));
 
 	ndev->base_addr = (unsigned long)rsw2->gwca_base_addrs[port_num];
-	dev_info(rsw2->dev, "Assigning irq %d to internal port %d\n", rsw2->rxtx_irqs[port_num], port_num);
+
+	rsw2_info(MSG_GEN, "Assigning irq %d to internal port %d\n", rsw2->rxtx_irqs[port_num], port_num);
+
 	ndev->irq = rsw2->rxtx_irqs[port_num];
 	strncpy(ndev->name, RSW2_NETDEV_BASENAME, sizeof(ndev->name) - 1);
 
 	ret = dev_alloc_name(ndev, ndev->name);
 	if (ret < 0) {
-		printk("Failed to alloc dev_name()\n");
+		rsw2_err(MSG_GEN, "Failed to alloc dev_name()\n");
 		goto intern_port_err;
 	}
 
@@ -3207,7 +3320,7 @@ static int rswitch2_init_internal_port(struct rswitch2_drv *rsw2, unsigned int p
 
 	intern_port = kzalloc(sizeof(struct rswitch2_internal_port), GFP_KERNEL);
 	if (intern_port < 0) {
-		dev_err(rsw2->dev, "Failed to allocate internal port\n");
+		rsw2_err(MSG_GEN, "Failed to allocate internal port\n");
 		ret = -ENOMEM;
 		goto intern_port_err;
 	}
@@ -3221,7 +3334,7 @@ static int rswitch2_init_internal_port(struct rswitch2_drv *rsw2, unsigned int p
 	eth_port->phy_port = NULL;
 
 	/* Get MAC address and set it in HW */
-	dev_info(rsw2->dev, "Start init the MAC\n");
+	rsw2_dbg(MSG_GEN, "Start init the MAC\n");
 
 	rswitch2_init_mac_addr(ndev);
 	rswitch2_intern_set_mac_addr(ndev);
@@ -3265,6 +3378,12 @@ static void rswitch2_free_rings(struct net_device *ndev)
 	uint num_of_rx_queues;
 	uint num_of_tx_queues;
 	uint q;
+#ifdef RSW2_RX_TS_DESC
+	struct rswitch2_dma_ext_ts_desc *rx_desc;
+#else
+	struct rswitch2_dma_ext_desc *rx_desc;
+#endif
+
 
 	eth_port = netdev_priv(ndev);
 	rsw2 = eth_port->rsw2;
@@ -3282,6 +3401,7 @@ static void rswitch2_free_rings(struct net_device *ndev)
 
 
 	for (q = 0; q < num_of_rx_queues; q++) {
+		uint q_entry;
 		size_t ring_size;
 		struct rsw2_rx_q_data *rx_q;
 
@@ -3289,12 +3409,23 @@ static void rswitch2_free_rings(struct net_device *ndev)
 
 		ring_size = sizeof(*rx_q->desc_ring) * (rx_q->entries + 1);
 
+		for(q_entry = 0; q_entry < rx_q->entries; q_entry++) {
+			if(rx_q->skb[q_entry] != NULL) {
+				rx_desc = &rx_q->desc_ring[q_entry];
+				dma_unmap_single(ndev->dev.parent, le32_to_cpu(rx_desc->dptrl),
+									RSW2_PKT_BUF_SZ, DMA_FROM_DEVICE);
+				dev_kfree_skb_any(rx_q->skb[q_entry]);
+			}
+		}
+
+
 		if(rx_q->desc_ring) {
 			dma_free_coherent(rsw2->dev, ring_size, rx_q->desc_ring, rx_q->desc_dma);
 			rx_q->desc_ring = NULL;
 			rx_q->desc_dma = 0;
 		}
 	}
+
 
 	for (q = 0; q < num_of_tx_queues; q++) {
 		size_t ring_size;
@@ -3324,41 +3455,6 @@ static void rswitch2_free_bat(struct rswitch2_drv *rsw2)
 	kfree(rsw2->bat_addr);
 }
 
-static void rswitch2_disable_rx(struct net_device *ndev)
-{
-	struct rswitch2_drv *rsw2;
-	struct rswitch2_eth_port *eth_port;
-	struct rswitch2_internal_port *intern_port;
-	struct rswitch2_physical_port *phy_port;
-	uint num_of_rx_queues;
-	uint q;
-
-	eth_port = netdev_priv(ndev);
-	rsw2 = eth_port->rsw2;
-
-	intern_port = eth_port->intern_port;
-	phy_port = eth_port->phy_port;
-
-	if(intern_port) {
-		num_of_rx_queues = ARRAY_SIZE(intern_port->rx_q);
-	} else {
-		num_of_rx_queues = ARRAY_SIZE(phy_port->rx_q);
-	}
-
-	for (q = 0; q < num_of_rx_queues; q++) {
-		u32 reg_queue;
-		u32 bit_queue;
-		struct rsw2_rx_q_data *rx_q;
-
-		(void)rswitch2_netdev_get_rx_q(ndev, q, &rx_q);
-
-		reg_queue = (q + rx_q->offset) / RSWITCH2_BITS_PER_REG;
-		bit_queue = (q + rx_q->offset) % RSWITCH2_BITS_PER_REG;
-
-		iowrite32(BIT(bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDID(reg_queue));
-		iowrite32(BIT(bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDIS(reg_queue));
-	}
-}
 
 static void rswitch2_disable_ports(struct rswitch2_drv *rsw2)
 {
@@ -3404,6 +3500,7 @@ static void rswitch2_disable_ports(struct rswitch2_drv *rsw2)
 int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 {
 	int ret;
+	int i;
 	unsigned int cur_port;
 	unsigned int cur_irq;
 	unsigned int num_of_cpus;
@@ -3413,10 +3510,9 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 
 	spin_lock_init(&rsw2->lock);
 
-
 	ret = rswitch2_gwca_init(rsw2);
 	if (ret < 0) {
-		dev_err(rsw2->dev, "Failed to initialize GWCA: %d\n", ret);
+		rsw2_err(MSG_GEN, "Failed to initialize GWCA: %d\n", ret);
 		return ret;
 
 	}
@@ -3425,19 +3521,18 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 	if (!rsw2->ports)
 		return -ENOMEM;
 
-
-
 	ret = rswitch2_bat_init(rsw2);
 	if (ret < 0) {
-		dev_err(rsw2->dev, "Base table initialization failed: %d\n", ret);
+		rsw2_err(MSG_GEN, "Base table initialization failed: %d\n", ret);
 		goto bat_init_err;
 	}
 
-	dev_err(rsw2->dev, "Number of CPU ports: %d\n", rsw2->num_of_cpu_ports);
+	/* Debug message level */
+	rsw2->msg_enable = RSW2_DEF_MSG_ENABLE;
 
 	num_of_cpus = num_online_cpus();
 
-	dev_info(rsw2->dev, "Detected %d CPUs cores - creating 1 BE queue per core", rsw2->num_of_cpu_ports);
+	//dev_info(rsw2->dev, "Detected %d CPUs cores - creating 1 BE queue per core", rsw2->num_of_cpu_ports);
 
 	for (cur_port = 0; cur_port < rsw2->num_of_cpu_ports; cur_port++) {
 		struct net_device *ndev;
@@ -3447,7 +3542,6 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 			goto port_init_err;
 
 		ndev = rsw2->ports[cur_port]->ndev;
-		printk("rswitch2_init_internal_port() done, ndev = 0x%px\n", ndev);
 
 		// FIXME: ARRAY_SIZE()
 		for(cur_tx_q = 0; cur_tx_q < NUM_BE_TX_QUEUES; cur_tx_q++) {
@@ -3455,99 +3549,107 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 			/* Init TX best effort queues */
 			ret = rswitch2_tx_ring_init(ndev, cur_tx_q, RSW2_BE_TX_Q_OFFSET);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "TX ring init for '%s' failed\n", ndev->name);
+				rsw2_err(MSG_GEN, "TX ring init for '%s' failed\n", ndev->name);
 				goto port_init_err;
-				return ret;
 			}
-			printk("BE rswitch2_tx_ring_init() done\n");
+			rsw2_info(MSG_GEN, "BE rswitch2_tx_ring_init() done\n");
 
 			rswitch2_tx_ring_format(ndev, cur_tx_q);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "TX ring format for '%s' failed\n", ndev->name);
+				rsw2_err(MSG_GEN, "TX ring format for '%s' failed\n", ndev->name);
 				goto port_init_err;
 			}
-			printk("BE rswitch2_tx_ring_format() done\n");
+			rsw2_info(MSG_GEN,"BE rswitch2_tx_ring_format() done\n");
 		}
 		for(cur_rx_q = 0; cur_rx_q < NUM_BE_RX_QUEUES; cur_rx_q++) {
 
 			/* Init RX best effort queues */
-			pr_info("BE Initializing RX ring %d\n", cur_rx_q);
+			rsw2_info(MSG_GEN, "BE Initializing RX ring %d\n", cur_rx_q);
+
 			ret = rswitch2_rx_ring_init(ndev, cur_rx_q, RSW2_BE_RX_Q_OFFSET);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "RX ring %d init for '%s' failed\n", cur_rx_q, ndev->name);
+				rsw2_err(MSG_GEN, "RX ring %d init for '%s' failed\n", cur_rx_q, ndev->name);
 				goto port_init_err;
 			}
-
-			pr_info("BE Formating ring RX ring %d\n", cur_rx_q);
+			rsw2_info(MSG_GEN, "BE Formating ring RX ring %d\n", cur_rx_q);
 			rswitch2_rx_ring_format(ndev, cur_rx_q);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "RX ring %d format for '%s' failed\n", cur_rx_q, ndev->name);
+				rsw2_err(MSG_GEN, "RX ring %d format for '%s' failed\n", cur_rx_q, ndev->name);
 				goto port_init_err;
 			}
-		}
-		ret = register_netdev(ndev);
-		if (ret < 0) {
-			dev_err(rsw2->dev, "Failed to register netdev: %d\n", ret);
-			goto port_init_err;
+
+
 		}
 	}
-
-	/* the common SERDES initialisation for RSW2/PHY connection */
-	//rswitch2_serdes_common_init(rsw2);
 
 	for (cur_port = 0; cur_port < rsw2->num_of_tsn_ports; cur_port++) {
 		struct net_device *ndev;
 
 		rswitch2_init_physical_port(rsw2, cur_port);
 		if (ret < 0) {
-			dev_err(rsw2->dev, "Failed to initialize port %d: %d\n", cur_port, ret);
+			rsw2_err(MSG_GEN, "Failed to initialize port %d: %d\n", cur_port, ret);
 			goto port_init_err;
 		}
-		printk("rswitch2_init_physical_port(%d) done\n", cur_port);
+		rsw2_info(MSG_GEN, "rswitch2_init_physical_port(%d) done\n", cur_port);
 		ndev = rsw2->ports[cur_port + rsw2->num_of_cpu_ports]->ndev;
 		for(cur_tx_q = 0; cur_tx_q < RSW2_LL_TX_PER_PORT_QUEUES; cur_tx_q++) {
 
 			/* Init TX link local queues */
 			ret = rswitch2_tx_ring_init(ndev, cur_tx_q, RSW2_LL_TX_Q_OFFSET + cur_port);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "TX ring init for '%s' failed\n", ndev->name);
+				rsw2_err(MSG_GEN, "TX ring init for '%s' failed\n", ndev->name);
 				goto port_init_err;
 				return ret;
 			}
-			printk("LL rswitch2_tx_ring_init() done\n");
+			rsw2_info(MSG_GEN, "LL rswitch2_tx_ring_init() done\n");
 
 			rswitch2_tx_ring_format(ndev, cur_tx_q);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "TX ring format for '%s' failed\n", ndev->name);
+				rsw2_err(MSG_GEN, "TX ring format for '%s' failed\n", ndev->name);
 				goto port_init_err;
 			}
-			printk("LL rswitch2_tx_ring_format() done\n");
+			rsw2_info(MSG_GEN, "LL rswitch2_tx_ring_format() done\n");
 		}
 		for(cur_rx_q = 0; cur_rx_q < RSW2_LL_RX_PER_PORT_QUEUES; cur_rx_q++) {
 
 			/* Init RX link local queues */
-			pr_info("LL Initializing RX ring %d\n", cur_rx_q);
+			rsw2_info(MSG_GEN, "LL Initializing RX ring %d\n", cur_rx_q);
+
 			ret = rswitch2_rx_ring_init(ndev, cur_rx_q, RSW2_LL_RX_Q_OFFSET + cur_port);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "RX ring %d init for '%s' failed\n", cur_rx_q, ndev->name);
+				rsw2_err(MSG_GEN, "RX ring %d init for '%s' failed\n", cur_rx_q, ndev->name);
 				goto port_init_err;
 			}
 
-			pr_info("LL Formating ring RX ring %d\n", cur_rx_q);
+			rsw2_info(MSG_GEN, "LL Formating ring RX ring %d\n", cur_rx_q);
 			rswitch2_rx_ring_format(ndev, cur_rx_q);
 			if (ret < 0) {
-				dev_err(rsw2->dev, "RX ring %d format for '%s' failed\n", cur_rx_q, ndev->name);
+				rsw2_err(MSG_GEN, "RX ring %d format for '%s' failed\n", cur_rx_q, ndev->name);
 				goto port_init_err;
 			}
+
 		}
 	}
 
 	/* FIXME: return value */
 	rswitch2_ts_ring_init(rsw2);
 
+
+	for (cur_port = 0; cur_port < rsw2->num_of_tsn_ports + rsw2->num_of_cpu_ports; cur_port++) {
+		struct net_device *ndev;
+		ndev = rsw2->ports[cur_port ]->ndev;
+		ret = register_netdev(ndev);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Failed to register netdev: %d\n", ret);
+			goto port_init_err;
+		}
+		else
+			rsw2_info(MSG_GEN, "Register netdev '%s'sucessfully\n", ndev->name);
+	}
+
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_operation);
 	if (ret < 0) {
-		dev_err(rsw2->dev, "Failed to set GWCA operation state!\n");
+		rsw2_err(MSG_GEN, "Failed to set GWCA operation state!\n");
 		goto port_init_err;
 	}
 
@@ -3556,7 +3658,7 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 		ret = request_irq(rsw2->rxtx_irqs[cur_irq], rswitch2_eth_interrupt, IRQ_TYPE_LEVEL_HIGH,
 						RSWITCH2_NAME, rsw2);
 		if (ret < 0) {
-			dev_err(rsw2->dev, "Failed to request data IRQ(%d): %d\n", rsw2->rxtx_irqs[cur_irq], ret);
+			rsw2_err(MSG_GEN, "Failed to request data IRQ(%d): %d\n", rsw2->rxtx_irqs[cur_irq], ret);
 			goto bat_init_err;
 		}
 	}
@@ -3566,10 +3668,17 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 		ret = request_irq(rsw2->status_irqs[cur_irq], rswitch2_status_interrupt, IRQ_TYPE_LEVEL_HIGH,
 						RSWITCH2_NAME, rsw2);
 		if (ret < 0) {
-			dev_err(rsw2->dev, "Failed to status request IRQ(%d): %d\n", rsw2->status_irqs[cur_irq], ret);
+			rsw2_err(MSG_GEN, "Failed to request status IRQ(%d): %d\n", rsw2->status_irqs[cur_irq], ret);
 			goto bat_init_err;
 		}
 	}
+
+	/* Set max frame size to enable data storage in internal RAM */
+	for( i = 0; i < 8; i++) {
+		iowrite32(0xFFFF, rsw2->gwca_base_addrs[0] +RSW2_GCWA_GWRMFSC(i));
+	}
+
+	iowrite32(0x0, rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWRDQC);
 
 	return 0;
 
@@ -3585,9 +3694,22 @@ void rswitch2_eth_exit(struct rswitch2_drv *rsw2)
 {
 	struct rswitch2_eth_port *eth_port;
 	unsigned int cur_irq;
+	int i;
+	size_t ts_ring_size;
+	uint ring_entries;
+
+	/* Set max frame size to zero to avoid data is stored in internal RAM */
+	for( i = 0; i < 8; i++) {
+		iowrite32(0x0, rsw2->gwca_base_addrs[0] +RSW2_GCWA_GWRMFSC(i));
+	}
+	iowrite32(0xFF, rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWRDQC);
+
 
 	for(cur_irq = 0; cur_irq < rsw2->num_of_rxtx_irqs; cur_irq++) {
 		free_irq(rsw2->rxtx_irqs[cur_irq], rsw2);
+	}
+	for(cur_irq = 0; cur_irq < rsw2->num_of_status_irqs; cur_irq++) {
+		free_irq(rsw2->status_irqs[cur_irq], rsw2);
 	}
 
 
@@ -3597,62 +3719,74 @@ void rswitch2_eth_exit(struct rswitch2_drv *rsw2)
 		struct rswitch2_physical_port *phy_port;
 
 		rsw2->ports_intialized--;
+
 		eth_port = rsw2->ports[rsw2->ports_intialized];
 		ndev = eth_port->ndev;
-
 		intern_port = eth_port->intern_port;
 		phy_port = eth_port->phy_port;
 
-		if (phy_port) {
-			uint cur_q;
-			uint num_of_rx_queues;
+		rtnl_lock();
+		if(netif_running(ndev))
+			dev_close(ndev);
+		rtnl_unlock();
 
-			if (ndev && ndev->phydev) {
-				if (phy_is_started(ndev->phydev))
-					phy_stop(ndev->phydev);
-				phy_disconnect(ndev->phydev);
-			}
+		if (phy_port) {
+            uint cur_q;
+            uint num_of_rx_queues;
+            uint num_of_tx_queues;
+
+            phy_disconnect(phy_port->phy);
+            phy_device_remove(phy_port->phy);
+			phy_device_free(phy_port->phy);
 
 			mdiobus_unregister(phy_port->mii_bus);
 			mdiobus_free(phy_port->mii_bus);
 
-
 			num_of_rx_queues = ARRAY_SIZE(phy_port->rx_q);
-
-			if (ndev) {
-				rswitch2_disable_rx(ndev);
-				netif_tx_stop_all_queues(ndev);
-			}
-			for (cur_q = 0; cur_q < num_of_rx_queues; cur_q++)
-				netif_napi_del(&phy_port->rx_q[cur_q].napi);
+			num_of_tx_queues = ARRAY_SIZE(phy_port->tx_q);
 
 			rswitch2_free_rings(ndev);
+
+			for (cur_q = 0; cur_q < num_of_rx_queues; cur_q++) {
+				netif_napi_del(&phy_port->rx_q[cur_q].napi);
+				kfree(phy_port->rx_q[cur_q].skb);
+			}
+
+			for (cur_q = 0; cur_q < num_of_tx_queues; cur_q++)
+				kfree(phy_port->tx_q[cur_q].skb);
+
 			kfree(eth_port->phy_port);
 			eth_port->phy_port = NULL;
+
 		} else if (intern_port) {
 			uint cur_q;
 			uint num_of_rx_queues;
+			uint num_of_tx_queues;
 
 			num_of_rx_queues = ARRAY_SIZE(intern_port->rx_q);
-
-			if (ndev) {
-				rswitch2_disable_rx(ndev);
-				netif_tx_stop_all_queues(ndev);
-			}
-			for (cur_q = 0; cur_q < num_of_rx_queues; cur_q++)
-				netif_napi_del(&intern_port->rx_q[cur_q].napi);
+			num_of_tx_queues = ARRAY_SIZE(intern_port->tx_q);
 
 			rswitch2_free_rings(ndev);
+
+			for (cur_q = 0; cur_q < num_of_rx_queues; cur_q++) {
+				netif_napi_del(&intern_port->rx_q[cur_q].napi);
+				kfree(intern_port->rx_q[cur_q].skb);
+			}
+
+			for (cur_q = 0; cur_q < num_of_tx_queues; cur_q++)
+				kfree(intern_port->tx_q[cur_q].skb);
+
 			kfree(eth_port->intern_port);
 			eth_port->intern_port = NULL;
 		}
-
-		if (ndev) {
-			if (ndev->reg_state != NETREG_UNINITIALIZED)
-				unregister_netdev(ndev);
-			free_netdev(ndev);
-		}
+		unregister_netdev(ndev);
+		free_netdev(ndev);
 	}
+
+	ring_entries = rsw2->num_of_tsn_ports * MAX_TS_Q_ENTRIES_PER_PORT;
+	ts_ring_size = sizeof(*rsw2->ts_desc_ring) * (ring_entries + 1);
+	dma_free_coherent(rsw2->dev, ts_ring_size, rsw2->ts_desc_ring, rsw2->ts_desc_dma);
+	dma_free_coherent(rsw2->dev, sizeof(*rsw2->bat_ts_addr), rsw2->bat_ts_addr, rsw2->bat_ts_dma_addr);
 
 	rswitch2_free_bat(rsw2);
 	kfree(rsw2->ports);

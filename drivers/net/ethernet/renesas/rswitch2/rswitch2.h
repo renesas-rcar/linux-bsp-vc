@@ -50,6 +50,19 @@ static const u8 rsw2_own_multicast_mac[ETH_ALEN] __aligned(2) = {
 		0x74, 0x90, 0x50, 0x00, 0xcc, 0x00};
 
 
+enum rsw2_msg_section {
+	MSG_GEN = 0,
+	MSG_DESC,			/* Descriptors, ring layout */
+	MSG_RXTX,			/* Reception/Transmission */
+	MSG_FWD,			/* Forwarding engine */
+	MSG_SERDES,			/* SerDes */
+	MSG_LAST_ENTRY
+};
+
+
+
+
+
 struct rswitch2_port_data {
 	char phy_id[MII_BUS_ID_SIZE + 3];
 	phy_interface_t phy_iface;
@@ -91,7 +104,9 @@ struct rswitch2_drv {
 	u32 ts_cur_desc;	/* Consumer ring indices */
 	u32 ts_dirty_desc;	/* Producer ring indices */
 
+#ifdef RSW2_DEPRECATED
 	struct rswitch2_port_data *port_data;
+#endif /* RSW2_DEPRECATED */
 	int rxtx_irqs[RSWITCH2_MAX_RXTX_IRQS];
 	unsigned int num_of_rxtx_irqs;
 	int status_irqs[RSWITCH2_MAX_STATUS_IRQS];
@@ -99,9 +114,64 @@ struct rswitch2_drv {
 	struct rtsn_ptp_private *ptp_drv;
 	struct rsw2_q_port_backref port_backref[RSWITCH2_AXI_CHAIN_N];
 	int msg_enable;
+	int sec_log_lvl[MSG_LAST_ENTRY];
 	spinlock_t lock;
 
 };
+
+#define __THIS_FILE__   ((strrchr(__FILE__, '/') == NULL) ?  ( __FILE__ ) :  (strrchr(__FILE__, '/') + 1))
+
+static inline const char *_rsw2_get_msg_section(enum rsw2_msg_section msg_sec) {
+	const char *section_str;
+
+		switch(msg_sec) {
+		case MSG_GEN:
+			section_str = "";
+			break;
+
+		case MSG_DESC:
+			section_str = "[DESC]";
+			break;
+
+		case MSG_RXTX:
+			section_str = "[RX/TX]";
+			break;
+
+		case MSG_FWD:
+			section_str = "[FWD]";
+			break;
+
+		case MSG_SERDES:
+			section_str = "[SerDes]";
+			break;
+
+
+		default:
+			pr_warn("RSwitch2[%s:%d]: Illegal message section.\n", __THIS_FILE__,  __LINE__);
+			section_str = "";
+		}
+		return section_str;
+}
+
+#define rsw2_dbg(MSG_SEC, ARG, ...)  _rsw2_pr(rsw2, LOGLEVEL_DEBUG, MSG_SEC, "RSwitch2[%s:%d]%s: " ARG , (__THIS_FILE__), (__LINE__), _rsw2_get_msg_section(MSG_SEC),  ##__VA_ARGS__)
+#define rsw2_info(MSG_SEC, ARG, ...)  _rsw2_pr(rsw2, LOGLEVEL_INFO, MSG_SEC, "RSwitch2[%s:%d]%s: " ARG , (__THIS_FILE__), (__LINE__), _rsw2_get_msg_section(MSG_SEC),  ##__VA_ARGS__)
+#define rsw2_notice(MSG_SEC, ARG, ...)  _rsw2_pr(rsw2, LOGLEVEL_NOTICE, MSG_SEC, "RSwitch2[%s:%d]%s: " ARG , (__THIS_FILE__), (__LINE__), _rsw2_get_msg_section(MSG_SEC),  ##__VA_ARGS__)
+#define rsw2_warn(MSG_SEC, ARG, ...)  _rsw2_pr(rsw2, LOGLEVEL_WARNING, MSG_SEC, "RSwitch2[%s:%d]%s: " ARG , (__THIS_FILE__), (__LINE__), _rsw2_get_msg_section(MSG_SEC),  ##__VA_ARGS__)
+#define rsw2_err(MSG_SEC, ARG, ...)  _rsw2_pr(rsw2, LOGLEVEL_ERR, MSG_SEC, "RSwitch2[%s:%d]%s: " ARG , (__THIS_FILE__), (__LINE__), _rsw2_get_msg_section(MSG_SEC),  ##__VA_ARGS__)
+#define rsw2_crit(MSG_SEC, ARG, ...)  _rsw2_pr(rsw2, LOGLEVEL_CRIT, MSG_SEC, "RSwitch2[%s:%d]%s: " ARG , (__THIS_FILE__), (__LINE__), _rsw2_get_msg_section(MSG_SEC),  ##__VA_ARGS__)
+
+static inline int _rsw2_pr(struct rswitch2_drv *rsw2,  int level, enum rsw2_msg_section msg_sec, const char *fmt, ...) {
+	int ret;
+	va_list args;
+
+	if(level <= rsw2->sec_log_lvl[msg_sec]) {
+		va_start(args, fmt);
+		ret = vprintk(fmt, args);
+		va_end(args);
+	}
+	return ret;
+}
+
 
 int rswitch2_init(struct rswitch2_drv *rsw2);
 void rswitch2_exit(struct rswitch2_drv *rsw2);

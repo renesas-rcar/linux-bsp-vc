@@ -31,6 +31,11 @@
 		reg = <0x0 0x48000000 0x0 0x78000000>;
 	};
 
+	memory@480000000 {
+		device_type = "memory";
+		reg = <0x4 0x80000000 0x0 0x80000000>;
+	};
+
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -324,7 +329,7 @@
 			/* phy-handle set via plugin */
 			tsn0_phy_2g5: ethernet-phy@0 {
 				reg = <0>;
-				compatible = "ethernet-phy-ieee802.3-c45";
+				compatible = "ethernet-phy-id0000.0000";
 				status = "disabled";
 			};
 			tsn0_phy_1g: ethernet-phy@3 {
