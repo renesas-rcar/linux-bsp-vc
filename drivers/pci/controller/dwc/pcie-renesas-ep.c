@@ -46,10 +46,9 @@
 #define  SMLH_LINK_UP		BIT(7)
 #define  RDLH_LINK_UP		BIT(6)
 
-/* PCIEC PHY */
-#define RCVRCTRLP0		0x0040
-#define  PHY0_RX1_TERM_ACDC	BIT(14)
-#define  PHY0_RX0_TERM_ACDC	BIT(13)
+/* PORT LOGIC */
+#define PRTLGC5			0x0714
+#define INSERT_LANE_SKEW	BIT(6)
 
 /* Shadow regs */
 #define BAR0MASKF0		0x10
@@ -89,17 +88,6 @@ static u32 renesas_pcie_readl(struct renesas_pcie_ep *pcie, u32 reg)
 static void renesas_pcie_writel(struct renesas_pcie_ep *pcie, u32 reg, u32 val)
 {
 	writel(val, pcie->base + reg);
-}
-
-static u32 renesas_pcie_phy_readl(struct renesas_pcie_ep *pcie, u32 reg)
-{
-	return readl(pcie->phy_base + reg);
-}
-
-static void renesas_pcie_phy_writel(struct renesas_pcie_ep *pcie, u32 reg,
-				    u32 val)
-{
-	writel(val, pcie->phy_base + reg);
 }
 
 static void renesas_pcie_ltssm_enable(struct renesas_pcie_ep *pcie,
@@ -240,7 +228,7 @@ static void renesas_pcie_init_ep(struct renesas_pcie_ep *pcie)
 
 	/* Device type selection - Endpoint */
 	val = renesas_pcie_readl(pcie, PCIEMSR0);
-	val |= BIFUR_MOD_SET_ON | DEVICE_TYPE_EP;
+	val |= DEVICE_TYPE_EP;
 	renesas_pcie_writel(pcie, PCIEMSR0, val);
 
 	/* Enable DBI read-only registers for writing */
@@ -271,11 +259,12 @@ static void renesas_pcie_init_ep(struct renesas_pcie_ep *pcie)
 	}
 	dw_pcie_writel_dbi(pci, EXPCAP3, val);
 
+	val = dw_pcie_readl_dbi(pci, PRTLGC5);
+	val |= INSERT_LANE_SKEW;
+	dw_pcie_writel_dbi(pci, PRTLGC5, val);
+
 	dw_pcie_dbi_ro_wr_dis(pci);
 
-	val = renesas_pcie_phy_readl(pcie, RCVRCTRLP0);
-	val |= PHY0_RX0_TERM_ACDC | PHY0_RX1_TERM_ACDC;
-	renesas_pcie_phy_writel(pcie, RCVRCTRLP0, val);
 }
 
 static int renesas_pcie_ep_enable(struct renesas_pcie_ep *pcie)
@@ -464,6 +453,10 @@ static const struct of_device_id renesas_pcie_of_match[] = {
 	},
 	{
 		.compatible = "renesas,r8a779f0-pcie-ep",
+		.data = &renesas_pcie_ep_of_data,
+	},
+	{
+		.compatible = "renesas,r8a779g0-pcie-ep",
 		.data = &renesas_pcie_ep_of_data,
 	},
 	{},

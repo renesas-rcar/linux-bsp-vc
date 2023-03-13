@@ -59,6 +59,7 @@ enum clk_ids {
 	CLK_PLL6_DIV2,
 	CLK_S0,
 	CLK_SDSRC,
+	CLK_RPCSRC,
 	CLK_OCO,
 
 	CD_CLK_MOSC,
@@ -100,7 +101,13 @@ static const struct cpg_core_clk r8a779f0_core_clks[] __initconst = {
 	DEF_FIXED(".sdsrc",	CLK_SDSRC,	CLK_PLL5_DIV2,	2, 1),
 	DEF_RATE(".oco",	CLK_OCO,	32768),
 
+	DEF_BASE(".rpcsrc",	CLK_RPCSRC,		CLK_TYPE_GEN4_RPCSRC, CLK_PLL5),
+	DEF_BASE(".rpc",	R8A779F0_CLK_RPC,	CLK_TYPE_GEN4_RPC, CLK_RPCSRC),
+	DEF_BASE("rpcd2",	R8A779F0_CLK_RPCD2,	CLK_TYPE_GEN4_RPCD2, R8A779F0_CLK_RPC),
+
 	/* Core Clock Outputs */
+	DEF_GEN4_Z("z0",	R8A779F0_CLK_Z0,	CLK_TYPE_GEN4_Z,	CLK_PLL2,	2, 0),
+	DEF_GEN4_Z("z1",	R8A779F0_CLK_Z1,	CLK_TYPE_GEN4_Z,	CLK_PLL2,	2, 0),
 	DEF_FIXED("s0d2",	R8A779F0_CLK_S0D2,	CLK_S0,		2, 1),
 	DEF_FIXED("s0d3",	R8A779F0_CLK_S0D3,	CLK_S0,		3, 1),
 	DEF_FIXED("s0d4",	R8A779F0_CLK_S0D4,	CLK_S0,		4, 1),
@@ -129,6 +136,10 @@ static const struct cpg_core_clk r8a779f0_core_clks[] __initconst = {
 	DEF_FIXED("rsw",	R8A779F0_CLK_RSW2,	CLK_PLL5,	2, 1),
 	DEF_FIXED("cbfusa",	R8A779F0_CLK_CBFUSA,	CLK_EXTAL,	2, 1),
 	DEF_FIXED("cpex",	R8A779F0_CLK_CPEX,	CLK_EXTAL,	2, 1),
+	DEF_FIXED("sasyncper", R8A779F0_CLK_SASYNCPER, CLK_PLL5_DIV4, 3, 1),
+	DEF_FIXED("sasyncperd1", R8A779F0_CLK_SASYNCPERD1, R8A779F0_CLK_SASYNCPER, 1, 1),
+	DEF_FIXED("sasyncperd2", R8A779F0_CLK_SASYNCPERD2, R8A779F0_CLK_SASYNCPER, 2, 1),
+	DEF_FIXED("sasyncperd4", R8A779F0_CLK_SASYNCPERD4, R8A779F0_CLK_SASYNCPER, 4, 1),
 
 	DEF_GEN4_SD("sd0",	R8A779F0_CLK_SD0,	CLK_SDSRC,	0x870),
 	DEF_DIV6P1("mso",       R8A779F0_CLK_MSO,       CLK_PLL5_DIV4, 0x087C),
@@ -170,10 +181,10 @@ static const struct cpg_core_clk r8a779f0_core_clks[] __initconst = {
 };
 
 static const struct mssr_mod_clk r8a779f0_mod_clks[] __initconst = {
-	DEF_MOD("hscif0",	514,	R8A779F0_CLK_S0D3),
-	DEF_MOD("hscif1",	515,	R8A779F0_CLK_S0D3),
-	DEF_MOD("hscif2",	516,	R8A779F0_CLK_S0D3),
-	DEF_MOD("hscif3",	517,	R8A779F0_CLK_S0D3),
+	DEF_MOD("hscif0",	514,	R8A779F0_CLK_SASYNCPERD2),
+	DEF_MOD("hscif1",	515,	R8A779F0_CLK_SASYNCPERD2),
+	DEF_MOD("hscif2",	516,	R8A779F0_CLK_SASYNCPERD2),
+	DEF_MOD("hscif3",	517,	R8A779F0_CLK_SASYNCPERD2),
 	DEF_MOD("i2c0",		518,	R8A779F0_CLK_S0D6_PER),
 	DEF_MOD("i2c1",		519,	R8A779F0_CLK_S0D6_PER),
 	DEF_MOD("i2c2",		520,	R8A779F0_CLK_S0D6_PER),
@@ -186,14 +197,16 @@ static const struct mssr_mod_clk r8a779f0_mod_clks[] __initconst = {
 	DEF_MOD("msi3",		621,	R8A779F0_CLK_MSO),
 	DEF_MOD("pcie0",	624,	R8A779F0_CLK_S0D2),
 	DEF_MOD("pcie1",	625,	R8A779F0_CLK_S0D2),
+	DEF_MOD("rpc",		629,	R8A779F0_CLK_RPCD2),
 	DEF_MOD("rtdm0",	630,	R8A779F0_CLK_S0D2),
 	DEF_MOD("rtdm1",	631,	R8A779F0_CLK_S0D2),
 	DEF_MOD("rtdm2",	700,	R8A779F0_CLK_S0D2),
 	DEF_MOD("rtdm3",	701,	R8A779F0_CLK_S0D2),
-	DEF_MOD("scif0",	702,	R8A779F0_CLK_S0D12_PER),
-	DEF_MOD("scif1",	703,	R8A779F0_CLK_S0D12_PER),
-	DEF_MOD("scif3",	704,	R8A779F0_CLK_S0D12_PER),
-	DEF_MOD("scif4",	705,	R8A779F0_CLK_S0D12_PER),
+
+	DEF_MOD("scif0",	702,	R8A779F0_CLK_SASYNCPERD4),
+	DEF_MOD("scif1",	703,	R8A779F0_CLK_SASYNCPERD4),
+	DEF_MOD("scif3",	704,	R8A779F0_CLK_SASYNCPERD4),
+	DEF_MOD("scif4",	705,	R8A779F0_CLK_SASYNCPERD4),
 	DEF_MOD("sdhi0",	706,	R8A779F0_CLK_SD0),
 	DEF_MOD("sydm1",	709,	R8A779F0_CLK_S0D3),
 	DEF_MOD("sydm2",	710,	R8A779F0_CLK_S0D3),
@@ -203,6 +216,7 @@ static const struct mssr_mod_clk r8a779f0_mod_clks[] __initconst = {
 	DEF_MOD("tmu3",		716,	R8A779F0_CLK_S0D6_RT),
 	DEF_MOD("tmu4",		717,	R8A779F0_CLK_S0D6_RT),
 	DEF_MOD("ships0",	719,	R8A779F0_CLK_S0D2),
+	DEF_MOD("caip_wrapper",	720,	R8A779F0_CLK_S0D2),
 	DEF_MOD("caiplite0",	721,	R8A779F0_CLK_S0D2),
 	DEF_MOD("caiplite1",	722,	R8A779F0_CLK_S0D2),
 	DEF_MOD("caiplite2",	723,	R8A779F0_CLK_S0D2),
@@ -272,11 +286,11 @@ static const struct mssr_mod_clk r8a779f0_cd_mod_clks[] __initconst = {
 					 (((md) & BIT(13)) >> 13))
 
 static const struct rcar_gen4_cpg_pll_config cpg_pll_configs[4] = {
-	/* EXTAL div	PLL1 mult/div	PLL2 mult/div	PLL3 mult/div	PLL5 mult/div	PLL6 mult/div	OSC prediv */
-	{ 1,		200,	1,	150,	1,	200,	1,	200,	1,	134,	1,	16,	},
-	{ 1,		160,	1,	120,	1,	160,	1,	160,	1,	106,	1,	19,	},
-	{ 0,		0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	},
-	{ 2,		160,	1,	120,	1,	160,	1,	160,	1,	106,	1,	32,	},
+	/* EXTAL div	PLL1 mult/div	PLL2 mult/div	PLL3 mult/div	PLL4 mult/div	PLL5 mult/div	PLL6 mult/div	OSC prediv */
+	{ 1,		200,	1,	150,	1,	200,	1,	0,	0,	200,	1,	134,	1,	16,	},
+	{ 1,		160,	1,	120,	1,	160,	1,	0,	0,	160,	1,	106,	1,	19,	},
+	{ 0,		0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	},
+	{ 2,		160,	1,	120,	1,	160,	1,	0,	0,	160,	1,	106,	1,	32,	},
 };
 
 static int __init r8a779f0_cpg_mssr_init(struct device *dev)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * PCIe host controller driver for Renesas R-Car V3U and Gen4 Series SoCs
- *  Copyright (C) 2020-2021 Renesas Electronics Corporation
+ *  Copyright (C) 2022 Renesas Electronics Corporation
  *
  * Author: Hoang Vo <hoang.vo.eb@renesas.com>
  */
@@ -50,10 +50,9 @@
 #define  SMLH_LINK_UP		BIT(7)
 #define  RDLH_LINK_UP		BIT(6)
 
-/* PCIEC PHY */
-#define RCVRCTRLP0		0x0040
-#define  PHY0_RX1_TERM_ACDC	BIT(14)
-#define  PHY0_RX0_TERM_ACDC	BIT(13)
+/* PORT LOGIC */
+#define PRTLGC5			0x0714
+#define INSERT_LANE_SKEW	BIT(6)
 
 /* PCI Shadow offset */
 #define SHADOW_REG(x)		(0x2000 + (x))
@@ -83,16 +82,6 @@ static u32 renesas_pcie_readl(struct renesas_pcie *pcie, u32 reg)
 static void renesas_pcie_writel(struct renesas_pcie *pcie, u32 reg, u32 val)
 {
 	writel(val, pcie->base + reg);
-}
-
-static u32 renesas_pcie_phy_readl(struct renesas_pcie *pcie, u32 reg)
-{
-	return readl(pcie->phy_base + reg);
-}
-
-static void renesas_pcie_phy_writel(struct renesas_pcie *pcie, u32 reg, u32 val)
-{
-	writel(val, pcie->phy_base + reg);
 }
 
 static void renesas_pcie_ltssm_enable(struct renesas_pcie *pcie,
@@ -238,7 +227,7 @@ static void renesas_pcie_init_rc(struct renesas_pcie *pcie)
 
 	/* Device type selection - Root Complex */
 	val = renesas_pcie_readl(pcie, PCIEMSR0);
-	val |= BIFUR_MOD_SET_ON | DEVICE_TYPE_RC;
+	val |= DEVICE_TYPE_RC;
 	renesas_pcie_writel(pcie, PCIEMSR0, val);
 
 	/* Enable DBI read-only registers for writing */
@@ -279,11 +268,12 @@ static void renesas_pcie_init_rc(struct renesas_pcie *pcie)
 		PCI_EXP_DEVCTL_FERE | PCI_EXP_DEVCTL_URRE;
 	dw_pcie_writel_dbi(pci, EXPCAP(PCI_EXP_DEVCTL), val);
 
+	val = dw_pcie_readl_dbi(pci, PRTLGC5);
+	val |= INSERT_LANE_SKEW;
+	dw_pcie_writel_dbi(pci, PRTLGC5, val);
+
 	dw_pcie_dbi_ro_wr_dis(pci);
 
-	val = renesas_pcie_phy_readl(pcie, RCVRCTRLP0);
-	val |= PHY0_RX0_TERM_ACDC | PHY0_RX1_TERM_ACDC;
-	renesas_pcie_phy_writel(pcie, RCVRCTRLP0, val);
 }
 
 static int renesas_pcie_host_enable(struct renesas_pcie *pcie)
@@ -407,6 +397,7 @@ err_pm_put:
 static const struct of_device_id renesas_pcie_of_match[] = {
 	{ .compatible = "renesas,r8a779a0-pcie", },
 	{ .compatible = "renesas,r8a779f0-pcie", },
+	{ .compatible = "renesas,r8a779g0-pcie", },
 	{},
 };
 

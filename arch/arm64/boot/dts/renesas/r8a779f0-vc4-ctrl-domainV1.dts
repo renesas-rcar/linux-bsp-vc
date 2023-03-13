@@ -122,7 +122,7 @@
 };
 
 &etnb0 {
-	status = "okay";
+	status = "disabled";
 
 	pinctrl-0 = <&etnb0_pins>;
 	pinctrl-names = "default";
@@ -172,17 +172,24 @@
 	pinctrl-0 = <&mspi0_pins>;
 	pinctrl-names = "default";
 
-	t1s@0 {
+	t1s0 {
 		compatible = "microchip,lan865x";
 		reg = <0>;
 
 		spi-max-frequency = <20000000>;
 
-		interrupt-parent = <&gpio6>;
-		interrupts = <18 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-0 = <&mspi0_t1s_pins>;
+		pinctrl-names = "default";
+		interrupt-parent = <&intswcd>;
+		interrupts = <R8A779F0_INTSWCD_INTP35>;
+		//reset-pin = /bits/ 16 <12>;
 
+		//local-mac-address = [14 15 16 11 12 13];
+		tx-cut-through-mode = /bits/ 8 <0>;
 		plca-enable = /bits/ 8 <0>;
-		tx-cut-through-mode = /bits/ 8 <1>;
+
+		plca-node-id = /bits/ 8 <0>; /* PLCA node id range: 0 to 254 */
+		plca-node-count = /bits/ 8 <8>; /* PLCA node count range: 1 to 255 */
 	};
 };
 
@@ -192,17 +199,24 @@
 	pinctrl-0 = <&mspi1_pins>;
 	pinctrl-names = "default";
 
-	t1s@0 {
+	t1s1 {
 		compatible = "microchip,lan865x";
 		reg = <0>;
 
 		spi-max-frequency = <20000000>;
 
-		interrupt-parent = <&gpio6>;
-		interrupts = <19 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-0 = <&mspi1_t1s_pins>;
+		pinctrl-names = "default";
+		interrupt-parent = <&intswcd>;
+		interrupts = <R8A779F0_INTSWCD_INTP34>;
+		//reset-pin = /bits/ 16 <12>;
 
+		//local-mac-address = [14 15 16 11 12 13];
+		tx-cut-through-mode = /bits/ 8 <0>;
 		plca-enable = /bits/ 8 <0>;
-		tx-cut-through-mode = /bits/ 8 <1>;
+
+		plca-node-id = /bits/ 8 <0>; /* PLCA node id range: 0 to 254 */
+		plca-node-count = /bits/ 8 <8>; /* PLCA node count range: 1 to 255 */
 	};
 };
 
@@ -212,17 +226,25 @@
 	pinctrl-0 = <&mspi4_pins>;
 	pinctrl-names = "default";
 
-	t1s@0 {
+	t1s2 {
 		compatible = "microchip,lan865x";
 		reg = <0>;
 
 		spi-max-frequency = <20000000>;
 
-		interrupt-parent = <&gpio6>;
-		interrupts = <20 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-0 = <&mspi4_t1s_pins>;
+		pinctrl-names = "default";
+		interrupt-parent = <&intswcd>;
+		interrupts = <R8A779F0_INTSWCD_INTP33>;
+		//reset-pin = /bits/ 16 <12>;
 
+		//local-mac-address = [14 15 16 11 12 13];
+		tx-cut-through-mode = /bits/ 8 <0>;
 		plca-enable = /bits/ 8 <0>;
-		tx-cut-through-mode = /bits/ 8 <1>;
+
+
+		plca-node-id = /bits/ 8 <0>; /* PLCA node id range: 0 to 254 */
+		plca-node-count = /bits/ 8 <8>; /* PLCA node count range: 1 to 255 */
 	};
 };
 
@@ -306,14 +328,26 @@
 		groups = "mspi0_sck", "mspi0_din", "mspi0_dout", "mspi0_cs0";
 		function = "mspi0";
 	};
+	mspi0_t1s_pins: mspi0_t1s {
+		groups = "intp35";
+		function = "intp";
+	};
 
 	mspi1_pins: mpsi1 {
 		groups = "mspi1_sck", "mspi1_din", "mspi1_dout", "mspi1_cs0";
 		function = "mspi1";
 	};
+	mspi1_t1s_pins: mspi1_t1s {
+		groups = "intp34";
+		function = "intp";
+	};
 
 	mspi4_pins: mpsi4 {
 		groups = "mspi4_sck", "mspi4_din", "mspi4_dout", "mspi4_cs0";
 		function = "mspi4";
+	};
+	mspi4_t1s_pins: mspi4_t1s {
+		groups = "intp33";
+		function = "intp";
 	};
 };

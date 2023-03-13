@@ -2726,7 +2726,7 @@ static const struct ethtool_ops rswitch2_ethtool_ops = {
 };
 
 
-static void rswitch2_init_port_mac(struct net_device *port_ndev)
+static int rswitch2_init_port_mac(struct net_device *port_ndev)
 {
 	u32 reg_val;
 	int speed;
@@ -2765,7 +2765,7 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 			break;
 		default:
 			rsw2_err(MSG_GEN, "Unsupported MAC xMII format %s (%d) on port %d\n",phy_modes(phy_iface), phy_iface, eth_port->port_num-1);
-			//return -EINVAL;
+			return -EINVAL;
 	}
 
 	iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
@@ -2784,6 +2784,8 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 	reg_val |= MRAFC_MCENP;
 	reg_val |= MRAFC_UCENP;
 	iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MRAFC);
+
+	return 0;
 }
 
 
@@ -3088,6 +3090,9 @@ static int rswitch2_get_phy_config(struct net_device *ndev)
 		else {
 			rsw2_info(MSG_GEN, "Got phy_iface mode: %s (%d)\n", phy_modes(phy_port->phy_iface), phy_port->phy_iface);
 		}
+	} else {
+		rsw2_err(MSG_GEN, "Failed to get port nodeof_get_phy_mode failed\n");
+		return -ENODEV;
 	}
 	of_node_put(port_node);
 
@@ -3179,7 +3184,11 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 	/* MAC related setup */
 	rswitch2_init_mac_addr(port_ndev);
 	rswitch2_port_set_mac_addr(port_ndev);
-	rswitch2_init_port_mac(port_ndev);
+	ret = rswitch2_init_port_mac(port_ndev);
+	if (ret < 0) {
+		netdev_err(port_ndev, "Could not init port MAC: %d\n", ret);
+		goto cleanup_phy_port;
+	}
 
 	/* Change to OPERATION Mode */
 	ret = rswitch2_emac_set_state(port_ndev, emac_operation);
@@ -3577,18 +3586,17 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 				rsw2_err(MSG_GEN, "RX ring %d format for '%s' failed\n", cur_rx_q, ndev->name);
 				goto port_init_err;
 			}
-
-
 		}
 	}
 
 	for (cur_port = 0; cur_port < rsw2->num_of_tsn_ports; cur_port++) {
 		struct net_device *ndev;
 
-		rswitch2_init_physical_port(rsw2, cur_port);
+
+		ret = rswitch2_init_physical_port(rsw2, cur_port);
 		if (ret < 0) {
 			rsw2_err(MSG_GEN, "Failed to initialize port %d: %d\n", cur_port, ret);
-			goto port_init_err;
+			continue;
 		}
 		rsw2_info(MSG_GEN, "rswitch2_init_physical_port(%d) done\n", cur_port);
 		ndev = rsw2->ports[cur_port + rsw2->num_of_cpu_ports]->ndev;
@@ -3637,6 +3645,10 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 
 	for (cur_port = 0; cur_port < rsw2->num_of_tsn_ports + rsw2->num_of_cpu_ports; cur_port++) {
 		struct net_device *ndev;
+
+		if(!rsw2->ports[cur_port])
+			continue;
+
 		ndev = rsw2->ports[cur_port ]->ndev;
 		ret = register_netdev(ndev);
 		if (ret < 0) {

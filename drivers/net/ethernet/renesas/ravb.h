@@ -998,6 +998,9 @@ enum GECMR_BIT {
 	GECMR_SPEED_1000 = 0x00000001,
 };
 
+#define GPOUT		0x1000
+#define GPOUT_TDM	BIT(14)
+
 /* The Ethernet AVB descriptor definitions. */
 struct ravb_desc {
 	__le16 ds;		/* Descriptor size */
@@ -1095,6 +1098,7 @@ enum RAVB_QUEUE {
 /* TX descriptors per packet */
 #define NUM_TX_DESC_GEN2	2
 #define NUM_TX_DESC_GEN3	1
+#define NUM_TX_DESC_GEN4	1
 
 struct ravb_tstamp_skb {
 	struct list_head list;
@@ -1122,7 +1126,7 @@ struct ravb_ptp {
 enum ravb_chip_id {
 	RCAR_GEN2,
 	RCAR_GEN3,
-	RCAR_S4,
+	RCAR_GEN4,
 };
 
 struct ravb_private {

@@ -139,10 +139,9 @@ static void rswitch2_platf_set_base_addr(struct rswitch2_drv *rsw2)
 	rsw2->etha_base_addrs[1] = base_addr + RSWITCH2_TSNA1_BASE_ADDR;
 	rsw2->etha_base_addrs[2] = base_addr + RSWITCH2_TSNA2_BASE_ADDR;
 	rsw2->gwca_base_addrs[0] = base_addr + RSWITCH2_GWCA0_BASE_ADDR;
+	rsw2->ptp_base_addr = base_addr + RSWITCH2_GPTP_BASE_ADDR;	
+	//rsw2->gwca_base_addrs[1] = base_addr + RSWITCH2_GWCA1_BASE_ADDR;
 	rsw2->ptp_base_addr = base_addr + RSWITCH2_GPTP_BASE_ADDR;
-#if RSWITCH2_CPU_PORTS > 1
-	rsw2->gwca_base_addrs[1] = base_addr + RSWITCH2_GWCA1_BASE_ADDR;
-#endif
 }
 
 static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
@@ -422,13 +421,13 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 	drv_priv->rsw_clk = devm_clk_get(&pdev->dev, "rsw2");
 	if (IS_ERR(drv_priv->rsw_clk)) {
 		dev_err(&pdev->dev, "Failed to get rsw2 clock: %ld\n", PTR_ERR(drv_priv->rsw_clk));
-		return PTR_ERR(drv_priv->rsw_clk);
+		return -PTR_ERR(drv_priv->rsw_clk);
 	}
 
 	drv_priv->phy_clk = devm_clk_get(&pdev->dev, "eth-phy");
 	if (IS_ERR(drv_priv->phy_clk)) {
 		dev_err(&pdev->dev, "Failed to get eth-phy clock: %ld\n", PTR_ERR(drv_priv->phy_clk));
-		return PTR_ERR(drv_priv->phy_clk);
+		return -PTR_ERR(drv_priv->phy_clk);
 	}
 
 	/* Allocate memory for the common rswitch2 data */
@@ -671,6 +670,8 @@ static int rswitch2_platf_remove(struct platform_device *pdev)
 
 static const struct of_device_id rswitch2_platf_of_table[] = {
 	{ .compatible = "renesas,rswitch2", },
+	{ .compatible = "renesas,etherswitch-r8a779f0" },
+	{ .compatible = "renesas,etherswitch", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, rswitch2_platf_of_table);

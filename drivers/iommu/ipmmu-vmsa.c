@@ -41,11 +41,6 @@
 
 #define IPMMU_UTLB_MAX		64U
 
-enum ipmmu_reg_layout {
-	IPMMU_REG_LAYOUT_RCAR_GEN3 = 0,
-	IPMMU_REG_LAYOUT_RCAR_S4,
-};
-
 struct ipmmu_features {
 	bool use_ns_alias_offset;
 	bool has_cache_leaf_nodes;
@@ -56,11 +51,9 @@ struct ipmmu_features {
 	bool reserved_context;
 	bool cache_snoop;
 	unsigned int ctx_offset_base;
-	unsigned int ctx_offset_base_2;
 	unsigned int ctx_offset_stride;
 	unsigned int ctx_offset_stride_adj;
 	unsigned int utlb_offset_base;
-	enum ipmmu_reg_layout reg_layout;
 };
 
 struct ipmmu_vmsa_device {
@@ -126,7 +119,7 @@ static struct ipmmu_vmsa_device *to_ipmmu(struct device *dev)
 #define IMBUSCR_DVM			(1 << 2)	/* R-Car Gen2 only */
 #define IMBUSCR_BUSSEL_MASK		(3 << 0)	/* R-Car Gen2 only */
 
-#define IMSCTLR				0x0500
+#define IMSCTLR				0x0500		/* R-Car Gen3/4 */
 #define IMSCTLR_USE_SECGRP		BIT(28)
 
 #define IMTTLBR0			0x0010		/* R-Car Gen2/3 */
@@ -202,23 +195,15 @@ static void ipmmu_write(struct ipmmu_vmsa_device *mmu, unsigned int offset,
 	iowrite32(data, mmu->base + offset);
 }
 
-/*
- * Offset adresss of R-Car S4 is the same as R-Car V3U
- * so we continues to use offset calculating for R-Car V3U.
- */
-
 static unsigned int ipmmu_ctx_reg(struct ipmmu_vmsa_device *mmu,
 				  unsigned int context_id, unsigned int reg)
 {
-	if (mmu->features->reg_layout == IPMMU_REG_LAYOUT_RCAR_S4 &&
-	    context_id >= 8)
-		return mmu->features->ctx_offset_base_2 +
-		       (context_id - 8) * mmu->features->ctx_offset_stride +
-		       context_id * mmu->features->ctx_offset_stride_adj + reg;
+	unsigned int base = mmu->features->ctx_offset_base;
 
-	return mmu->features->ctx_offset_base +
-	       context_id * mmu->features->ctx_offset_stride +
-	       context_id * mmu->features->ctx_offset_stride_adj + reg;
+	if (context_id > 7)
+		base += 0x800 - 8 * 0x40;
+
+	return base + context_id * mmu->features->ctx_offset_stride + reg;
 }
 
 static u32 ipmmu_ctx_read(struct ipmmu_vmsa_device *mmu,
@@ -396,7 +381,7 @@ static void ipmmu_domain_free_context(struct ipmmu_vmsa_device *mmu,
 static void ipmmu_domain_setup_context(struct ipmmu_vmsa_domain *domain)
 {
 	u64 ttbr;
-	u32 tmp, tmp_cache, tmp_root;
+	u32 tmp;
 
 	/* TTBR0 */
 	ttbr = domain->cfg.arm_lpae_s1_cfg.ttbr;
@@ -433,20 +418,20 @@ static void ipmmu_domain_setup_context(struct ipmmu_vmsa_domain *domain)
 				     ipmmu_ctx_read_root(domain, IMBUSCR) &
 				     ~(IMBUSCR_DVM | IMBUSCR_BUSSEL_MASK));
 
-	tmp_root = ipmmu_read(domain->mmu->root,
-		              IMSCTLR + domain->mmu->features->ctx_offset_stride_adj)
-		              & ~IMSCTLR_USE_SECGRP;
-	tmp_cache = ipmmu_read(domain->mmu,
-		               IMSCTLR + domain->mmu->features->ctx_offset_stride_adj)
-		               & ~IMSCTLR_USE_SECGRP;
+	/* IMSCTLR */
+	if (domain->mmu != domain->mmu->root) {
+		tmp = ipmmu_read(domain->mmu, IMSCTLR
+				 + domain->mmu->features->ctx_offset_stride_adj)
+				 & ~IMSCTLR_USE_SECGRP;
+		ipmmu_write(domain->mmu, IMSCTLR
+			    + domain->mmu->features->ctx_offset_stride_adj, tmp);
+	}
 
-	if (domain->mmu != domain->mmu->root)
-		ipmmu_write(domain->mmu,
-		            IMSCTLR + domain->mmu->features->ctx_offset_stride_adj,
-			    tmp_cache);
-
+	tmp = ipmmu_read(domain->mmu->root,
+			 IMSCTLR + domain->mmu->features->ctx_offset_stride_adj)
+			 & ~IMSCTLR_USE_SECGRP;
 	ipmmu_write(domain->mmu->root,
-	            IMSCTLR + domain->mmu->features->ctx_offset_stride_adj, tmp_root);
+		    IMSCTLR + domain->mmu->features->ctx_offset_stride_adj, tmp);
 
 	/*
 	 * IMSTR
@@ -795,6 +780,9 @@ static const struct soc_device_attribute soc_denylist[] = {
 	{ .soc_id = "r8a774a1", },
 	{ .soc_id = "r8a7795", .revision = "ES1.*" },
 	{ .soc_id = "r8a7795", .revision = "ES2.*" },
+	{ .soc_id = "r8a77970", },
+	{ .soc_id = "r8a77980", },
+	{ .soc_id = "r8a77995", },
 	{ /* sentinel */ }
 };
 
@@ -828,6 +816,8 @@ static const char * const devices_allowlist[] = {
 	"e6700000.dma-controller",
 	"e7300000.dma-controller",
 	"e7310000.dma-controller",
+	"e7350000.dma-controller",
+	"e7351000.dma-controller",
 	"ffc10000.dma-controller",
 	"ffc20000.dma-controller",
 	"ec700000.dma-controller",
@@ -837,6 +827,95 @@ static const char * const devices_allowlist[] = {
 	"e6800000.ethernet",
 	"fe000000.pcie",
 	"ee800000.pcie",
+	"ffa00000.imp-core",
+	"ffa20000.imp-core",
+	"ffa40000.imp-cve",
+	"ffa50000.imp-cve",
+	"fec00000.cisp",
+	"fee00000.cisp",
+	"fef00000.cisp",
+	"fed80000.dsi-encoder",
+	"e6ef0000.video",
+	"e6ef1000.video",
+	"e6ef2000.video",
+	"e6ef3000.video",
+	"e7a00000.stv_sts_00",
+	"e7ba0000.stv_sts_01",
+	"e7a10000.dof_sts_00",
+	"e7bb0000.dof_sts_01",
+	"e7a50000.acf_sts_00",
+	"e7a60000.acf_sts_01",
+	"e7a70000.acf_sts_02",
+	"e7a80000.acf_sts_03",
+	"fe860000.ims",
+	"fe870000.ims",
+	"fe880000.imr",
+	"fe890000.imr",
+	"fe8a0000.imr",
+	"fe8b0000.imr",
+	"fea00000.ivcp1e_00",
+	"fec00000.cisp",
+	"fed00000.tisp",
+	"fee00000.cisp",
+	"fed20000.tisp",
+	"fef00000.cisp",
+	"fed30000.tisp",
+	"fe400000.cisp",
+	"fed40000.tisp",
+	"f1f00000.dma-controller",
+	"f1f10000.dma-controller",
+	"ff900000.imp-distributer0",
+	"ff900000.imp-distributer1",
+	"ff900000.imp-distributer2",
+	"ff900000.imp-distributer3",
+	"ff900000.imp-distributer4",
+	"ff900000.imp-distributer5",
+	"ff900000.imp-distributer6",
+	"ffa00000.imp-core",
+	"ffa20000.imp-core",
+	"ffb00000.imp-core",
+	"ffb20000.imp-core",
+	"ffa40000.imp-cve",
+	"ffa50000.imp-cve",
+	"ffb40000.imp-cve",
+	"ffb50000.imp-cve",
+	"ffa60000.imp-cve",
+	"ffb60000.imp-cve",
+	"ffa70000.imp-cve",
+	"ffb70000.imp-cve",
+	"ffa80000.dma-controller",
+	"ffb80000.dma-controller",
+	"ffa84000.imp-psc",
+	"ffb84000.imp-psc",
+	"ffaa0000.imp-cnn",
+	"ffbc0000.imp-cnn",
+	"ffac0000.imp-cnn",
+	"ed300000.imp-ram",
+	"ffa8c000.imp-ram",
+	"ffb8c000.imp-ram",
+	"eda00000.imp-ram",
+	"ffab0000.cnn-ram",
+	"ed600000.cnn-ram",
+	"ffbd0000.cnn-ram",
+	"ed800000.cnn-ram",
+	"ffad0000.cnn-ram",
+	"ed400000.cnn-ram",
+	"fedd0000.vspx",
+	"fedd8000.vspx",
+	"fede0000.vspx",
+	"fede8000.vspx",
+	"fe601000.fba",
+	"fe602000.fba",
+	"fe603000.fba",
+	"fe604000.fba",
+	"fe605000.fba",
+	"fe606000.fba",
+	"e7b81000.fba",
+	"e7b87000.fba",
+	"e7b61000.fba",
+	"e7b80000.fba",
+	"e7b82000.fba",
+	"e7b86000.fba",
 };
 
 static bool ipmmu_device_is_allowed(struct device *dev)
@@ -1039,7 +1118,6 @@ static const struct ipmmu_features ipmmu_features_default = {
 	.reserved_context = false,
 	.cache_snoop = true,
 	.ctx_offset_base = 0,
-	.ctx_offset_base_2 = 0,
 	.ctx_offset_stride = 0x40,
 	.ctx_offset_stride_adj = 0,
 	.utlb_offset_base = 0,
@@ -1055,13 +1133,12 @@ static const struct ipmmu_features ipmmu_features_rcar_gen3 = {
 	.reserved_context = true,
 	.cache_snoop = false,
 	.ctx_offset_base = 0,
-	.ctx_offset_base_2 = 0,
 	.ctx_offset_stride = 0x40,
 	.ctx_offset_stride_adj = 0,
 	.utlb_offset_base = 0,
 };
 
-static const struct ipmmu_features ipmmu_features_rcar_s4 = {
+static const struct ipmmu_features ipmmu_features_rcar_gen4 = {
 	.use_ns_alias_offset = false,
 	.has_cache_leaf_nodes = true,
 	.number_of_contexts = 16,
@@ -1071,11 +1148,9 @@ static const struct ipmmu_features ipmmu_features_rcar_s4 = {
 	.reserved_context = true,
 	.cache_snoop = false,
 	.ctx_offset_base = 0x10000,
-	.ctx_offset_base_2 = 0x10800,
-	.ctx_offset_stride = 0x40,
+	.ctx_offset_stride = 0x1040,
 	.ctx_offset_stride_adj = 0x1000,
 	.utlb_offset_base = 0x3000,
-	.reg_layout = IPMMU_REG_LAYOUT_RCAR_S4,
 };
 
 static const struct of_device_id ipmmu_of_ids[] = {
@@ -1107,17 +1182,17 @@ static const struct of_device_id ipmmu_of_ids[] = {
 		.compatible = "renesas,ipmmu-r8a77965",
 		.data = &ipmmu_features_rcar_gen3,
 	}, {
-		.compatible = "renesas,ipmmu-r8a77970",
-		.data = &ipmmu_features_rcar_gen3,
-	}, {
 		.compatible = "renesas,ipmmu-r8a77990",
 		.data = &ipmmu_features_rcar_gen3,
 	}, {
-		.compatible = "renesas,ipmmu-r8a77995",
-		.data = &ipmmu_features_rcar_gen3,
+		.compatible = "renesas,ipmmu-r8a779a0",
+		.data = &ipmmu_features_rcar_gen4,
 	}, {
 		.compatible = "renesas,ipmmu-r8a779f0",
-		.data = &ipmmu_features_rcar_s4,
+		.data = &ipmmu_features_rcar_gen4,
+	}, {
+		.compatible = "renesas,ipmmu-r8a779g0",
+		.data = &ipmmu_features_rcar_gen4,
 	}, {
 		/* Terminator */
 	},
@@ -1214,11 +1289,7 @@ static int ipmmu_probe(struct platform_device *pdev)
 		if (ret)
 			return ret;
 
-		iommu_device_set_ops(&mmu->iommu, &ipmmu_ops);
-		iommu_device_set_fwnode(&mmu->iommu,
-					&pdev->dev.of_node->fwnode);
-
-		ret = iommu_device_register(&mmu->iommu);
+		ret = iommu_device_register(&mmu->iommu, &ipmmu_ops, &pdev->dev);
 		if (ret)
 			return ret;
 

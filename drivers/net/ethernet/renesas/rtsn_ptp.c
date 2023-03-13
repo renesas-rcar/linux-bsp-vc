@@ -164,7 +164,20 @@ int rtsn_ptp_init(struct rtsn_ptp_private *ptp_priv, enum rtsn_ptp_reg_layout la
 	return 0;
 }
 
-struct rtsn_ptp_private *rtsn_ptp_alloc(struct device *dev)
+struct rtsn_ptp_private *rtsn_ptp_alloc(struct platform_device *pdev)
+{
+	struct rtsn_ptp_private *ptp;
+
+	ptp = devm_kzalloc(&pdev->dev, sizeof(*ptp), GFP_KERNEL);
+	if (!ptp)
+		return NULL;
+
+	ptp->info = rtsn_ptp_info;
+
+	return ptp;
+}
+
+struct rtsn_ptp_private *rtsn_ptp_alloc_dev(struct device *dev)
 {
 	struct rtsn_ptp_private *ptp;
 

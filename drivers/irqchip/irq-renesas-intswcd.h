@@ -10,11 +10,17 @@ enum {
 	INTSWCD_EDGE
 };
 
+enum {
+	INTSWCD_QUIRK_NONE = 0,
+	INTSWCD_QUIRK_EXT_LVL
+};
+
 struct intswcd_hwirq_info {
 	unsigned int type;
 	unsigned int parent_irq_offset;
 	unsigned int reg;
 	u32 mask;
+	unsigned int quirk;
 };
 
 struct intswcd_info {

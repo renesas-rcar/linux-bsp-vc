@@ -13,14 +13,16 @@ enum rcar_gen4_clk_types {
 	CLK_TYPE_GEN4_MAIN = CLK_TYPE_CUSTOM,
 	CLK_TYPE_GEN4_PLL1,
 	CLK_TYPE_GEN4_PLL2,
+	CLK_TYPE_GEN4_PLL2X_3X,	/* r8a779a0 only */
 	CLK_TYPE_GEN4_PLL3,
+	CLK_TYPE_GEN4_PLL4,
 	CLK_TYPE_GEN4_PLL5,
 	CLK_TYPE_GEN4_PLL6,
+	CLK_TYPE_GEN4_SDSRC,
+	CLK_TYPE_GEN4_SDH,
 	CLK_TYPE_GEN4_SD,
-	CLK_TYPE_GEN4_R,
 	CLK_TYPE_GEN4_MDSEL,	/* Select parent/divider using mode pin */
 	CLK_TYPE_GEN4_Z,
-	CLK_TYPE_GEN4_ZG,
 	CLK_TYPE_GEN4_OSC,	/* OSC EXTAL predivider and fixed divider */
 	CLK_TYPE_GEN4_RPCSRC,
 	CLK_TYPE_GEN4_RPC,
@@ -30,6 +32,9 @@ enum rcar_gen4_clk_types {
 	CLK_TYPE_GEN4_SOC_BASE,
 };
 
+#define DEF_GEN4_SDH(_name, _id, _parent, _offset)	\
+	DEF_BASE(_name, _id, CLK_TYPE_GEN4_SDH, _parent, .offset = _offset)
+
 #define DEF_GEN4_SD(_name, _id, _parent, _offset)	\
 	DEF_BASE(_name, _id, CLK_TYPE_GEN4_SD, _parent, .offset = _offset)
 
@@ -37,11 +42,6 @@ enum rcar_gen4_clk_types {
 	DEF_BASE(_name, _id, CLK_TYPE_GEN4_MDSEL,	\
 		 (_parent0) << 16 | (_parent1),		\
 		 .div = (_div0) << 16 | (_div1), .offset = _md)
-
-#define DEF_GEN4_PE(_name, _id, _parent_clean, _div_clean, _parent_sscg, \
-		    _div_sscg) \
-	DEF_GEN4_MDSEL(_name, _id, 12, _parent_clean, _div_clean,	\
-		       _parent_sscg, _div_sscg)
 
 #define DEF_GEN4_OSC(_name, _id, _parent, _div)		\
 	DEF_BASE(_name, _id, CLK_TYPE_GEN4_OSC, _parent, .div = _div)
@@ -57,6 +57,8 @@ struct rcar_gen4_cpg_pll_config {
 	u8 pll2_div;
 	u8 pll3_mult;
 	u8 pll3_div;
+	u8 pll4_mult;
+	u8 pll4_div;
 	u8 pll5_mult;
 	u8 pll5_div;
 	u8 pll6_mult;
@@ -65,6 +67,7 @@ struct rcar_gen4_cpg_pll_config {
 };
 
 #define CPG_RPCCKCR	0x874
+#define SD0CKCR1	0x8a4
 
 struct clk *rcar_gen4_cpg_clk_register(struct device *dev,
 	const struct cpg_core_clk *core, const struct cpg_mssr_info *info,

@@ -55,12 +55,21 @@ static void intswcd_irq_set_masked(struct irq_data *d, bool masked)
 	val = ioread32(reg);
 	if (masked)
 		val &= ~ihi->mask;	/* mask irq = clear bit */
-	else
+	else {
 		val |= ihi->mask;	/* unmask irq = set bit */
+		if (ihi->quirk == INTSWCD_QUIRK_EXT_LVL) {
+			iowrite32(ihi->mask, edge_clr_reg(swcd, ihi->reg));
+			ioread32(edge_sts_reg(swcd, ihi->reg));
+		}
+	}
 	iowrite32(val, reg);
 	raw_spin_unlock_irqrestore(&swcd->lock, flags);
 }
 
+static void intswcd_irq_mask_ack(struct irq_data *d)
+{
+	intswcd_irq_set_masked(d, true);
+}
 static void intswcd_irq_mask(struct irq_data *d)
 {
 	intswcd_irq_set_masked(d, true);
@@ -75,6 +84,7 @@ static struct irq_chip intswcd_irq_chip = {
 	.name = "intswcd",
 	.irq_mask = intswcd_irq_mask,
 	.irq_unmask = intswcd_irq_unmask,
+	.irq_mask_ack = intswcd_irq_mask_ack,
 };
 
 static int intswcd_irq_map(struct irq_domain *domain, unsigned int irq,
@@ -87,10 +97,14 @@ static int intswcd_irq_map(struct irq_domain *domain, unsigned int irq,
 		return -EINVAL;
 	ihi = &swcd->ii->ihi[hwirq];
 
-	if (ihi->type == INTSWCD_LEVEL)
+	if ((ihi->type == INTSWCD_LEVEL) || (ihi->quirk == INTSWCD_QUIRK_EXT_LVL))
 		irq_set_status_flags(irq, IRQ_LEVEL);
-	irq_set_chip_and_handler(irq, &intswcd_irq_chip, handle_simple_irq);
 
+	if (ihi->quirk == INTSWCD_QUIRK_EXT_LVL)
+		irq_set_chip_and_handler(irq, &intswcd_irq_chip, handle_level_irq);
+	else 
+		irq_set_chip_and_handler(irq, &intswcd_irq_chip, handle_simple_irq);
+	
 	return 0;
 }
 
@@ -113,9 +127,12 @@ static int intswcd_irq_xlate(struct irq_domain *domain, struct device_node *dn,
 		return -EINVAL;
 
 	*out_hwirq = hwirq;
-	*out_type = ihi->type == INTSWCD_EDGE ?
-		    IRQ_TYPE_EDGE_RISING : IRQ_TYPE_LEVEL_HIGH;
-
+	if(ihi->quirk == INTSWCD_QUIRK_EXT_LVL)
+		*out_type = IRQ_TYPE_LEVEL_LOW;
+	else {
+		*out_type = ihi->type == INTSWCD_EDGE ?
+		    	IRQ_TYPE_EDGE_RISING : IRQ_TYPE_LEVEL_HIGH;
+	}
 	return 0;
 }
 
@@ -142,7 +159,18 @@ static void intswcd_irq_handler(struct irq_desc *desc)
 			continue;
 
 		ihi = &swcd->ii->ihi[hwirq];
-		if (ihi->type == INTSWCD_EDGE) {
+		if(ihi->quirk == INTSWCD_QUIRK_EXT_LVL) {
+			val = ioread32(edge_sts_reg(swcd, ihi->reg)) & ioread32(edge_msk_reg(swcd, ihi->reg));
+			if (val & ihi->mask) {
+				val = ioread32(edge_msk_reg(swcd, ihi->reg));
+				/* mask irq = clear bit */
+				val = val & ~ihi->mask;
+
+				iowrite32(val, edge_msk_reg(swcd, ihi->reg));
+
+				generic_handle_irq(virq);
+			}
+		} else if (ihi->type == INTSWCD_EDGE) {
 			val = ioread32(edge_sts_reg(swcd, ihi->reg)) &
 			      ioread32(edge_msk_reg(swcd, ihi->reg));
 			if (val & ihi->mask) {

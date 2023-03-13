@@ -23,6 +23,31 @@
 		i2c5 = &i2c5;
 	};
 
+	cluster1_opp: opp_table10 {
+		compatible = "operating-points-v2";
+		opp-shared;
+		opp-500000000 {
+			opp-hz = /bits/ 64 <500000000>;
+			opp-microvolt = <880000>;
+			clock-latency-ns = <500000>;
+		};
+		opp-800000000 {
+			opp-hz = /bits/ 64 <800000000>;
+			opp-microvolt = <880000>;
+			clock-latency-ns = <500000>;
+		};
+		opp-1000000000 {
+			opp-hz = /bits/ 64 <1000000000>;
+			opp-microvolt = <880000>;
+			clock-latency-ns = <500000>;
+		};
+		opp-1200000000 {
+			opp-hz = /bits/ 64 <1200000000>;
+			opp-microvolt = <880000>;
+			clock-latency-ns = <500000>;
+			opp-suspend;
+		};
+	};
 
 	cpus {
 		#address-cells = <1>;
@@ -69,6 +94,9 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E0D0C0>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z0>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_0>;
 		};
 
@@ -78,6 +106,9 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E0D0C1>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z0>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_0>;
 		};
 
@@ -87,6 +118,9 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E0D1C0>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z0>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_1>;
 		};
 
@@ -96,6 +130,9 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E0D1C1>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z0>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_1>;
 		};
 
@@ -105,6 +142,9 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E1D0C0>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z1>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_2>;
 		};
 
@@ -114,6 +154,9 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E1D0C1>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z1>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_2>;
 		};
 
@@ -123,6 +166,9 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E1D1C0>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z1>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_3>;
 		};
 
@@ -132,8 +178,24 @@
 			device_type = "cpu";
 			power-domains = <&sysc R8A779F0_PD_A1E1D1C1>;
 			enable-method = "psci";
+			cpu-idle-states = <&CPU_SLEEP_0>;
+			clocks =<&cpg CPG_CORE R8A779F0_CLK_Z1>;
+			operating-points-v2 = <&cluster1_opp>;
 			next-level-cache = <&L3_CA55_3>;
 		};
+
+		idle-states {
+			entry-method = "psci";
+
+			CPU_SLEEP_0: cpu-sleep-0 {
+				compatible = "arm,idle-state";
+				arm,psci-suspend-param = <0x0010000>;
+				local-timer-stop;
+				entry-latency-us = <400>;
+				exit-latency-us = <500>;
+				min-residency-us = <4000>;
+			};
+	       };
 
 		L3_CA55_0: cache-controller-0 {
 			compatible = "cache";
@@ -200,13 +262,6 @@
 	pmu_a76 {
 		compatible = "arm,cortex-a55-pmu";
 		interrupts-extended = <&gic GIC_PPI 7 IRQ_TYPE_LEVEL_LOW>;
-	};
-
-	/* MSIOF reference clock - to be overridden by boards that provide it */
-	msiof_ref_clk: msiof-ref-clock {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <0>;
 	};
 
 	/* External PCIe clock - can be overridden by the board */
@@ -333,7 +388,9 @@
 			clocks = <&cpg CPG_MOD 518>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 518>;
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x91>, <&dmac0 0x90>,
+			       <&dmac1 0x91>, <&dmac1 0x90>;
+			dma-names = "tx", "rx", "tx", "rx";
 			i2c-scl-internal-delay-ns = <110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -348,7 +405,9 @@
 			clocks = <&cpg CPG_MOD 519>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 519>;
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x93>, <&dmac0 0x92>,
+			       <&dmac1 0x93>, <&dmac1 0x92>;
+			dma-names = "tx", "rx", "tx", "rx";
 			i2c-scl-internal-delay-ns = <110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -363,7 +422,9 @@
 			clocks = <&cpg CPG_MOD 520>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 520>;
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x95>, <&dmac0 0x94>,
+			       <&dmac1 0x95>, <&dmac1 0x94>;
+			dma-names = "tx", "rx", "tx", "rx";
 			i2c-scl-internal-delay-ns = <110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -378,7 +439,9 @@
 			clocks = <&cpg CPG_MOD 521>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 521>;
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x97>, <&dmac0 0x96>,
+			       <&dmac1 0x97>, <&dmac1 0x96>;
+			dma-names = "tx", "rx", "tx", "rx";
 			i2c-scl-internal-delay-ns = <110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -393,7 +456,9 @@
 			clocks = <&cpg CPG_MOD 522>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 522>;
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x99>, <&dmac0 0x98>,
+			       <&dmac1 0x99>, <&dmac1 0x98>;
+			dma-names = "tx", "rx", "tx", "rx";
 			i2c-scl-internal-delay-ns = <110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -408,7 +473,9 @@
 			clocks = <&cpg CPG_MOD 523>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 523>;
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x9b>, <&dmac0 0x9a>,
+			       <&dmac1 0x9b>, <&dmac1 0x9a>;
+			dma-names = "tx", "rx", "tx", "rx";
 			i2c-scl-internal-delay-ns = <110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -421,6 +488,7 @@
 			      <0 0xe61a0000 0 0x100>,
 			      <0 0xe61a8000 0 0x100>,
 			      <0 0xe61b0000 0 0x100>;
+			interrupts = <GIC_SPI 768 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 919>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 919>;
@@ -433,10 +501,12 @@
 			reg = <0 0xe6540000 0 0x60>;
 			interrupts = <GIC_SPI 245 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 514>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x31>, <&dmac0 0x30>,
+			       <&dmac1 0x31>, <&dmac1 0x30>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 514>;
 			status = "disabled";
@@ -448,10 +518,12 @@
 			reg = <0 0xe6550000 0 0x60>;
 			interrupts = <GIC_SPI 246 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 515>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x33>, <&dmac0 0x32>,
+			       <&dmac1 0x33>, <&dmac1 0x32>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 515>;
 			status = "disabled";
@@ -463,10 +535,12 @@
 			reg = <0 0xe6560000 0 0x60>;
 			interrupts = <GIC_SPI 247 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 516>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x35>, <&dmac0 0x34>,
+			       <&dmac1 0x35>, <&dmac1 0x34>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 516>;
 			status = "disabled";
@@ -478,27 +552,25 @@
 			reg = <0 0xe66a0000 0 0x60>;
 			interrupts = <GIC_SPI 248 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 517>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x37>, <&dmac0 0x36>,
+			       <&dmac1 0x37>, <&dmac1 0x36>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 517>;
 			status = "disabled";
 		};
 
 		rswitch: ethernet@e68c0000 {
-			compatible = "renesas,rswitch2-r8a779f0",
-				     "renesas,rswitch2";
+			compatible = "renesas,etherswitch-r8a779f0",
+				     "renesas,etherswitch";
 			reg = <0 0xe68c0000 0 0x00020000>,
 			      <0 0xe6444000 0 0x2800>,
 			      <0 0xe643B000 0 0x800>;
 			reg-names = "iobase", "serdes", "sram";
-			#address-cells = <1>;
-			#size-cells = <0>;
-			clocks = <&cpg CPG_MOD 1505>,
-				<&cpg CPG_MOD 1506>;
-			clock-names = "rsw2", "eth-phy";
+
 			interrupts = <GIC_SPI 280 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 281 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH>,
@@ -529,8 +601,14 @@
 					  "gwca1_rxtx6", "gwca1_rxtx7",
 					  "gwca0_rxts0", "gwca0_rxts1",
 					  "gwca1_rxts0", "gwca1_rxts1";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&cpg CPG_MOD 1505>,
+				<&cpg CPG_MOD 1506>;
+			clock-names = "rsw2", "eth-phy";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 1505>, <&cpg 1506>;
+			reset-names = "rsw2", "eth-phy";
 			status = "disabled";
 
 			ports {
@@ -560,10 +638,12 @@
 			reg = <0 0xe6e60000 0 0x64>;
 			interrupts = <GIC_SPI 249 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 702>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3_PER>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x51>, <&dmac0 0x50>,
+			       <&dmac1 0x51>, <&dmac1 0x50>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 702>;
 			status = "disabled";
@@ -575,10 +655,12 @@
 			reg = <0 0xe6e68000 0 0x64>;
 			interrupts = <GIC_SPI 250 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 703>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3_PER>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x53>, <&dmac0 0x52>,
+			       <&dmac1 0x53>, <&dmac1 0x52>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 703>;
 			status = "disabled";
@@ -590,10 +672,12 @@
 			reg = <0 0xe6c50000 0 0x64>;
 			interrupts = <GIC_SPI 252 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 704>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3_PER>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x57>, <&dmac0 0x56>,
+			       <&dmac1 0x57>, <&dmac1 0x56>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 704>;
 			status = "disabled";
@@ -605,10 +689,12 @@
 			reg = <0 0xe6c40000 0 0x64>;
 			interrupts = <GIC_SPI 253 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cpg CPG_MOD 705>,
-				 <&cpg CPG_CORE R8A779F0_CLK_S0D3_PER>,
+				 <&cpg CPG_CORE R8A779F0_CLK_SASYNCPERD1>,
 				 <&scif_clk>;
 			clock-names = "fck", "brg_int", "scif_clk";
-			/* dmas and dma-names placeholder */
+			dmas = <&dmac0 0x59>, <&dmac0 0x58>,
+			       <&dmac1 0x59>, <&dmac1 0x58>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 705>;
 			status = "disabled";
@@ -619,9 +705,13 @@
 				     "renesas,rcar-gen4-msiof";
 			reg = <0 0xe6e90000 0 0x0064>;
 			interrupts = <GIC_SPI 230 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 618>, <&msiof_ref_clk>;
-			clock-names = "msiof_clk", "msiof_ref_clk";
-			/* dmas and dma-names placeholder */
+			clocks = <&cpg CPG_MOD 618>, <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			clock-names = "msiof_clk", "mso";
+			assigned-clocks = <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			assigned-clock-rates = <20000000>;
+			dmas = <&dmac0 0x41>, <&dmac0 0x40>,
+			       <&dmac1 0x41>, <&dmac1 0x40>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 618>;
 			#address-cells = <1>;
@@ -634,9 +724,13 @@
 				     "renesas,rcar-gen4-msiof";
 			reg = <0 0xe6ea0000 0 0x0064>;
 			interrupts = <GIC_SPI 231 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 619>, <&msiof_ref_clk>;
-			clock-names = "msiof_clk", "msiof_ref_clk";
-			/* dmas and dma-names placeholder */
+			clocks = <&cpg CPG_MOD 619>, <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			clock-names = "msiof_clk", "mso";
+			assigned-clocks = <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			assigned-clock-rates = <20000000>;
+			dmas = <&dmac0 0x43>, <&dmac0 0x42>,
+			       <&dmac1 0x43>, <&dmac1 0x42>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 619>;
 			#address-cells = <1>;
@@ -649,9 +743,13 @@
 				     "renesas,rcar-gen4-msiof";
 			reg = <0 0xe6c00000 0 0x0064>;
 			interrupts = <GIC_SPI 232 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 620>, <&msiof_ref_clk>;
-			clock-names = "msiof_clk", "msiof_ref_clk";
-			/* dmas and dma-names placeholder */
+			clocks = <&cpg CPG_MOD 620>, <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			clock-names = "msiof_clk", "mso";
+			assigned-clocks = <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			assigned-clock-rates = <20000000>;
+			dmas = <&dmac0 0x45>, <&dmac0 0x44>,
+			       <&dmac1 0x45>, <&dmac1 0x44>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 620>;
 			#address-cells = <1>;
@@ -664,9 +762,13 @@
 				     "renesas,rcar-gen4-msiof";
 			reg = <0 0xe6c10000 0 0x0064>;
 			interrupts = <GIC_SPI 233 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 621>, <&msiof_ref_clk>;
-			clock-names = "msiof_clk", "msiof_ref_clk";
-			/* dmas and dma-names placeholder */
+			clocks = <&cpg CPG_MOD 621>, <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			clock-names = "msiof_clk", "mso";
+			assigned-clocks = <&cpg CPG_CORE R8A779F0_CLK_MSO>;
+			assigned-clock-rates = <20000000>;
+			dmas = <&dmac0 0x47>, <&dmac0 0x46>,
+			       <&dmac1 0x47>, <&dmac1 0x46>;
+			dma-names = "tx", "rx", "tx", "rx";
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			resets = <&cpg 621>;
 			#address-cells = <1>;
@@ -674,7 +776,7 @@
 			status = "disabled";
 		};
 
-		dmac1: dma-controller@e7350000 {
+		dmac0: dma-controller@e7350000 {
 			compatible = "renesas,dmac-r8a779f0";
 			reg = <0 0xe7350000 0 0x1000>,
 			      <0 0xe7300000 0 0x10000>;
@@ -716,7 +818,7 @@
 			       <&ipmmu_ds0 14>, <&ipmmu_ds0 15>;
 		};
 
-		dmac2: dma-controller@e7351000 {
+		dmac1: dma-controller@e7351000 {
 			compatible = "renesas,dmac-r8a779f0";
 			reg = <0 0xe7351000 0 0x1000>,
 			      <0 0xe7310000 0 0x10000>;
@@ -835,6 +937,7 @@
 			resets = <&cpg 630>;
 			#dma-cells = <1>;
 			dma-channels = <16>;
+			status = "disabled";
 		};
 
 		rt_dmac1: dma-controller@ffd61000 {
@@ -869,6 +972,7 @@
 			resets = <&cpg 631>;
 			#dma-cells = <1>;
 			dma-channels = <16>;
+			status = "disabled";
 		};
 
 		rt_dmac2: dma-controller@ffd62000 {
@@ -903,6 +1007,7 @@
 			resets = <&cpg 700>;
 			#dma-cells = <1>;
 			dma-channels = <16>;
+			status = "disabled";
 		};
 
 		rt_dmac3: dma-controller@ffd63000 {
@@ -937,6 +1042,7 @@
 			resets = <&cpg 701>;
 			#dma-cells = <1>;
 			dma-channels = <16>;
+			status = "disabled";
 		};
 
 		ipmmu_mm: iommu@eefc0000 {
@@ -982,6 +1088,11 @@
 			#iommu-cells = <1>;
 			status = "disabled";
 		};
+
+                qos@e67e0000 {
+                        compatible = "renesas,qos";
+                        reg = <0 0xe67e0000 0 0x10090>;
+                };
 
 		pciec0: pcie@e65d0000 {
 			compatible = "renesas,r8a779f0-pcie";
@@ -1364,6 +1475,14 @@
 			linux,uio-name = "irq_iccom_00_23";
 		};
 
+		caiplite_wrapper {
+			compatible = "generic-uio";
+			clocks = <&cpg CPG_MOD 720>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			resets = <&cpg 720>;
+			linux,uio-name = "caiplite_wrapper_00";
+		};
+
 		caiplite0 {
 			compatible = "generic-uio";
 			reg = <0 0xe7800000 0 0x1000>;
@@ -1480,775 +1599,644 @@
 			linux,uio-name = "wcrc_caiplite_03";
 		};
 
-		rtdmac_control0: rtdmac_control@ffc10000 {
+		rtdmac_control0_00: rtdmac_control@ffc10000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc10000 0 0x1000>;
 			interrupts = <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			resets = <&cpg 630>;
-			linux,uio-name = "rtdmac_control_00";
+			linux,uio-name = "rtdmac_control0_00";
 			ipmmu-id = <RCAR_IPMMU_RT1 0>;
 			iommus = <&ipmmu_rt1 0>;
-			status = "disabled";
 		};
 
-		rtdmac_control001 {
+		rtdmac_control0_01: rtdmac_control@ffc11000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc11000 0 0x1000>;
 			interrupts = <GIC_SPI 31 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_01";
+			linux,uio-name = "rtdmac_control0_01";
 			ipmmu-id = <RCAR_IPMMU_RT1 1>;
 			iommus = <&ipmmu_rt1 1>;
-			status = "disabled";
 		};
 
-		rtdmac_control002 {
+		rtdmac_control0_02: rtdmac_control@ffc12000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc12000 0 0x1000>;
 			interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_02";
+			linux,uio-name = "rtdmac_control0_02";
 			ipmmu-id = <RCAR_IPMMU_RT1 2>;
 			iommus = <&ipmmu_rt1 2>;
-			status = "disabled";
 		};
 
-		rtdmac_control003 {
+		rtdmac_control0_03: rtdmac_control@ffc13000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc13000 0 0x1000>;
 			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_03";
+			linux,uio-name = "rtdmac_control0_03";
 			ipmmu-id = <RCAR_IPMMU_RT1 3>;
 			iommus = <&ipmmu_rt1 3>;
-			status = "disabled";
 		};
 
-		rtdmac_control004 {
+		rtdmac_control0_04: rtdmac_control@ffc14000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc14000 0 0x1000>;
 			interrupts = <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_04";
+			linux,uio-name = "rtdmac_control0_04";
 			ipmmu-id = <RCAR_IPMMU_RT1 4>;
 			iommus = <&ipmmu_rt1 4>;
-			status = "disabled";
 		};
 
-		rtdmac_control005 {
+		rtdmac_control0_05: rtdmac_control@ffc15000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc15000 0 0x1000>;
 			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			ipmmu-id = <RCAR_IPMMU_RT1 5>;
-			linux,uio-name = "irq_rtdmac_control_00_05";
+			linux,uio-name = "rtdmac_control0_05";
 			iommus = <&ipmmu_rt1 5>;
-			status = "disabled";
 		};
 
-		rtdmac_control006 {
+		rtdmac_control0_06: rtdmac_control@ffc16000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc16000 0 0x1000>;
 			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_06";
+			linux,uio-name = "rtdmac_control0_06";
 			ipmmu-id = <RCAR_IPMMU_RT1 6>;
 			iommus = <&ipmmu_rt1 6>;
-			status = "disabled";
 		};
 
-		rtdmac_control007 {
+		rtdmac_control0_07: rtdmac_control@ffc17000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc17000 0 0x1000>;
 			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_07";
+			linux,uio-name = "rtdmac_control0_07";
 			ipmmu-id = <RCAR_IPMMU_RT1 7>;
 			iommus = <&ipmmu_rt1 7>;
-			status = "disabled";
 		};
 
-		rtdmac_control008 {
+		rtdmac_control0_08: rtdmac_control@ffc18000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc18000 0 0x1000>;
 			interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_08";
+			linux,uio-name = "rtdmac_control0_08";
 			ipmmu-id = <RCAR_IPMMU_RT1 8>;
 			iommus = <&ipmmu_rt1 8>;
-			status = "disabled";
 		};
 
-		rtdmac_control009 {
+		rtdmac_control0_09: rtdmac_control@ffc19000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc19000 0 0x1000>;
 			interrupts = <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_09";
+			linux,uio-name = "rtdmac_control0_09";
 			ipmmu-id = <RCAR_IPMMU_RT1 9>;
 			iommus = <&ipmmu_rt1 9>;
-			status = "disabled";
 		};
 
-		rtdmac_control010 {
+		rtdmac_control0_10: rtdmac_control@ffc1a000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc1a000 0 0x1000>;
 			interrupts = <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_10";
+			linux,uio-name = "rtdmac_control0_10";
 			ipmmu-id = <RCAR_IPMMU_RT1 10>;
 			iommus = <&ipmmu_rt1 10>;
-			status = "disabled";
 		};
 
-		rtdmac_control011 {
+		rtdmac_control0_11: rtdmac_control@ffc1b000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc1b000 0 0x1000>;
 			interrupts = <GIC_SPI 41 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_11";
+			linux,uio-name = "rtdmac_control0_11";
 			ipmmu-id = <RCAR_IPMMU_RT1 11>;
 			iommus = <&ipmmu_rt1 11>;
-			status = "disabled";
 		};
 
-		rtdmac_control012 {
+		rtdmac_control0_12: rtdmac_control@ffc1c000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc1c000 0 0x1000>;
 			interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_12";
+			linux,uio-name = "rtdmac_control0_12";
 			ipmmu-id = <RCAR_IPMMU_RT1 12>;
 			iommus = <&ipmmu_rt1 12>;
-			status = "disabled";
 		};
 
-		rtdmac_control013 {
+		rtdmac_control0_13: rtdmac_control@ffc1d000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc1d000 0 0x1000>;
 			interrupts = <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			ipmmu-id = <RCAR_IPMMU_RT1 13>;
-			linux,uio-name = "irq_rtdmac_control_00_13";
+			linux,uio-name = "rtdmac_control0_13";
 			iommus = <&ipmmu_rt1 13>;
-			status = "disabled";
 		};
 
-		rtdmac_control014 {
+		rtdmac_control0_14: rtdmac_control@ffc1e000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc1e000 0 0x1000>;
 			interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 			ipmmu-id = <RCAR_IPMMU_RT1 14>;
-			linux,uio-name = "irq_rtdmac_control_00_14";
+			linux,uio-name = "rtdmac_control0_14";
 			iommus = <&ipmmu_rt1 14>;
-			status = "disabled";
 		};
 
-		rtdmac_control015 {
+		rtdmac_control0_15: rtdmac_control@ffc1f000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc10000 0 0x10000>;
+			reg = <0 0xffc1f000 0 0x1000>;
 			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_00_15";
+			linux,uio-name = "rtdmac_control0_15";
 			ipmmu-id = <RCAR_IPMMU_RT1 15>;
 			iommus = <&ipmmu_rt1 15>;
-			status = "disabled";
 		};
 
-		rtdmac_control1: rtdmac_control@ffc20000 {
+		rtdmac_control1_00: rtdmac_control@ffc20000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc20000 0 0x1000>;
 			interrupts = <GIC_SPI 48 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			resets = <&cpg 631>;
-			linux,uio-name = "rtdmac_control_01";
+			linux,uio-name = "rtdmac_control1_00";
 			ipmmu-id = <RCAR_IPMMU_RT1 16>;
 			iommus = <&ipmmu_rt1 16>;
-			status = "disabled";
 		};
 
-		rtdmac_control101 {
+		rtdmac_control1_01: rtdmac_control@ffc21000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc21000 0 0x1000>;
 			interrupts = <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_01";
+			linux,uio-name = "rtdmac_control1_01";
 			ipmmu-id = <RCAR_IPMMU_RT1 17>;
 			iommus = <&ipmmu_rt1 17>;
-			status = "disabled";
 		};
 
-		rtdmac_control102 {
+		rtdmac_control1_02: rtdmac_control@ffc22000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc22000 0 0x1000>;
 			interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_02";
+			linux,uio-name = "rtdmac_control1_02";
 			ipmmu-id = <RCAR_IPMMU_RT1 18>;
 			iommus = <&ipmmu_rt1 18>;
-			status = "disabled";
 		};
 
-		rtdmac_control103 {
+		rtdmac_control1_03: rtdmac_control@ffc23000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc23000 0 0x1000>;
 			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_03";
+			linux,uio-name = "rtdmac_control1_03";
 			ipmmu-id = <RCAR_IPMMU_RT1 19>;
 			iommus = <&ipmmu_rt1 19>;
-			status = "disabled";
 		};
 
-		rtdmac_control104 {
+		rtdmac_control1_04: rtdmac_control@ffc24000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc24000 0 0x1000>;
 			interrupts = <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_04";
+			linux,uio-name = "rtdmac_control1_04";
 			ipmmu-id = <RCAR_IPMMU_RT1 20>;
 			iommus = <&ipmmu_rt1 20>;
-			status = "disabled";
 		};
 
-		rtdmac_control105 {
+		rtdmac_control1_05: rtdmac_control@ffc25000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc25000 0 0x1000>;
 			interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_05";
+			linux,uio-name = "rtdmac_control1_05";
 			ipmmu-id = <RCAR_IPMMU_RT1 21>;
 			iommus = <&ipmmu_rt1 21>;
-			status = "disabled";
 		};
 
-		rtdmac_control106 {
+		rtdmac_control1_06: rtdmac_control@ffc26000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc26000 0 0x1000>;
 			interrupts = <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_06";
+			linux,uio-name = "rtdmac_control1_06";
 			ipmmu-id = <RCAR_IPMMU_RT1 22>;
 			iommus = <&ipmmu_rt1 22>;
-			status = "disabled";
 		};
 
-		rtdmac_control107 {
+		rtdmac_control1_07: rtdmac_control@ffc27000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc27000 0 0x1000>;
 			interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_07";
+			linux,uio-name = "rtdmac_control1_07";
 			ipmmu-id = <RCAR_IPMMU_RT1 23>;
 			iommus = <&ipmmu_rt1 23>;
-			status = "disabled";
 		};
 
-		rtdmac_control108 {
+		rtdmac_control1_08: rtdmac_control@ffc28000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc28000 0 0x1000>;
 			interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_08";
+			linux,uio-name = "rtdmac_control1_08";
 			ipmmu-id = <RCAR_IPMMU_RT1 24>;
 			iommus = <&ipmmu_rt1 24>;
-			status = "disabled";
 		};
 
-		rtdmac_control109 {
+		rtdmac_control1_09: rtdmac_control@ffc29000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc29000 0 0x1000>;
 			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_09";
+			linux,uio-name = "rtdmac_control1_09";
 			ipmmu-id = <RCAR_IPMMU_RT1 25>;
 			iommus = <&ipmmu_rt1 25>;
-			status = "disabled";
 		};
 
-		rtdmac_control110 {
+		rtdmac_control1_10: rtdmac_control@ffc2a000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc2a000 0 0x1000>;
 			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_10";
+			linux,uio-name = "rtdmac_control1_10";
 			ipmmu-id = <RCAR_IPMMU_RT1 26>;
 			iommus = <&ipmmu_rt1 26>;
-			status = "disabled";
 		};
 
-		rtdmac_control111 {
+		rtdmac_control1_11: rtdmac_control@ffc2b000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc2b000 0 0x1000>;
 			interrupts = <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_11";
+			linux,uio-name = "rtdmac_control1_11";
 			ipmmu-id = <RCAR_IPMMU_RT1 27>;
 			iommus = <&ipmmu_rt1 27>;
-			status = "disabled";
 		};
 
-		rtdmac_control112 {
+		rtdmac_control1_12: rtdmac_control@ffc2c000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc2c000 0 0x1000>;
 			interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_12";
+			linux,uio-name = "rtdmac_control1_12";
 			ipmmu-id = <RCAR_IPMMU_RT1 28>;
 			iommus = <&ipmmu_rt1 28>;
-			status = "disabled";
 		};
 
-		rtdmac_control113 {
+		rtdmac_control1_13: rtdmac_control@ffc2d000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc2d000 0 0x1000>;
 			interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_13";
+			linux,uio-name = "rtdmac_control1_13";
 			ipmmu-id = <RCAR_IPMMU_RT1 29>;
 			iommus = <&ipmmu_rt1 29>;
-			status = "disabled";
 		};
 
-		rtdmac_control114 {
+		rtdmac_control1_14: rtdmac_control@ffc2e000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc2e000 0 0x1000>;
 			interrupts = <GIC_SPI 62 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_14";
+			linux,uio-name = "rtdmac_control1_14";
 			ipmmu-id = <RCAR_IPMMU_RT1 30>;
 			iommus = <&ipmmu_rt1 30>;
-			status = "disabled";
 		};
 
-		rtdmac_control115 {
+		rtdmac_control1_15: rtdmac_control@ffc2f000 {
 			compatible = "generic-uio";
-			reg = <0 0xffc20000 0 0x10000>;
+			reg = <0 0xffc2f000 0 0x1000>;
 			interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_01_15";
+			linux,uio-name = "rtdmac_control1_15";
 			ipmmu-id = <RCAR_IPMMU_RT1 31>;
 			iommus = <&ipmmu_rt1 31>;
-			status = "disabled";
 		};
 
-		rtdmac_control2: rtdmac_control@ffd70000 {
+		rtdmac_control2_00: rtdmac_control@ffd70000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd70000 0 0x1000>;
 			interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			resets = <&cpg 700>;
-			linux,uio-name = "rtdmac_control_02";
+			linux,uio-name = "rtdmac_control2_00";
 			ipmmu-id = <RCAR_IPMMU_RT1 32>;
 			iommus = <&ipmmu_rt1 32>;
-			status = "disabled";
 		};
 
-		rtdmac_control201 {
+		rtdmac_control2_01: rtdmac_control@ffd71000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd71000 0 0x1000>;
 			interrupts = <GIC_SPI 67 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_01";
+			linux,uio-name = "rtdmac_control2_01";
 			ipmmu-id = <RCAR_IPMMU_RT1 33>;
 			iommus = <&ipmmu_rt1 33>;
-			status = "disabled";
 		};
 
-		rtdmac_control202 {
+		rtdmac_control2_02: rtdmac_control@ffd72000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd72000 0 0x1000>;
 			interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_02";
+			linux,uio-name = "rtdmac_control2_02";
 			ipmmu-id = <RCAR_IPMMU_RT1 34>;
 			iommus = <&ipmmu_rt1 34>;
-			status = "disabled";
 		};
 
-		rtdmac_control203 {
+		rtdmac_control2_03: rtdmac_control@ffd73000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd73000 0 0x1000>;
 			interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_03";
+			linux,uio-name = "rtdmac_control2_03";
 			ipmmu-id = <RCAR_IPMMU_RT1 35>;
 			iommus = <&ipmmu_rt1 35>;
-			status = "disabled";
 		};
 
-		rtdmac_control204 {
+		rtdmac_control2_04: rtdmac_control@ffd74000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd74000 0 0x1000>;
 			interrupts = <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_04";
+			linux,uio-name = "rtdmac_control2_04";
 			ipmmu-id = <RCAR_IPMMU_RT1 36>;
 			iommus = <&ipmmu_rt1 36>;
-			status = "disabled";
 		};
 
-		rtdmac_control205 {
+		rtdmac_control2_05: rtdmac_control@ffd75000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd75000 0 0x1000>;
 			interrupts = <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_05";
+			linux,uio-name = "rtdmac_control2_05";
 			ipmmu-id = <RCAR_IPMMU_RT1 37>;
 			iommus = <&ipmmu_rt1 37>;
-			status = "disabled";
 		};
 
-		rtdmac_control206 {
+		rtdmac_control2_06: rtdmac_control@ffd76000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd76000 0 0x1000>;
 			interrupts = <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_06";
+			linux,uio-name = "rtdmac_control2_06";
 			ipmmu-id = <RCAR_IPMMU_RT1 38>;
 			iommus = <&ipmmu_rt1 38>;
-			status = "disabled";
 		};
 
-		rtdmac_control207 {
+		rtdmac_control2_07: rtdmac_control@ffd77000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd77000 0 0x1000>;
 			interrupts = <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_07";
+			linux,uio-name = "rtdmac_control2_07";
 			ipmmu-id = <RCAR_IPMMU_RT1 39>;
 			iommus = <&ipmmu_rt1 39>;
-			status = "disabled";
 		};
 
-		rtdmac_control208 {
+		rtdmac_control2_08: rtdmac_control@ffd78000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd78000 0 0x1000>;
 			interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_08";
+			linux,uio-name = "rtdmac_control2_08";
 			ipmmu-id = <RCAR_IPMMU_RT1 40>;
 			iommus = <&ipmmu_rt1 40>;
-			status = "disabled";
 		};
 
-		rtdmac_control209 {
+		rtdmac_control2_09: rtdmac_control@ffd79000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd79000 0 0x1000>;
 			interrupts = <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_09";
+			linux,uio-name = "rtdmac_control2_09";
 			ipmmu-id = <RCAR_IPMMU_RT1 41>;
 			iommus = <&ipmmu_rt1 41>;
-			status = "disabled";
 		};
 
-		rtdmac_control210 {
+		rtdmac_control2_10: rtdmac_control@ffd7a000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd7a000 0 0x1000>;
 			interrupts = <GIC_SPI 76 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_10";
+			linux,uio-name = "rtdmac_control2_10";
 			ipmmu-id = <RCAR_IPMMU_RT1 42>;
 			iommus = <&ipmmu_rt1 42>;
-			status = "disabled";
 		};
 
-		rtdmac_control211 {
+		rtdmac_control2_11: rtdmac_control@ffd7b000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd7b000 0 0x1000>;
 			interrupts = <GIC_SPI 77 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_11";
+			linux,uio-name = "rtdmac_control2_11";
 			ipmmu-id = <RCAR_IPMMU_RT1 43>;
 			iommus = <&ipmmu_rt1 43>;
-			status = "disabled";
 		};
 
-		rtdmac_control212 {
+		rtdmac_control2_12: rtdmac_control@ffd7c000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd7c000 0 0x1000>;
 			interrupts = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_12";
+			linux,uio-name = "rtdmac_control2_12";
 			ipmmu-id = <RCAR_IPMMU_RT1 44>;
 			iommus = <&ipmmu_rt1 44>;
-			status = "disabled";
 		};
 
-		rtdmac_control213 {
+		rtdmac_control2_13: rtdmac_control@ffd7d000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd7d000 0 0x1000>;
 			interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_13";
+			linux,uio-name = "rtdmac_control2_13";
 			ipmmu-id = <RCAR_IPMMU_RT1 45>;
 			iommus = <&ipmmu_rt1 45>;
-			status = "disabled";
 		};
 
-		rtdmac_control214 {
+		rtdmac_control2_14: rtdmac_control@ffd7e000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd7e000 0 0x1000>;
 			interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_14";
+			linux,uio-name = "rtdmac_control2_14";
 			ipmmu-id = <RCAR_IPMMU_RT1 46>;
 			iommus = <&ipmmu_rt1 46>;
-			status = "disabled";
 		};
 
-		rtdmac_control215 {
+		rtdmac_control2_15: rtdmac_control@ffd7f000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd70000 0 0x10000>;
+			reg = <0 0xffd7f000 0 0x1000>;
 			interrupts = <GIC_SPI 81 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_02_15";
+			linux,uio-name = "rtdmac_control2_15";
 			ipmmu-id = <RCAR_IPMMU_RT1 47>;
 			iommus = <&ipmmu_rt1 47>;
-			status = "disabled";
 		};
 
-		rtdmac_control3: rtdmac_control@ffd80000 {
+		rtdmac_control3_00: rtdmac_control@ffd80000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd80000 0 0x1000>;
 			interrupts = <GIC_SPI 84 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			resets = <&cpg 701>;
-			linux,uio-name = "rtdmac_control_03";
+			linux,uio-name = "rtdmac_control3_00";
 			ipmmu-id = <RCAR_IPMMU_RT1 48>;
 			iommus = <&ipmmu_rt1 48>;
-			status = "disabled";
 		};
 
-		rtdmac_control301 {
+		rtdmac_control3_01: rtdmac_control@ffd81000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd81000 0 0x1000>;
 			interrupts = <GIC_SPI 85 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_01";
+			linux,uio-name = "rtdmac_control3_01";
 			ipmmu-id = <RCAR_IPMMU_RT1 49>;
 			iommus = <&ipmmu_rt1 49>;
 		};
 
-		rtdmac_control302 {
+		rtdmac_control3_02: rtdmac_control@ffd82000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd82000 0 0x1000>;
 			interrupts = <GIC_SPI 86 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_02";
+			linux,uio-name = "rtdmac_control3_02";
 			ipmmu-id = <RCAR_IPMMU_RT1 50>;
 			iommus = <&ipmmu_rt1 50>;
-			status = "disabled";
 		};
 
-		rtdmac_control303 {
+		rtdmac_control3_03: rtdmac_control@ffd83000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd83000 0 0x1000>;
 			interrupts = <GIC_SPI 87 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_03";
+			linux,uio-name = "rtdmac_control3_03";
 			ipmmu-id = <RCAR_IPMMU_RT1 51>;
 			iommus = <&ipmmu_rt1 51>;
-			status = "disabled";
 		};
 
-		rtdmac_control304 {
+		rtdmac_control3_04: rtdmac_control@ffd84000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd84000 0 0x1000>;
 			interrupts = <GIC_SPI 88 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_04";
+			linux,uio-name = "rtdmac_control3_04";
 			ipmmu-id = <RCAR_IPMMU_RT1 52>;
 			iommus = <&ipmmu_rt1 52>;
-			status = "disabled";
 		};
 
-		rtdmac_control305 {
+		rtdmac_control3_05: rtdmac_control@ffd85000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd85000 0 0x1000>;
 			interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_05";
+			linux,uio-name = "rtdmac_control3_05";
 			ipmmu-id = <RCAR_IPMMU_RT1 53>;
 			iommus = <&ipmmu_rt1 53>;
-			status = "disabled";
 		};
 
-		rtdmac_control306 {
+		rtdmac_control3_06: rtdmac_control@ffd86000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd86000 0 0x1000>;
 			interrupts = <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_06";
+			linux,uio-name = "rtdmac_control3_06";
 			ipmmu-id = <RCAR_IPMMU_RT1 54>;
 			iommus = <&ipmmu_rt1 54>;
-			status = "disabled";
 		};
 
-		rtdmac_control307 {
+		rtdmac_control3_07: rtdmac_control@ffd87000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd87000 0 0x1000>;
 			interrupts = <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_07";
+			linux,uio-name = "rtdmac_control3_07";
 			ipmmu-id = <RCAR_IPMMU_RT1 55>;
 			iommus = <&ipmmu_rt1 55>;
-			status = "disabled";
 		};
 
-		rtdmac_control308 {
+		rtdmac_control3_08: rtdmac_control@ffd88000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd88000 0 0x1000>;
 			interrupts = <GIC_SPI 92 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_08";
+			linux,uio-name = "rtdmac_control3_08";
 			ipmmu-id = <RCAR_IPMMU_RT1 56>;
 			iommus = <&ipmmu_rt1 56>;
-			status = "disabled";
 		};
 
-		rtdmac_control309 {
+		rtdmac_control3_09: rtdmac_control@ffd89000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd89000 0 0x1000>;
 			interrupts = <GIC_SPI 93 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_09";
+			linux,uio-name = "rtdmac_control3_09";
 			ipmmu-id = <RCAR_IPMMU_RT1 57>;
 			iommus = <&ipmmu_rt1 57>;
-			status = "disabled";
 		};
 
-		rtdmac_control310 {
+		rtdmac_control3_10: rtdmac_control@ffd8a000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd8a000 0 0x1000>;
 			interrupts = <GIC_SPI 94 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_10";
+			linux,uio-name = "rtdmac_control3_10";
 			ipmmu-id = <RCAR_IPMMU_RT1 58>;
 			iommus = <&ipmmu_rt1 58>;
-			status = "disabled";
 		};
 
-		rtdmac_control311 {
+		rtdmac_control3_11: rtdmac_control@ffd8b000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd8b000 0 0x1000>;
 			interrupts = <GIC_SPI 95 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_11";
+			linux,uio-name = "rtdmac_control3_11";
 			ipmmu-id = <RCAR_IPMMU_RT1 59>;
 			iommus = <&ipmmu_rt1 59>;
-			status = "disabled";
 		};
 
-		rtdmac_control312 {
+		rtdmac_control3_12: rtdmac_control@ffd8c000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd8c000 0 0x1000>;
 			interrupts = <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_12";
+			linux,uio-name = "rtdmac_control3_12";
 			ipmmu-id = <RCAR_IPMMU_RT1 60>;
 			iommus = <&ipmmu_rt1 60>;
-			status = "disabled";
 		};
 
-		rtdmac_control313 {
+		rtdmac_control3_13: rtdmac_control@ffd8d000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd8d000 0 0x1000>;
 			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_13";
+			linux,uio-name = "rtdmac_control3_13";
 			ipmmu-id = <RCAR_IPMMU_RT1 61>;
 			iommus = <&ipmmu_rt1 61>;
-			status = "disabled";
 		};
 
-		rtdmac_control314 {
+		rtdmac_control3_14: rtdmac_control@ffd8e000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd8e000 0 0x1000>;
 			interrupts = <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_14";
+			linux,uio-name = "rtdmac_control3_14";
 			ipmmu-id = <RCAR_IPMMU_RT1 62>;
 			iommus = <&ipmmu_rt1 62>;
-			status = "disabled";
 		};
 
-		rtdmac_control315 {
+		rtdmac_control3_15: rtdmac_control@ffd8f000 {
 			compatible = "generic-uio";
-			reg = <0 0xffd80000 0 0x10000>;
+			reg = <0 0xffd8f000 0 0x1000>;
 			interrupts = <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_rtdmac_control_03_15";
+			linux,uio-name = "rtdmac_control3_15";
 			ipmmu-id = <RCAR_IPMMU_RT1 63>;
 			iommus = <&ipmmu_rt1 63>;
-			status = "disabled";
 		};
 
 		rtdmac_descriptor0: rtdmac_descriptor@ffd60000 {
@@ -2256,7 +2244,8 @@
 			reg = <0 0xffd60000 0 0x1000>;
 			clocks = <&cpg CPG_MOD 630>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "rtdmac_descriptor_00";
+			resets = <&cpg 630>;
+			linux,uio-name = "rtdmac_descriptor0_00";
 		};
 
 		rtdmac_descriptor1: rtdmac_descriptor@ffd61000 {
@@ -2264,7 +2253,8 @@
 			reg = <0 0xffd61000 0 0x1000>;
 			clocks = <&cpg CPG_MOD 631>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "rtdmac_descriptor_01";
+			resets = <&cpg 631>;
+			linux,uio-name = "rtdmac_descriptor1_00";
 		};
 
 		rtdmac_descriptor2: rtdmac_descriptor@ffd62000 {
@@ -2272,7 +2262,8 @@
 			reg = <0 0xffd62000 0 0x1000>;
 			clocks = <&cpg CPG_MOD 700>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "rtdmac_descriptor_02";
+			resets = <&cpg 700>;
+			linux,uio-name = "rtdmac_descriptor2_00";
 		};
 
 		rtdmac_descriptor3: rtdmac_descriptor@ffd63000 {
@@ -2280,7 +2271,8 @@
 			reg = <0 0xffd63000 0 0x1000>;
 			clocks = <&cpg CPG_MOD 701>;
 			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
-			linux,uio-name = "rtdmac_descriptor_03";
+			resets = <&cpg 701>;
+			linux,uio-name = "rtdmac_descriptor3_00";
 		};
 
 		ships0: ships0@e7810000 {
@@ -2347,6 +2339,206 @@
 			linux,uio-name = "system_ram_00";
 		};
 
+		icumx_cmd0: icumx_cmd@e6610000 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 192 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "icumx_cmd_00";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_01 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 193 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_01";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_02 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 194 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_02";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_03 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 195 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_03";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_04 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 196 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_04";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_05 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 197 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_05";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_06 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 198 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_06";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_07 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 199 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_07";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_08 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 200 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_08";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_09 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 201 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_09";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_10 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 202 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_10";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_11 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 203 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_11";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_12 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 204 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_12";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_13 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 205 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_13";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_14 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 206 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_14";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_15 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 207 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_15";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_16 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 208 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_16";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_17 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 209 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_17";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_18 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 210 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_18";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
+		icumx_cmd0_19 {
+			compatible = "generic-uio";
+			reg = <0 0xe6610000 0 0x8000>;
+			interrupts = <GIC_SPI 211 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+			linux,uio-name = "irq_icumx_cmd_00_19";
+			ipmmu-id = <RCAR_IPMMU_RT0 1>;
+			iommus = <&ipmmu_rt0 1>, <&ipmmu_rt0 2>;
+		};
+
 		ufs: scsi@e6860000 {
 			compatible = "renesas,r8a779f0-ufs";
 			reg = <0 0xe6860000 0 0x100>;
@@ -2363,7 +2555,7 @@
 	thermal-zones {
 		sensor_thermal1: sensor-thermal1 {
 			polling-delay-passive = <250>;
-			polling-delay = <1000>;
+			polling-delay = <0>;
 			thermal-sensors = <&tsc 0>;
 			//sustainable-power = <1000>;
 
@@ -2378,7 +2570,7 @@
 
 		sensor_thermal2: sensor-thermal2 {
 			polling-delay-passive = <250>;
-			polling-delay = <1000>;
+			polling-delay = <0>;
 			thermal-sensors = <&tsc 1>;
 			//sustainable-power = <1000>;
 
@@ -2393,7 +2585,7 @@
 
 		sensor_thermal3: sensor-thermal3 {
 			polling-delay-passive = <250>;
-			polling-delay = <1000>;
+			polling-delay = <0>;
 			thermal-sensors = <&tsc 2>;
 			//sustainable-power = <1000>;
 

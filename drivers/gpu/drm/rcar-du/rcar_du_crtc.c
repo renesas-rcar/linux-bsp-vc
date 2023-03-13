@@ -32,19 +32,18 @@
 #include "rcar_du_vsp.h"
 #include "rcar_lvds.h"
 #include "rcar_mipi_dsi.h"
+#include "rcar_dsc.h"
 
 static bool rcar_du_register_access_check(struct rcar_du_crtc *rcrtc, u32 reg)
 {
 	struct rcar_du_device *rcdu = rcrtc->dev;
 	struct rcar_du_group *rgrp = rcrtc->group;
-	u32 escr13 = ESCR13 + DU1_REG_OFFSET;
-	u32 otar13 = OTAR13 + DU1_REG_OFFSET;
 
 	/* ESCR register access check */
-	if (reg == ESCR02 || reg == escr13) {
+	if (reg == ESCR02 || reg == ESCR13) {
 		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A7795_REGS) ||
 		    rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A77965_REGS)) {
-			if (rgrp->index == 0 && reg == escr13)
+			if (rgrp->index == 0 && reg == ESCR13)
 				return false;
 			else if (rgrp->index == 1 && reg == ESCR02)
 				return false;
@@ -52,20 +51,21 @@ static bool rcar_du_register_access_check(struct rcar_du_crtc *rcrtc, u32 reg)
 				return true;
 		}
 		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A7796_REGS)) {
-			if (rgrp->index == 0 && reg == escr13)
+			if (rgrp->index == 0 && reg == ESCR13)
 				return false;
 			else
 				return true;
 		}
-		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS))
+		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS) ||
+			rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779G0_REGS))
 			return false;
 	}
 
 	/* OTAR register access check */
-	if (reg == OTAR02 || reg == otar13) {
+	if (reg == OTAR02 || reg == OTAR13) {
 		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A7795_REGS) ||
 		    rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A77965_REGS)) {
-			if (rgrp->index == 1 && reg == otar13)
+			if (rgrp->index == 1 && reg == OTAR13)
 				return true;
 			else
 				return false;
@@ -76,7 +76,8 @@ static bool rcar_du_register_access_check(struct rcar_du_crtc *rcrtc, u32 reg)
 			else
 				return false;
 		}
-		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS))
+		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS) ||
+			rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779G0_REGS))
 			return false;
 	}
 
@@ -281,6 +282,7 @@ static void rcar_du_crtc_set_display_timing(struct rcar_du_crtc *rcrtc)
 	const struct drm_display_mode *mode = &rcrtc->crtc.state->adjusted_mode;
 	struct rcar_du_device *rcdu = rcrtc->dev;
 	unsigned long mode_clock = mode->clock * 1000;
+	unsigned int hdse_offset;
 	u32 dsmr;
 	u32 escr;
 
@@ -367,10 +369,15 @@ static void rcar_du_crtc_set_display_timing(struct rcar_du_crtc *rcrtc)
 	     | DSMR_DIPM_DISP | DSMR_CSPM;
 	rcar_du_crtc_write(rcrtc, DSMR, dsmr);
 
+	hdse_offset = 19;
+	if (rcrtc->group->cmms_mask & BIT(rcrtc->index % 2))
+		hdse_offset += 25;
+
 	/* Display timings */
-	rcar_du_crtc_write(rcrtc, HDSR, mode->htotal - mode->hsync_start - 19);
+	rcar_du_crtc_write(rcrtc, HDSR, mode->htotal - mode->hsync_start -
+					hdse_offset);
 	rcar_du_crtc_write(rcrtc, HDER, mode->htotal - mode->hsync_start +
-					mode->hdisplay - 19);
+					mode->hdisplay - hdse_offset);
 	rcar_du_crtc_write(rcrtc, HSWR, mode->hsync_end -
 					mode->hsync_start - 1);
 	rcar_du_crtc_write(rcrtc, HCR,  mode->htotal - 1);
@@ -611,6 +618,7 @@ static void rcar_du_crtc_setup(struct rcar_du_crtc *rcrtc)
 
 static int rcar_du_crtc_get(struct rcar_du_crtc *rcrtc)
 {
+	struct rcar_du_device *rcdu = rcrtc->dev;
 	int ret;
 
 	/*
@@ -619,6 +627,24 @@ static int rcar_du_crtc_get(struct rcar_du_crtc *rcrtc)
 	 */
 	if (rcrtc->initialized)
 		return 0;
+
+	/*
+	 * The dot clock is provided by the MIPI DSI encoder which is attached
+	 * to DU. So, the MIPI DSI module should be enable before starting DU.
+	 */
+	if (rcdu->info->mipi_dsi_clk_mask) {
+		struct drm_bridge *bridge = rcdu->mipi_dsi[rcrtc->index];
+		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779G0_REGS) &&
+			rcrtc->index == 1)
+		{
+			struct rcar_dsc *dsc = bridge->driver_private;
+			rcar_mipi_dsi_clk_enable(dsc->next_bridge);
+		}
+		else
+		{
+			rcar_mipi_dsi_clk_enable(bridge);
+		}
+	}
 
 	ret = clk_prepare_enable(rcrtc->clock);
 	if (ret < 0)
@@ -646,10 +672,26 @@ error_clock:
 
 static void rcar_du_crtc_put(struct rcar_du_crtc *rcrtc)
 {
+	struct rcar_du_device *rcdu = rcrtc->dev;
+
 	rcar_du_group_put(rcrtc->group);
 
 	clk_disable_unprepare(rcrtc->extclock);
 	clk_disable_unprepare(rcrtc->clock);
+
+	if (rcdu->info->mipi_dsi_clk_mask) {
+		struct drm_bridge *bridge = rcdu->mipi_dsi[rcrtc->index];
+		if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779G0_REGS) &&
+			rcrtc->index == 1)
+		{
+			struct rcar_dsc *dsc = bridge->driver_private;
+			rcar_mipi_dsi_clk_disable(dsc->next_bridge);
+		}
+		else
+		{
+			rcar_mipi_dsi_clk_disable(bridge);
+		}
+	}
 
 	rcrtc->initialized = false;
 }
@@ -803,15 +845,6 @@ static void rcar_du_crtc_atomic_enable(struct drm_crtc *crtc,
 		rcar_lvds_clk_enable(bridge, mode->clock * 1000);
 	}
 
-	/*
-	 * On V3U the dot clock is provided by the MIPI DSI encoder which is attached
-	 * to DU. So, the MIPI DSI module should be enable before starting DU.
-	 */
-	if (rcdu->info->mipi_dsi_clk_mask & BIT(rcrtc->index)) {
-		struct drm_bridge *bridge = rcdu->mipi_dsi[rcrtc->index];
-		rcar_mipi_dsi_clk_enable(bridge);
-	}
-
 	rcar_du_crtc_start(rcrtc);
 
 	/*
@@ -841,15 +874,6 @@ static void rcar_du_crtc_atomic_disable(struct drm_crtc *crtc,
 		 * rcar_du_crtc_atomic_enable().
 		 */
 		rcar_lvds_clk_disable(bridge);
-	}
-
-	if (rcdu->info->mipi_dsi_clk_mask & BIT(rcrtc->index)) {
-		struct drm_bridge *bridge = rcdu->mipi_dsi[rcrtc->index];
-
-		/*
-		 * Disable the MIPI DSI clock output
-		 */
-		rcar_mipi_dsi_clk_disable(bridge);
 	}
 
 	spin_lock_irq(&crtc->dev->event_lock);
@@ -918,6 +942,7 @@ rcar_du_crtc_mode_valid(struct drm_crtc *crtc,
 	struct rcar_du_crtc *rcrtc = to_rcar_crtc(crtc);
 	struct rcar_du_device *rcdu = rcrtc->dev;
 	bool interlaced = mode->flags & DRM_MODE_FLAG_INTERLACE;
+	unsigned int min_sync_porch;
 	unsigned int vbp;
 
 	if (interlaced && !rcar_du_has(rcdu, RCAR_DU_FEATURE_INTERLACED))
@@ -925,9 +950,14 @@ rcar_du_crtc_mode_valid(struct drm_crtc *crtc,
 
 	/*
 	 * The hardware requires a minimum combined horizontal sync and back
-	 * porch of 20 pixels and a minimum vertical back porch of 3 lines.
+	 * porch of 20 pixels (when CMM isn't used) or 45 pixels (when CMM is
+	 * used), and a minimum vertical back porch of 3 lines.
 	 */
-	if (mode->htotal - mode->hsync_start < 20)
+	min_sync_porch = 20;
+	if (rcrtc->group->cmms_mask & BIT(rcrtc->index % 2))
+		min_sync_porch += 25;
+
+	if (mode->htotal - mode->hsync_start < min_sync_porch)
 		return MODE_HBLANK_NARROW;
 
 	vbp = (mode->vtotal - mode->vsync_end) / (interlaced ? 2 : 1);
@@ -1208,7 +1238,7 @@ static const struct drm_crtc_funcs crtc_funcs_gen2 = {
 	.disable_vblank = rcar_du_crtc_disable_vblank,
 };
 
-static const struct drm_crtc_funcs crtc_funcs_gen3 = {
+static const struct drm_crtc_funcs crtc_funcs_gen3_4 = {
 	.reset = rcar_du_crtc_reset,
 	.destroy = rcar_du_crtc_cleanup,
 	.set_config = drm_atomic_helper_set_config,
@@ -1328,7 +1358,8 @@ int rcar_du_crtc_create(struct rcar_du_group *rgrp, unsigned int swindex,
 	rcrtc->index = hwindex;
 	rcrtc->dsysr = (rcrtc->index % 2 ? 0 : DSYSR_DRES) | DSYSR_TVM_TVSYNC;
 	/* In V3U, the bit TVM and SCM are always set to 0 */
-	if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS))
+	if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS) ||
+		rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779G0_REGS))
 		rcrtc->dsysr = rcrtc->dsysr &
 				~(DSYSR_SCM_MASK | DSYSR_TVM_MASK);
 
@@ -1344,7 +1375,7 @@ int rcar_du_crtc_create(struct rcar_du_group *rgrp, unsigned int swindex,
 
 	ret = drm_crtc_init_with_planes(rcdu->ddev, crtc, primary, NULL,
 					rcdu->info->gen <= 2 ?
-					&crtc_funcs_gen2 : &crtc_funcs_gen3,
+					&crtc_funcs_gen2 : &crtc_funcs_gen3_4,
 					NULL);
 	if (ret < 0)
 		return ret;

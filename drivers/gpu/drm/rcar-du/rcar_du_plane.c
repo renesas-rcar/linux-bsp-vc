@@ -498,7 +498,7 @@ static void rcar_du_plane_setup_format_gen2(struct rcar_du_group *rgrp,
 	rcar_du_plane_write(rgrp, index, PnDDCR4, ddcr4);
 }
 
-static void rcar_du_plane_setup_format_gen3(struct rcar_du_group *rgrp,
+static void rcar_du_plane_setup_format_gen3_4(struct rcar_du_group *rgrp,
 					    unsigned int index,
 					    const struct rcar_du_plane_state *state)
 {
@@ -507,7 +507,8 @@ static void rcar_du_plane_setup_format_gen3(struct rcar_du_group *rgrp,
 
 	if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A7795_REGS)) {
 		pnmr = PnMR_SPIM_TP_OFF | state->format->pnmr;
-	} else if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS)) {
+	} else if (rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779A0_REGS) ||
+				rcar_du_has(rcdu, RCAR_DU_FEATURE_R8A779G0_REGS)) {
 		pnmr = PnMR_SPIM_TP_OFF | (state->format->pnmr & ~PnMR_SPIM_ALP);
 	} else {
 		if (rgrp->index == 0)
@@ -520,6 +521,12 @@ static void rcar_du_plane_setup_format_gen3(struct rcar_du_group *rgrp,
 
 	rcar_du_plane_write(rgrp, index, PnDDCR4,
 			    state->format->edf | PnDDCR4_CODE);
+
+	/* In Gen3, PnALPHAR register need to be set to 0
+	 * to avoid black screen issue when alpha blend is enable
+	 * on DU module
+	 */
+	rcar_du_plane_write(rgrp, index, PnALPHAR, PnALPHAR_BRSL);
 }
 
 static void rcar_du_plane_setup_format(struct rcar_du_group *rgrp,
@@ -532,7 +539,7 @@ static void rcar_du_plane_setup_format(struct rcar_du_group *rgrp,
 	if (rcdu->info->gen < 3)
 		rcar_du_plane_setup_format_gen2(rgrp, index, state);
 	else
-		rcar_du_plane_setup_format_gen3(rgrp, index, state);
+		rcar_du_plane_setup_format_gen3_4(rgrp, index, state);
 
 	/* Destination position and size */
 	rcar_du_plane_write(rgrp, index, PnDSXR, drm_rect_width(dst));
@@ -559,8 +566,10 @@ void __rcar_du_plane_setup(struct rcar_du_group *rgrp,
 		rcar_du_plane_setup_format(rgrp, (state->hwindex + 1) % 8,
 					   state);
 
-	if (rcdu->info->gen < 3)
-		rcar_du_plane_setup_scanout(rgrp, state);
+	if (rcdu->info->gen >= 3)
+		return;
+
+	rcar_du_plane_setup_scanout(rgrp, state);
 
 	if (state->source == RCAR_DU_PLANE_VSPD1) {
 		unsigned int vspd1_sink = rgrp->index ? 2 : 0;
@@ -568,6 +577,12 @@ void __rcar_du_plane_setup(struct rcar_du_group *rgrp,
 		if (rcdu->vspd1_sink != vspd1_sink) {
 			rcdu->vspd1_sink = vspd1_sink;
 			rcar_du_set_dpad0_vsp1_routing(rcdu);
+
+			/*
+			 * Changes to the VSP1 sink take effect on DRES and thus
+			 * need a restart of the group.
+			 */
+			rgrp->need_restart = true;
 		}
 	}
 }

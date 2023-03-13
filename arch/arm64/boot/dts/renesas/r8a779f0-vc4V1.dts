@@ -31,6 +31,11 @@
 		reg = <0x0 0x48000000 0x0 0x78000000>;
 	};
 
+	memory@480000000 {
+		device_type = "memory";
+		reg = <0x4 0x80000000 0x0 0x80000000>;
+	};
+
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -58,6 +63,43 @@
 
 		gpio = <&gpio1 24 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
+	};
+	
+	cpus {
+	
+		a55_0: cpu@0 {
+			/delete-property/ cpu-idle-states ;
+		};
+
+		a55_1: cpu@100 {
+			/delete-property/ cpu-idle-states ;
+		};
+
+		a55_2: cpu@10000 {
+			/delete-property/ cpu-idle-states ;
+		};
+
+		a55_3: cpu@10100 {
+			/delete-property/ cpu-idle-states ;
+		};
+
+		a55_4: cpu@20000 {
+			/delete-property/ cpu-idle-states ;
+		};
+
+		a55_5: cpu@20100 {
+			/delete-property/ cpu-idle-states ;
+		};
+
+		a55_6: cpu@30000 {
+			/delete-property/ cpu-idle-states ;
+		};
+
+		a55_7: cpu@30100 {
+			/delete-property/ cpu-idle-states ;
+		};
+	
+		/delete-node/ idle-states;
 	};
 };
 
@@ -95,10 +137,26 @@
 		compatible = "st,24c16", "atmel,24c16";
 		reg = <0x50>;
 
+		#address-cells = <1>;
+		#size-cells = <1>;
+
 		vcc-supply = <&reg_3p3v>;
 
 		label = "board-data";
 		pagesize = <8>;
+
+		rswitch2_gw_mac: rsw2gwmac@720 {
+			reg = <0x720 0x06>;
+		};
+		rswitch2_port0_mac: rsw2p2mac@728 {
+			reg = <0x728 0x06>;
+		};
+		rswitch2_port1_mac: rsw2p2mac@730 {
+			reg = <0x730 0x06>;
+		};
+		rswitch2_port2_mac: rsw2p2mac@738 {
+			reg = <0x738 0x06>;
+		};
 	};
 
 	fpga4000: fpga4000@71 {
@@ -272,13 +330,28 @@
 &rswitch {
 	status = "okay";
 
+	/* MAC address of the gateway port sw0 */
+	nvmem-cells = <&rswitch2_gw_mac>;
+	nvmem-cell-names = "mac-address";
+
+	/* All 00 to be overwritten by bootloader or manually */
+	mac-address = [00 00 00 00 00 00];
+
 	ports {
 		tsn0: port@0 {
 			phy-mode = "sgmii";
+
+			nvmem-cells = <&rswitch2_port0_mac>;
+			nvmem-cell-names = "mac-address";
+
+			/* All 00 to be overwritten by bootloader or manually */
+			mac-address = [00 00 00 00 00 00];
+
+
 			/* phy-handle set via plugin */
 			tsn0_phy_2g5: ethernet-phy@0 {
 				reg = <0>;
-				compatible = "ethernet-phy-ieee802.3-c45";
+				compatible = "ethernet-phy-id0000.0000";
 				status = "disabled";
 			};
 			tsn0_phy_1g: ethernet-phy@3 {
@@ -289,6 +362,13 @@
 		};
 		tsn1: port@1 {
 			phy-mode = "sgmii";
+
+			nvmem-cells = <&rswitch2_port1_mac>;
+			nvmem-cell-names = "mac-address";
+
+			/* All 00 to be overwritten by bootloader or manually */
+			mac-address = [00 00 00 00 00 00];
+
 			/* phy-handle set via plugin */
 			tsn1_phy_2g5: ethernet-phy@0 {
 				reg = <0>;
@@ -303,6 +383,14 @@
 		};
 		tsn2: port@2 {
 			phy-mode = "sgmii";
+
+			nvmem-cells = <&rswitch2_port2_mac>;
+			nvmem-cell-names = "mac-address";
+
+			/* All 00 to be overwritten by bootloader or manually */
+			mac-address = [00 00 00 00 00 00];
+
+
 			/* phy-handle set via plugin */
 			tsn2_phy_1g_rh: ethernet-phy@1 {
 				reg = <1>;

@@ -86,7 +86,7 @@ int rswitch2_init(struct rswitch2_drv *rsw2)
 
 	rswitch2_clock_enable(rsw2);
 
-	rsw2->ptp_drv = rtsn_ptp_alloc(rsw2->dev);
+	rsw2->ptp_drv = rtsn_ptp_alloc_dev(rsw2->dev);
 	if (!rsw2->ptp_drv) {
 		rsw2_err(MSG_GEN, "Failed to allocate PTP driver struct\n");
 		goto err_ptp_init;
