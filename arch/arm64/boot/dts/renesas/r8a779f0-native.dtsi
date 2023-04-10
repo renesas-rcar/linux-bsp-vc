@@ -215,6 +215,18 @@
 			status = "okay";
 		};
 
+		ipmmu_mm: iommu@eefc0000 {
+			status = "okay";
+		};
+
+		ipmmu_ds0: iommu@eed00000 {
+			status = "okay";
+		};
+
+		ipmmu_hc: iommu@eed40000 {
+			status = "okay";
+		};
+
 		qos@e67e0000 {
 			status = "okay";
 		};
