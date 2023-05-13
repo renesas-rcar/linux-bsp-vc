@@ -158,6 +158,25 @@
 
 		label = "board-data";
 		pagesize = <8>;
+
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		rswitch2_gw_mac: rsw2gwmac@720 {
+			reg = <0x720 0x06>;
+		};
+
+		rswitch2_port0_mac: rsw2p0mac@728 {
+			reg = <0x728 0x06>;
+		};
+
+		rswitch2_port1_mac: rsw2p1mac@730 {
+			reg = <0x730 0x06>;
+		};
+
+		rswitch2_port2_mac: rsw2p2mac@738 {
+			reg = <0x738 0x06>;
+		};
 	};
 
 	fpga4000: fpga4000@71 {
@@ -368,16 +387,31 @@
 };
 
 &rswitch {
+	compatible = "renesas,rswitch2-r8a779f0", "renesas,rswitch2";
 	status = "okay";
 
 	pinctrl-0 = <&rswitch_pins>;
 	pinctrl-names = "default";
 
+	/* normally gateway port MAC address comes from EEPROM ... */
+	nvmem-cells = <&rswitch2_gw_mac>;
+	nvmem-cell-names = "mac-address";
+	/* ... but EEPROM setting could be overridden */
+	mac-address = [00 00 00 00 00 00];
+
 	ports {
 		#address-cells = <1>;
 		#size-cells = <0>;
+
 		port@0 {
 			reg = <0>;
+
+			/* normally port MAC address comes from EEPROM ... */
+			nvmem-cells = <&rswitch2_port0_mac>;
+			nvmem-cell-names = "mac-address";
+			/* ... but EEPROM setting could be overridden */
+			mac-address = [00 00 00 00 00 00];
+
 			/* phy-mode = "usxgmii"; */
 			/* phy-handle = <&tsn0_phy_2g5>; */
 			phy-mode = "sgmii";
@@ -386,17 +420,25 @@
 			#size-cells = <0>;
 			tsn0_phy_2g5: ethernet-phy@0 {
 				reg = <0>;
-				compatible = "ethernet-phy-ieee802.3-c45";
+				compatible = "ethernet-phy-id0000.0000";
 				status = "disabled";
 			};
 			tsn0_phy_1g: ethernet-phy@3 {
 				reg = <3>;
-				compatible = "ethernet-phy-ieee802.3-c45";
+				compatible = "ethernet-phy-id002B.0218";
 				status = "okay";
 			};
 		};
+
 		port@1 {
 			reg = <1>;
+
+			/* normally port MAC address comes from EEPROM ... */
+			nvmem-cells = <&rswitch2_port1_mac>;
+			nvmem-cell-names = "mac-address";
+			/* ... but EEPROM setting could be overridden */
+			mac-address = [00 00 00 00 00 00];
+
 			/* phy-mode = "usxgmii"; */
 			/* phy-handle = <&tsn1_phy_2g5>; */
 			phy-mode = "sgmii";
@@ -405,17 +447,25 @@
 			#size-cells = <0>;
 			tsn1_phy_2g5: ethernet-phy@0 {
 				reg = <0>;
-				compatible = "ethernet-phy-ieee802.3-c45";
+				compatible = "ethernet-phy-id0000.0000";
 				status = "disabled";
 			};
 			tsn1_phy_1g: ethernet-phy@3 {
 				reg = <3>;
-				compatible = "ethernet-phy-ieee802.3-c45";
+				compatible = "ethernet-phy-id002B.0218";
 				status = "okay";
 			};
 		};
+
 		port@2 {
 			reg = <2>;
+
+			/* normally port MAC address comes from EEPROM ... */
+			nvmem-cells = <&rswitch2_port2_mac>;
+			nvmem-cell-names = "mac-address";
+			/* ... but EEPROM setting could be overridden */
+			mac-address = [00 00 00 00 00 00];
+
 			phy-mode = "sgmii";
 			/* phy-handle = <&tsn2_phy_1g_rh>; */
 			phy-handle = <&tsn2_phy_1g>;
@@ -428,7 +478,7 @@
 			};
 			tsn2_phy_1g: ethernet-phy@3 {
 				reg = <3>;
-				compatible = "ethernet-phy-ieee802.3-c45";
+				compatible = "ethernet-phy-id002B.0218";
 				status = "okay";
 			};
 		};
