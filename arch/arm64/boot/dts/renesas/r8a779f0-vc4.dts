@@ -158,6 +158,25 @@
 
 		label = "board-data";
 		pagesize = <8>;
+
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		//rswitch_gw_mac: rsw2gwmac@720 {
+		//	reg = <0x720 0x06>;
+		//};
+
+		rswitch_port0_mac: rsw2p0mac@728 {
+			reg = <0x728 0x06>;
+		};
+
+		rswitch_port1_mac: rsw2p1mac@730 {
+			reg = <0x730 0x06>;
+		};
+
+		rswitch_port2_mac: rsw2p2mac@738 {
+			reg = <0x738 0x06>;
+		};
 	};
 
 	fpga4000: fpga4000@71 {
@@ -236,6 +255,29 @@
 		qspi1 {
 			groups = "qspi1_data4", "qspi1_ctrl";
 			function = "qspi1";
+		};
+	};
+
+	rswitch_pins: rswitch {
+		tsn0_mdio {
+			groups = "tsn0_mdio";
+			function = "tsn0";
+			drive-strength = <18>;
+			power-source = <1800>;
+		};
+
+		tsn1_mdio {
+			groups = "tsn1_mdio";
+			function = "tsn1";
+			drive-strength = <18>;
+			power-source = <1800>;
+		};
+
+		tsn2_mdio {
+			groups = "tsn2_mdio";
+			function = "tsn2";
+			drive-strength = <18>;
+			power-source = <1800>;
 		};
 	};
 
@@ -348,6 +390,107 @@
 			};
 			space3@1100000 {
 				reg = <0x01100000 0x02f00000>;
+			};
+		};
+	};
+};
+
+&rswitch {
+	status = "okay";
+
+	pinctrl-0 = <&rswitch_pins>;
+	pinctrl-names = "default";
+
+	/* iommu setting is valid only while only one GWCA port is used, and
+	 * OSID register fields always contain zero
+	 *
+	 * Per experiment:
+	 * - for GWCA0 (= port 3) stall use <&ipmmu_hc 16>
+	 * - for GWCA1 (= port 4) shall use <&ipmmu_hc 0>
+	 */
+       iommus = <&ipmmu_hc 0>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			/* normally port MAC address comes from EEPROM ... */
+			nvmem-cells = <&rswitch_port0_mac>;
+			nvmem-cell-names = "mac-address";
+			/* ... but EEPROM setting could be overridden */
+			mac-address = [00 00 00 00 00 00];
+
+			/* phy-mode = "usxgmii"; */
+			/* phy-handle = <&tsn0_phy_2g5>; */
+			phy-mode = "sgmii";
+			phy-handle = <&tsn0_phy_1g>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			tsn0_phy_2g5: ethernet-phy@0 {
+				reg = <0>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "disabled";
+			};
+			tsn0_phy_1g: ethernet-phy@3 {
+				reg = <3>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "okay";
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			/* normally port MAC address comes from EEPROM ... */
+			nvmem-cells = <&rswitch_port1_mac>;
+			nvmem-cell-names = "mac-address";
+			/* ... but EEPROM setting could be overridden */
+			mac-address = [00 00 00 00 00 00];
+
+			/* phy-mode = "usxgmii"; */
+			/* phy-handle = <&tsn1_phy_2g5>; */
+			phy-mode = "sgmii";
+			phy-handle = <&tsn1_phy_1g>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			tsn1_phy_2g5: ethernet-phy@0 {
+				reg = <0>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "disabled";
+			};
+			tsn1_phy_1g: ethernet-phy@3 {
+				reg = <3>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "okay";
+			};
+		};
+
+		port@2 {
+			reg = <2>;
+
+			/* normally port MAC address comes from EEPROM ... */
+			nvmem-cells = <&rswitch_port2_mac>;
+			nvmem-cell-names = "mac-address";
+			/* ... but EEPROM setting could be overridden */
+			mac-address = [00 00 00 00 00 00];
+
+			phy-mode = "sgmii";
+			/* phy-handle = <&tsn2_phy_1g_rh>; */
+			phy-handle = <&tsn2_phy_1g>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			tsn2_phy_1g_rh: ethernet-phy@1 {
+				reg = <1>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "disabled";
+			};
+			tsn2_phy_1g: ethernet-phy@3 {
+				reg = <3>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+				status = "okay";
 			};
 		};
 	};
