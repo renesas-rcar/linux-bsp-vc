@@ -48,6 +48,7 @@ enum clk_ids {
 	CLK_PLL6_DIV2,
 	CLK_S0,
 	CLK_SDSRC,
+	CLK_RPCSRC,
 	CLK_OCO,
 
 	/* Module Clocks */
@@ -76,6 +77,10 @@ static const struct cpg_core_clk r8a779f0_core_clks[] __initconst = {
 	DEF_FIXED(".s0",	CLK_S0,		CLK_PLL1_DIV2,	2, 1),
 	DEF_FIXED(".sdsrc",	CLK_SDSRC,	CLK_PLL5_DIV2,	2, 1),
 	DEF_RATE(".oco",	CLK_OCO,	32768),
+
+	DEF_BASE(".rpcsrc",	CLK_RPCSRC,		CLK_TYPE_GEN4_RPCSRC, CLK_PLL5),
+	DEF_BASE(".rpc",	R8A779F0_CLK_RPC,	CLK_TYPE_GEN4_RPC, CLK_RPCSRC),
+	DEF_BASE("rpcd2",	R8A779F0_CLK_RPCD2,	CLK_TYPE_GEN4_RPCD2, R8A779F0_CLK_RPC),
 
 	/* Core Clock Outputs */
 	DEF_GEN4_Z("z0",	R8A779F0_CLK_Z0,	CLK_TYPE_GEN4_Z,	CLK_PLL2,	2, 0),
@@ -139,6 +144,7 @@ static const struct mssr_mod_clk r8a779f0_mod_clks[] __initconst = {
 	DEF_MOD("msi3",		621,	R8A779F0_CLK_MSO),
 	DEF_MOD("pcie0",	624,	R8A779F0_CLK_S0D2),
 	DEF_MOD("pcie1",	625,	R8A779F0_CLK_S0D2),
+	DEF_MOD("rpc",		629,	R8A779F0_CLK_RPCD2),
 	DEF_MOD("rtdm0",	630,	R8A779F0_CLK_S0D2),
 	DEF_MOD("rtdm1",	631,	R8A779F0_CLK_S0D2),
 	DEF_MOD("rtdm2",	700,	R8A779F0_CLK_S0D2),
