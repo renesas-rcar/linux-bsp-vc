@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Device Tree Source for the VC4 vehicle computer board
+ * For V1 schematics, as of 2021-07-13
+ *
+ * Copyright (C) 2021-2023 Renesas Electronics Corp.
+ */
+
+#include "r8a779f0-vc4.dts"
+
+/* SDHI_PWR_SEL is at GPIO4_05 - n/a without control domain access */
+
+&vccq_sdhi {
+	status = "disabled";
+};
+
+&mmc0 {
+	vqmcc-supply = <&vcc_sdhi>;
+};
+
+/* TSN0_SEL_1_25 is at GPIO4_06 - n/a without control domain access */
+
+/delete-node/ &tsn0_mux;
+
+/* TSN1_SEL_1_25 is at GPIO4_07 - n/a without control domain access */
+
+/delete-node/ &tsn1_mux;
+
+/* TSN0_SLEEP is at GPIO3_15. When using tsn0_phy_2g5, keep high */
+
+&gpio3 {
+	/* tsn0-no-sleep {
+		gpio-hog;
+		gpios = <15 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN0-NO-SLEEP";
+	}; */
+};
+
+/* TSN1_SLEEP is at GPIO3_12. When using tsn1_phy_2g5, keep high */
+
+&gpio3 {
+	/* tsn1-no-sleep {
+		gpio-hog;
+		gpios = <12 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "TSN1-NO-SLEEP";
+	}; */
+};

@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Device Tree Source for the VC4 vehicle computer board
+ *
+ * This dts version requires full access for CA55 cores (application domain)
+ * to the control domain. Means G4 processor domain needs to grant access
+ * before Linux is booted.
+ *
+ * Copyright (C) 2021-2023 Renesas Electronics Corp.
+ */
+
+#include "r8a779f0-vc4.dts"
+#include "r8a779f0-ctrl-domain.dtsi"

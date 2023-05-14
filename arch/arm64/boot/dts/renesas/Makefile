@@ -75,6 +75,8 @@ dtb-$(CONFIG_ARCH_R8A779G0) += r8a779g0-whitehawk.dtb
 
 dtb-$(CONFIG_ARCH_R8A779F0) += r8a779f0-spider.dtb
 dtb-$(CONFIG_ARCH_R8A779F0) += r8a779f0-s4sk.dtb
+dtb-$(CONFIG_ARCH_R8A779F0) += r8a779f0-vc4.dtb r8a779f0-vc4-ctrl-domain.dtb
+dtb-$(CONFIG_ARCH_R8A779F0) += r8a779f0-vc4V1.dtb r8a779f0-vc4V1-ctrl-domain.dtb
 
 dtb-$(CONFIG_ARCH_R8A77970) += r8a77970-eagle-function.dtb
 dtb-$(CONFIG_ARCH_R8A77970) += r8a77970-es1-eagle.dtb r8a77970-es1-eagle-function.dtb
