@@ -176,11 +176,11 @@ int rtsn_ptp_unregister(struct rtsn_ptp_private *ptp_priv)
 	return 0;
 }
 
-struct rtsn_ptp_private *rtsn_ptp_alloc(struct platform_device *pdev)
+struct rtsn_ptp_private *rtsn_ptp_alloc(struct device *dev)
 {
 	struct rtsn_ptp_private *ptp;
 
-	ptp = devm_kzalloc(&pdev->dev, sizeof(*ptp), GFP_KERNEL);
+	ptp = devm_kzalloc(dev, sizeof(*ptp), GFP_KERNEL);
 	if (!ptp)
 		return NULL;
 

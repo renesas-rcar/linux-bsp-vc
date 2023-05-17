@@ -3090,7 +3090,7 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	priv->ptp_priv = rtsn_ptp_alloc(pdev);
+	priv->ptp_priv = rtsn_ptp_alloc(&pdev->dev);
 	if (!priv->ptp_priv)
 		return -ENOMEM;
 
