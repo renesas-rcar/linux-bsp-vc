@@ -210,6 +210,14 @@ config MARVELL_88Q2XXX_PHY
 config MARVELL_88Q2110_PHY
 	tristate "Proprietary driver for Marvell 88Q2110 PHY"
 
+config MARVELL_88Q3344_ES_PHY
+	tristate "Proprietary driver for Marvell 88Q3344 PHY Engineering Sample"
+	help
+	   This is a stripped down driver for the engineering sample (ES) of the
+	   Marvell 88Q3344 Base-T1 ethernet driver. The PHY comes up fully initialized in
+	   2.5G mode. So main purpose is to provide base functionality as speed reporting,
+	   master/slave setting and reporting link up/down.
+
 config MICREL_PHY
 	tristate "Micrel PHYs"
 	help
