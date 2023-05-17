@@ -598,8 +598,9 @@
 			compatible = "renesas,etherswitch-r8a779f0",
 				     "renesas,etherswitch";
 			reg = <0 0xe68c0000 0 0x00020000>,
-			      <0 0xe6444000 0 0x2800>;
-			reg-names = "iobase", "serdes";
+			      <0 0xe6444000 0 0x2800>,
+			      <0 0xe643B000 0 0x800>;
+			reg-names = "iobase", "serdes", "sram";
 			interrupts = <GIC_SPI 280 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 281 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH>,
