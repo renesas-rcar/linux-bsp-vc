@@ -1,0 +1,55 @@
+&soc {
+	gpio4: gpio@dfd90180 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd90180 0 0x54>;
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 128 31>;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+
+	gpio5: gpio@dfd90980 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd90980 0 0x54>;
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 160 20>;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+
+	gpio6: gpio@dfd91180 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd91180 0 0x54>;
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 192 32>;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+
+	gpio7: gpio@dfd91980 {
+		compatible = "renesas,gpio-r8a779f0";
+		reg = <0 0xdfd91980 0 0x54>;
+		#gpio-cells = <2>;
+		gpio-controller;
+		gpio-ranges = <&pfc 0 224 32>;
+		clocks = <&cpg CPG_MOD 915>;
+		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
+		resets = <&cpg 915>;
+	};
+};
+
+/* To enable control comain in cpg driver, need to define second reg range.
+ *
+ * DTS syntax does not allow property value appending. Thus have to duplicate
+ * the original value and add the second range.
+ */
+&cpg {
+	reg = <0 0xe6150000 0 0x4000>,
+	      <0 0xdf980000 0 0x10000>;
+};
