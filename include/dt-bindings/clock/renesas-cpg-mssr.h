@@ -7,5 +7,6 @@
 
 #define CPG_CORE			0	/* Core Clock */
 #define CPG_MOD				1	/* Module Clock */
+#define CPG_CD_MOD			2	/* Control Domain Module Clock */
 
 #endif /* __DT_BINDINGS_CLOCK_RENESAS_CPG_MSSR_H__ */

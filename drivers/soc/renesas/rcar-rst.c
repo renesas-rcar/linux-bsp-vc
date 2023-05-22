@@ -28,6 +28,7 @@ static int rcar_rst_gen4_enable_wdt_reset(void __iomem *base)
 
 struct rst_config {
 	unsigned int modemr;		/* Mode Monitoring Register Offset */
+	unsigned int modemr2;		/* Second Mode Monitor Register Offset */
 	int (*configure)(void __iomem *base);	/* Platform specific config */
 };
 
@@ -50,6 +51,7 @@ static const struct rst_config rcar_rst_r8a779a0 __initconst = {
 
 static const struct rst_config rcar_rst_gen4 __initconst = {
 	.modemr = 0x00,		/* MODEMR0 and it has CPG related bits */
+	.modemr2 = 0x04,
 	.configure = rcar_rst_gen4_enable_wdt_reset,
 };
 
@@ -94,6 +96,7 @@ static const struct of_device_id rcar_rst_matches[] __initconst = {
 
 static void __iomem *rcar_rst_base __initdata;
 static u32 saved_mode __initdata;
+static u32 saved_mode_2 __initdata;
 
 static int __init rcar_rst_init(void)
 {
@@ -117,6 +120,8 @@ static int __init rcar_rst_init(void)
 	rcar_rst_base = base;
 	cfg = match->data;
 	saved_mode = ioread32(base + cfg->modemr);
+	if (cfg->modemr2)	/* for second reg, zero means "undefined" */
+		saved_mode_2 = ioread32(base + cfg->modemr2);
 	if (cfg->configure) {
 		error = cfg->configure(base);
 		if (error) {
@@ -144,5 +149,19 @@ int __init rcar_rst_read_mode_pins(u32 *mode)
 	}
 
 	*mode = saved_mode;
+	return 0;
+}
+
+int __init rcar_rst_read_mode_pins_64(u64 *mode)
+{
+	int error;
+
+	if (!rcar_rst_base) {
+		error = rcar_rst_init();
+		if (error)
+			return error;
+	}
+
+	*mode = saved_mode | (((u64)saved_mode_2) << 32);
 	return 0;
 }

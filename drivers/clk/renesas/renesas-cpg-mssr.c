@@ -172,6 +172,10 @@ struct cpg_mssr_priv {
 		u32 val;
 	} smstpcr_saved[ARRAY_SIZE(mstpsr_for_gen4)];
 
+	void __iomem *cd_base;
+	unsigned int num_cd_mod_clks;
+	const u16 *cd_mod_control_regs;
+
 	struct clk *clks[];
 };
 
@@ -277,6 +281,85 @@ static const struct clk_ops cpg_mstp_clock_ops = {
 	.is_enabled = cpg_mstp_clock_is_enabled,
 };
 
+static int cpg_cd_mstp_get_reg(struct clk_hw *hw,
+		void __iomem **out_reg, u32 *out_mask)
+{
+	struct mstp_clock *clock = to_mstp_clock(hw);
+	struct cpg_mssr_priv *priv = clock->priv;
+
+	if (!priv->cd_base)
+		return -ENXIO;
+	if (clock->index >= priv->num_cd_mod_clks)
+		return -EINVAL;
+
+	*out_reg = priv->cd_base + priv->cd_mod_control_regs[clock->index / 32];
+	*out_mask = BIT(clock->index % 32);
+	return 0;
+}
+
+static int cpg_cd_mstp_clock_endisable(struct clk_hw *hw, bool enable)
+{
+	struct cpg_mssr_priv *priv = to_mstp_clock(hw)->priv;
+	void __iomem *reg;
+	u32 mask, val;
+	unsigned long flags;
+	int ret;
+
+	ret = cpg_cd_mstp_get_reg(hw, &reg, &mask);
+	if (WARN_ON_ONCE(ret))
+		return ret;
+
+	spin_lock_irqsave(&priv->rmw_lock, flags);
+
+	/* Hardcode unlock for now */
+	writel(0xa5a5a501, priv->cd_base + 0x1710);
+
+	val = readl(reg);
+	if (enable)
+		val &= ~mask;	/* enable = clear bit */
+	else
+		val |= mask;
+	writel(val, reg);
+
+	(void)readl(reg);	/* flush write */
+
+	/* Hardcode lock for now */
+	writel(0xa5a5a500, priv->cd_base + 0x1710);
+
+	spin_unlock_irqrestore(&priv->rmw_lock, flags);
+
+	return 0;
+}
+
+static int cpg_cd_mstp_clock_enable(struct clk_hw *hw)
+{
+	return cpg_cd_mstp_clock_endisable(hw, true);
+}
+
+static void cpg_cd_mstp_clock_disable(struct clk_hw *hw)
+{
+	cpg_cd_mstp_clock_endisable(hw, false);
+}
+
+static int cpg_cd_mstp_clock_is_enabled(struct clk_hw *hw)
+{
+	void __iomem *reg;
+	u32 mask;
+	int ret;
+
+	ret = cpg_cd_mstp_get_reg(hw, &reg, &mask);
+	if (WARN_ON_ONCE(ret))
+		return 0;
+
+	return !(readl(reg) & mask);	/* bit set = disabled */
+}
+
+static const struct clk_ops cpg_cd_mstp_clock_ops = {
+	.enable = cpg_cd_mstp_clock_enable,
+	.disable = cpg_cd_mstp_clock_disable,
+	.is_enabled = cpg_cd_mstp_clock_is_enabled,
+};
+
 static
 struct clk *cpg_mssr_clk_src_twocell_get(struct of_phandle_args *clkspec,
 					 void *data)
@@ -315,6 +398,23 @@ struct clk *cpg_mssr_clk_src_twocell_get(struct of_phandle_args *clkspec,
 			return ERR_PTR(-EINVAL);
 		}
 		clk = priv->clks[priv->num_core_clks + idx];
+		break;
+
+	case CPG_CD_MOD:
+		if (!priv->cd_base) {
+			dev_err(dev, "control domain is not available\n");
+			return ERR_PTR(-ENXIO);
+		}
+		type = "cd-module";
+		if ((clkidx % 100) >= 32 ||
+		    MOD_CLK_PACK(clkidx) >= priv->num_cd_mod_clks) {
+			dev_err(dev, "Invalid %s clock index %u\n", type,
+				clkidx);
+			return ERR_PTR(-EINVAL);
+		}
+		clk = priv->clks[priv->num_core_clks +
+				 priv->num_mod_clks +
+				 MOD_CLK_PACK(clkidx)];
 		break;
 
 	default:
@@ -478,6 +578,84 @@ fail:
 	kfree(clock);
 }
 
+static void __init cpg_mssr_register_cd_mod_clk(const struct mssr_mod_clk *mod,
+						struct cpg_mssr_priv *priv)
+{
+	unsigned int clk_index;
+	struct clk *parent;
+	const char *parent_name;
+	struct clk_init_data mclk_init;
+	struct mstp_clock *mclk;
+	struct clk *clk;
+
+	if (!priv->cd_base)
+		return;
+
+	if (!mod->name) {
+		dev_err(priv->dev, "no cd-mod clock name\n");
+		return;
+	}
+
+	if (mod->id >= priv->num_cd_mod_clks) {
+		dev_err(priv->dev, "invalid id %d for cd-mod clock %s",
+				mod->id, mod->name);
+		return;
+	}
+	clk_index = priv->num_core_clks + priv->num_mod_clks + mod->id;
+	if (PTR_ERR(priv->clks[clk_index]) != -ENOENT) {
+		dev_err(priv->dev, "duplicate id %d for cd-mod clock %s\n",
+				mod->id, mod->name);
+		return;
+	}
+
+	if (mod->parent >= priv->num_core_clks + priv->num_mod_clks) {
+		dev_err(priv->dev, "invalid parent id %d for cd-mod clock %s\n",
+				mod->parent, mod->name);
+		return;
+	}
+	parent = priv->clks[mod->parent];
+	if (IS_ERR(parent)) {
+		dev_err(priv->dev, "no parent clock for cd-mode clock %s\n",
+				mod->name);
+		return;
+	}
+	parent_name = __clk_get_name(parent);
+
+	memset(&mclk_init, 0, sizeof(mclk_init));
+	mclk_init.name = mod->name;
+	mclk_init.ops = &cpg_cd_mstp_clock_ops;
+	mclk_init.flags = CLK_SET_RATE_PARENT;
+	mclk_init.parent_names = &parent_name;
+	mclk_init.num_parents = 1;
+
+	mclk = kzalloc(sizeof(*mclk), GFP_KERNEL);
+	if (!mclk) {
+		dev_err(priv->dev, "failed to allocate cd-mod clock %s\n",
+				mod->name);
+		return;
+	}
+	mclk->index = mod->id;
+	mclk->priv = priv;
+	mclk->hw.init = &mclk_init;
+
+	clk = clk_register(NULL, &mclk->hw);
+	if (IS_ERR(clk)) {
+		dev_err(priv->dev, "failed to register cd-mod clock %s\n",
+				mod->name);
+		goto err_register;
+	}
+
+	priv->clks[clk_index] = clk;
+	dev_dbg(priv->dev, "registered cd-mod clk %s, id %d, rate %ld\n",
+			mod->name,
+			(mod->id / 32 * 100) + (mod->id % 32),
+			clk_get_rate(clk));
+	return;
+
+err_register:
+	kfree(mclk);
+}
+
 struct cpg_mssr_clk_domain {
 	struct generic_pm_domain genpd;
 	unsigned int num_core_pm_clks;
@@ -502,6 +680,7 @@ static bool cpg_mssr_is_pm_clk(const struct of_phandle_args *clkspec,
 		return false;
 
 	case CPG_MOD:
+	case CPG_CD_MOD:
 		return true;
 
 	default:
@@ -966,7 +1145,8 @@ static int __init cpg_mssr_common_init(struct device *dev,
 			return error;
 	}
 
-	nclks = info->num_total_core_clks + info->num_hw_mod_clks;
+	nclks = info->num_total_core_clks + info->num_hw_mod_clks +
+			(32 * info->num_cd_mod_control_regs);
 	priv = kzalloc(struct_size(priv, clks, nclks), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -979,6 +1159,12 @@ static int __init cpg_mssr_common_init(struct device *dev,
 	if (!priv->base) {
 		error = -ENOMEM;
 		goto out_err;
+	}
+
+	if (info->num_cd_mod_control_regs) {
+		priv->cd_base = of_iomap(np, 1);
+		/* since now, use non-null cd_base as a check that control
+		 * domain mod clocks exist */
 	}
 
 	cpg_mssr_priv = priv;
@@ -1003,6 +1189,10 @@ static int __init cpg_mssr_common_init(struct device *dev,
 		error = -EINVAL;
 		goto out_err;
 	}
+	if (priv->cd_base) {
+		priv->num_cd_mod_clks = 32 * info->num_cd_mod_control_regs;
+		priv->cd_mod_control_regs = info->cd_mod_control_regs;
+	}
 
 	for (i = 0; i < nclks; i++)
 		priv->clks[i] = ERR_PTR(-ENOENT);
@@ -1016,6 +1206,8 @@ static int __init cpg_mssr_common_init(struct device *dev,
 out_err:
 	if (priv->base)
 		iounmap(priv->base);
+	if (priv->cd_base)
+		iounmap(priv->cd_base);
 	kfree(priv);
 
 	return error;
@@ -1067,6 +1259,9 @@ static int __init cpg_mssr_probe(struct platform_device *pdev)
 
 	for (i = 0; i < info->num_mod_clks; i++)
 		cpg_mssr_register_mod_clk(&info->mod_clks[i], info, priv);
+
+	for (i = 0; i < info->num_cd_mod_clks; i++)
+		cpg_mssr_register_cd_mod_clk(&info->cd_mod_clks[i], priv);
 
 	error = devm_add_action_or_reset(dev,
 					 cpg_mssr_del_clk_provider,
@@ -1143,6 +1338,13 @@ void __init mssr_mod_reparent(struct mssr_mod_clk *mod_clks,
 			mod_clks[i].parent = clks[j].parent;
 			j++;
 		}
+}
+
+void __iomem *cpg_mssr_cd_base(struct device *dev)
+{
+	struct cpg_mssr_priv *priv = dev_get_drvdata(dev);
+
+	return priv->cd_base;
 }
 
 MODULE_DESCRIPTION("Renesas CPG/MSSR Driver");
