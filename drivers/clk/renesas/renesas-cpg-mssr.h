@@ -75,6 +75,9 @@ struct mssr_mod_clk {
 #define DEF_MOD(_name, _mod, _parent...)	\
 	{ .name = _name, .id = MOD_CLK_ID(_mod), .parent = _parent }
 
+#define DEF_CD_MOD(_name, _id, _parent)		\
+	{ .name = _name, .id = MOD_CLK_PACK(_id), .parent = _parent }
+
 /* Convert from sparse base-10 to packed index space */
 #define MOD_CLK_PACK_10(x)	((x / 10) * 32 + (x % 10))
 
@@ -135,6 +138,9 @@ struct cpg_mssr_info {
 	unsigned int num_total_core_clks;
 	enum clk_reg_layout reg_layout;
 
+	unsigned int first_dt_core_cd_clk;
+	unsigned int first_core_cd_clk;
+
 	/* Module Clocks */
 	const struct mssr_mod_clk *mod_clks;
 	unsigned int num_mod_clks;
@@ -155,6 +161,12 @@ struct cpg_mssr_info {
 					const struct cpg_mssr_info *info,
 					struct clk **clks, void __iomem *base,
 					struct raw_notifier_head *notifiers);
+
+	/* Support for control domain module clocks */
+	const u16 *cd_mod_control_regs;
+	unsigned int num_cd_mod_control_regs;
+	const struct mssr_mod_clk *cd_mod_clks;
+	unsigned int num_cd_mod_clks;
 };
 
 extern const struct cpg_mssr_info r7s9210_cpg_mssr_info;
@@ -204,4 +216,8 @@ extern void mssr_mod_reparent(struct mssr_mod_clk *mod_clks,
 			      unsigned int num_mod_clks,
 			      const struct mssr_mod_reparent *clks,
 			      unsigned int n);
+
+/* HACK: access to control domain register base */
+void __iomem *cpg_mssr_cd_base(struct device *dev);
+
 #endif

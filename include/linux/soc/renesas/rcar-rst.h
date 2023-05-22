@@ -4,6 +4,7 @@
 
 #ifdef CONFIG_RST_RCAR
 int rcar_rst_read_mode_pins(u32 *mode);
+int rcar_rst_read_mode_pins_64(u64 *mode);
 #else
 static inline int rcar_rst_read_mode_pins(u32 *mode) { return -ENODEV; }
 #endif
