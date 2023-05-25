@@ -1,3 +1,5 @@
+#include <dt-bindings/interrupt-controller/renesas-intswcd-r8a779f0.h>
+
 &soc {
 	gpio4: gpio@dfd90180 {
 		compatible = "renesas,gpio-r8a779f0";
@@ -41,6 +43,15 @@
 		clocks = <&cpg CPG_MOD 915>;
 		power-domains = <&sysc R8A779F0_PD_ALWAYS_ON>;
 		resets = <&cpg 915>;
+	};
+
+	intswcd: intswcd@d8f11000 {
+		compatible = "renesas,intswcd-r8a779f0";
+		reg = <0 0xd8f11000 0 0x400>;
+		first-level-interrupt = <&gic GIC_SPI 522 IRQ_TYPE_LEVEL_HIGH>;
+		first-edge-interrupt = <&gic GIC_SPI 573 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
 	};
 };
 
