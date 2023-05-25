@@ -472,6 +472,7 @@ static int gpio_rcar_parse_dt(struct gpio_rcar_priv *p, unsigned int *npins)
 static int gpio_rcar_probe(struct platform_device *pdev)
 {
 	struct gpio_rcar_priv *p;
+	bool interrupt_controller;
 	struct resource *irq;
 	struct gpio_chip *gpio_chip;
 	struct irq_chip *irq_chip;
@@ -497,11 +498,15 @@ static int gpio_rcar_probe(struct platform_device *pdev)
 
 	pm_runtime_enable(dev);
 
-	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!irq) {
-		dev_err(dev, "missing IRQ\n");
-		ret = -EINVAL;
-		goto err0;
+	interrupt_controller = of_property_read_bool(dev->of_node,
+			"interrupt-controller");
+	if (interrupt_controller) {
+		irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+		if (!irq) {
+			dev_err(dev, "missing IRQ\n");
+			ret = -EINVAL;
+			goto err0;
+		}
 	}
 
 	p->base = devm_platform_ioremap_resource(pdev, 0);
@@ -549,15 +554,20 @@ static int gpio_rcar_probe(struct platform_device *pdev)
 		goto err0;
 	}
 
-	p->irq_parent = irq->start;
-	if (devm_request_irq(dev, irq->start, gpio_rcar_irq_handler,
-			     IRQF_SHARED, name, p)) {
-		dev_err(dev, "failed to request IRQ\n");
-		ret = -ENOENT;
-		goto err1;
+	if (interrupt_controller) {
+		p->irq_parent = irq->start;
+		if (devm_request_irq(dev, irq->start, gpio_rcar_irq_handler,
+				     IRQF_SHARED, name, p)) {
+			dev_err(dev, "failed to request IRQ\n");
+			ret = -ENOENT;
+			goto err1;
+		}
+	} else {
+		p->irq_parent = 0;
 	}
 
-	dev_info(dev, "driving %d GPIOs\n", npins);
+	dev_info(dev, "driving %d GPIOs%s\n", npins,
+			interrupt_controller ? "" : ", no interrupts");
 
 	return 0;
 
