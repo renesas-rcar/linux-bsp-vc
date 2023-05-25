@@ -358,12 +358,12 @@
 		function = "intp";
 	};
 
-	t1s1_pins: t1s0 {
+	t1s1_pins: t1s1 {
 		groups = "intp34";
 		function = "intp";
 	};
 
-	t1s2_pins: t1s0 {
+	t1s2_pins: t1s2 {
 		groups = "intp33";
 		function = "intp";
 	};
