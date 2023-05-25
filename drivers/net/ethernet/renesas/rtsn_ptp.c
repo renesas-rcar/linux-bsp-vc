@@ -163,6 +163,7 @@ int rtsn_ptp_init(struct rtsn_ptp_private *ptp_priv, enum rtsn_ptp_reg_layout la
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(rtsn_ptp_init);
 
 int rtsn_ptp_unregister(struct rtsn_ptp_private *ptp_priv)
 {
@@ -175,6 +176,7 @@ int rtsn_ptp_unregister(struct rtsn_ptp_private *ptp_priv)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(rtsn_ptp_unregister);
 
 struct rtsn_ptp_private *rtsn_ptp_alloc(struct platform_device *pdev)
 {
@@ -188,3 +190,8 @@ struct rtsn_ptp_private *rtsn_ptp_alloc(struct platform_device *pdev)
 
 	return ptp;
 }
+EXPORT_SYMBOL_GPL(rtsn_ptp_alloc);
+
+MODULE_AUTHOR("Phong Hoang <phong.hoang.wz@renesas.com>");
+MODULE_DESCRIPTION("Renesas Gen4 PTP subdriver");
+MODULE_LICENSE("GPL v2");
