@@ -9,6 +9,7 @@
 
 #include <linux/if_ether.h>
 #include <linux/phy.h>
+#include <linux/reset.h>
 
 
 
@@ -86,6 +87,7 @@ struct rswitch2_drv {
 	void __iomem *ptp_base_addr;
 	void __iomem *sram_base_addr;  /* for sram debug and pps output control */
 	struct device *dev;
+	struct reset_control *sd_rst;
 	u32 num_of_cpu_ports;
 	u32 num_of_tsn_ports;
 	u32 ports_intialized;

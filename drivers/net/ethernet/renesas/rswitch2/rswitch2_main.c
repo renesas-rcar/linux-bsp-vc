@@ -18,6 +18,10 @@ static void rswitch2_reset(struct rswitch2_drv *rsw2)
 {
 	iowrite32(RRC_RR, rsw2->coma_base_addr + RSW2_COMA_RRC);
 	iowrite32(0x0, rsw2->coma_base_addr + RSW2_COMA_RRC);
+
+	reset_control_assert(rsw2->sd_rst);
+	mdelay(1);
+	reset_control_deassert(rsw2->sd_rst);
 }
 
 static void rswitch2_clock_enable(struct rswitch2_drv *rsw2)

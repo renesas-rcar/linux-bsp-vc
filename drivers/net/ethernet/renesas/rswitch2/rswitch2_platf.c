@@ -450,6 +450,12 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 
 	/* Set driver private data */
 	platform_set_drvdata(pdev, drv_priv);
+
+	rsw2->sd_rst = devm_reset_control_get(&pdev->dev, "eth-phy");
+	if (IS_ERR(rsw2->sd_rst)) {
+		dev_err(&pdev->dev, "Failed to get reset control: %ld\n", PTR_ERR(rsw2->sd_rst));
+		return PTR_ERR(rsw2->sd_rst);
+	}
 	//drv_priv->pdev = pdev;
 	rsw2->base_addr = devm_ioremap_resource(&pdev->dev, res_rsw2);
 	if (IS_ERR(rsw2->base_addr))
