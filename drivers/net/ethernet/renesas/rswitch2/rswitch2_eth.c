@@ -3005,11 +3005,9 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 	/* Only physical ports have MDIO interface */
 	BUG_ON(phy_port == NULL);
 
-
 	mii_bus = mdiobus_alloc();
 	if (!mii_bus)
 		return -ENOMEM;
-
 
 	mii_bus->name = "rswitch_mii";
 	sprintf(mii_bus->id, ndev->name, port_num);
@@ -3020,34 +3018,61 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 	mii_bus->parent = rsw2->dev;
 
 	dn_port = rswitch2_get_port_node(rsw2, port_num);
-	if(!dn_port) {
+	if (!dn_port)
 		return -ENODEV;
-	}
 
 	dn_phy = of_parse_phandle(dn_port, "phy-handle", 0);
-	if(!dn_phy) {
-		of_node_put(dn_port);
-		return -ENODEV;
+	if (dn_phy) {
+		ret = of_mdiobus_register(mii_bus, dn_port);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Failed to register MDIO bus for Port %d\n", port_num);
+			of_node_put(dn_phy);
+			goto mdio_bus_free;
+		}
+
+		ret = of_mdio_parse_addr(&mii_bus->dev, dn_phy);
+		of_node_put(dn_phy);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Failed to get PHY address for Port %d\n", port_num);
+			goto mdio_unreg;
+		}
+		phy_addr = ret;
+		dev_info(rsw2->dev, "MDIO: Phy is at addr %d\n", phy_addr);
+
+		phy_port->phy = to_phy_device(&mii_bus->mdio_map[phy_addr]->dev);
+		if (!phy_port->phy) {
+			rsw2_err(MSG_GEN, "PHY not found for Port %d\n", port_num);
+			ret = -ENODEV;
+			goto mdio_unreg;
+		}
+	} else if (of_phy_is_fixed_link(dn_port)) {
+		ret = mdiobus_register(mii_bus);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Failed to register MDIO bus for fixed PHY for Port %d\n", port_num);
+			goto mdio_bus_free;
+		}
+
+		ret = of_phy_register_fixed_link(dn_port);
+		if (ret < 0) {
+			rsw2_err(MSG_GEN, "Failed to register fixed link PHY for Port %d\n", port_num);
+			goto mdio_unreg;
+		}
+
+		phy_port->phy = of_phy_find_device(dn_port);
+		if (!phy_port->phy) {
+			rsw2_err(MSG_GEN, "Failed to get fixed link PHY for Port %d\n", port_num);
+			ret = -ENODEV;
+			goto mdio_unreg;
+		}
+	} else {
+		rsw2_err(MSG_GEN, "No PHY defined for Port %d\n", port_num);
+		ret = -EINVAL;
+		goto dn_port_put;
 	}
 
-	ret = of_mdiobus_register(mii_bus, dn_port);
-	if (ret < 0) {
-		rsw2_err(MSG_GEN, "MDIO bus register failed: %d\n", ret);
-		goto mdio_bus_free;
-	}
-	phy_addr = of_mdio_parse_addr(&mii_bus->dev, dn_phy);
-	dev_info(rsw2->dev, "MDIO: Phy is at addr %d\n", phy_addr);
-
-
-	phy_port->phy = to_phy_device(&mii_bus->mdio_map[phy_addr]->dev);
-	if(!phy_port->phy) {
-		rsw2_err(MSG_GEN, "MDIO bus register, failed to get phy\n");
-		goto mdio_unreg;
-	}
 	phy_port->phy->interface = phy_port->phy_iface;
 	phy_port->mii_bus = mii_bus;
 
-	of_node_put(dn_phy);
 	of_node_put(dn_port);
 
 	return 0;
@@ -3055,11 +3080,9 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 
 mdio_unreg:
 	mdiobus_unregister(phy_port->mii_bus);
-
 mdio_bus_free:
 	mdiobus_free(phy_port->mii_bus);
-
-	of_node_put(dn_phy);
+dn_port_put:
 	of_node_put(dn_port);
 
 	return ret;
