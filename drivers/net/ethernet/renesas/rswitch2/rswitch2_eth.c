@@ -363,9 +363,10 @@ static void rswitch2_phy_state_change(struct net_device *ndev)
 				break;
 
 			default:
-				rsw2_err(MSG_GEN,, "Unsupported Speed\n");
+				rsw2_err(MSG_GEN, "Unsupported Speed\n");
+				spin_unlock_irqrestore(&rsw2->lock, flags);
 				return;
-			}
+		}
 
 		rsw2_notice(MSG_GEN, "Link change: %s uses %s at %d Mbps\n", ndev->name, phy_modes(phydev->interface), phydev->speed);
 
