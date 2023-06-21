@@ -413,17 +413,11 @@ static void rswitch2_phy_state_change(struct net_device *ndev)
 	}
 }
 
-static struct device_node *rswitch2_get_port_node(struct net_device *ndev, unsigned int port_num)
+static struct device_node *rswitch2_get_port_node(struct rswitch2_drv *rsw2, unsigned int port_num)
 {
 	struct device_node *ports, *port;
 	int err = 0;
 	u32 index;
-
-	struct rswitch2_drv *rsw2;
-	struct rswitch2_eth_port *eth_port;
-
-	eth_port = netdev_priv(ndev);
-	rsw2 = eth_port->rsw2;
 
 	ports = of_get_child_by_name(rsw2->dev->of_node, "ports");
 	if (!ports)
@@ -501,6 +495,9 @@ static int rswitch2_serdes_common_setting(struct rswitch2_drv *rsw2)
 		phy_interface_t phy_iface;
 		uint phy_port_num = lane + rsw2->num_of_cpu_ports;
 		struct rswitch2_eth_port *cur_port = rsw2->ports[phy_port_num];
+
+		if(!cur_port)
+			continue;
 
 		phy_iface = cur_port->phy_port->phy_iface;
 		rsw2_dbg(MSG_SERDES, "PHYiface[%d] is %s (%d)\n", lane, phy_modes(phy_iface), phy_iface);
@@ -2803,7 +2800,7 @@ static void rswitch2_init_mac_addr(struct net_device *ndev)
 	rsw2 = eth_port->rsw2;
 
 
-	port_node = rswitch2_get_port_node(ndev, (eth_port->port_num - rsw2->num_of_cpu_ports));
+	port_node = rswitch2_get_port_node(rsw2, (eth_port->port_num - rsw2->num_of_cpu_ports));
 //	dev_node = ndev->dev.of_node;
 	ndev->dev.of_node = port_node;
 
@@ -3022,13 +3019,13 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 	mii_bus->reset = rswitch2_mdio_reset;
 	mii_bus->parent = rsw2->dev;
 
-	dn_port = rswitch2_get_port_node(ndev, port_num);
+	dn_port = rswitch2_get_port_node(rsw2, port_num);
 	if(!dn_port) {
 		return -ENODEV;
 	}
 
 	dn_phy = of_parse_phandle(dn_port, "phy-handle", 0);
-	if(!dn_port) {
+	if(!dn_phy) {
 		of_node_put(dn_port);
 		return -ENODEV;
 	}
@@ -3039,7 +3036,8 @@ static int rswitch2_mdio_init(struct net_device *ndev, unsigned int port_num)
 		goto mdio_bus_free;
 	}
 	phy_addr = of_mdio_parse_addr(&mii_bus->dev, dn_phy);
-	//dev_info(rsw2->dev, "MDIO: Phy is at addr %d\n", phy_addr);
+	dev_info(rsw2->dev, "MDIO: Phy is at addr %d\n", phy_addr);
+
 
 	phy_port->phy = to_phy_device(&mii_bus->mdio_map[phy_addr]->dev);
 	if(!phy_port->phy) {
@@ -3079,7 +3077,7 @@ static int rswitch2_get_phy_config(struct net_device *ndev)
 	rsw2 = eth_port->rsw2;
 	phy_port = eth_port->phy_port;
 
-	port_node = rswitch2_get_port_node(ndev, (eth_port->port_num - rsw2->num_of_cpu_ports));
+	port_node = rswitch2_get_port_node(rsw2, (eth_port->port_num - rsw2->num_of_cpu_ports));
 	if(port_node) {
 		ret = of_get_phy_mode(port_node, &phy_port->phy_iface);
 		if (ret != 0) {
@@ -3269,8 +3267,7 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 		rsw2_notice(MSG_GEN, "phy_connect_direct(): attached '%s' PHY driver: %d\n", port_ndev->phydev->drv->name , ret);
 	}
 
-	rsw2->ports[rsw2->ports_intialized] = eth_port;
-	rsw2->ports_intialized++;
+	rsw2->ports[port_num + rsw2->num_of_cpu_ports] = eth_port;
 
 	return 0;
 
@@ -3359,8 +3356,7 @@ static int rswitch2_init_internal_port(struct rswitch2_drv *rsw2, unsigned int p
 	for (q = 0; q < NUM_BE_RX_QUEUES; q++)
 		netif_napi_add(ndev, &intern_port->rx_q[q].napi, rswitch2_poll, 64);
 
-	rsw2->ports[rsw2->ports_intialized] = eth_port;
-	rsw2->ports_intialized++;
+	rsw2->ports[port_num] = eth_port;
 
 	return 0;
 
@@ -3459,15 +3455,19 @@ static void rswitch2_free_bat(struct rswitch2_drv *rsw2)
 
 static void rswitch2_disable_ports(struct rswitch2_drv *rsw2)
 {
-	int ports_intialized = rsw2->ports_intialized;
 
-	while (ports_intialized > 0) {
+	uint cur_port;
+	uint total_ports = rsw2->num_of_cpu_ports + rsw2->num_of_tsn_ports;
+
+	for (cur_port = 0; cur_port < total_ports; cur_port++) {
 		struct net_device *ndev;
 		struct rswitch2_eth_port *eth_port;
 		struct rswitch2_internal_port *intern_port;
 
-		ports_intialized--;
-		eth_port = rsw2->ports[ports_intialized];
+		eth_port = rsw2->ports[cur_port];
+		if(!eth_port)
+			continue;
+
 
 		ndev = eth_port->ndev;
 		intern_port = eth_port->intern_port;
@@ -3585,13 +3585,27 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 
 	for (cur_port = 0; cur_port < rsw2->num_of_tsn_ports; cur_port++) {
 		struct net_device *ndev;
+		struct device_node *dn_port;
 
-		rswitch2_init_physical_port(rsw2, cur_port);
+		dn_port = rswitch2_get_port_node(rsw2, cur_port);
+		if(!dn_port) {
+			rsw2_err(MSG_GEN, "Port %d has invalid device tree setting. Skipping.\n", cur_port);
+			of_node_put(dn_port);
+			continue;
+		} else if (!of_device_is_available(dn_port)) {
+			rsw2_notice(MSG_GEN, "Port %d is disabled in device tree.\n", cur_port);
+			of_node_put(dn_port);
+			continue;
+		}
+		of_node_put(dn_port);
+
+		ret = rswitch2_init_physical_port(rsw2, cur_port);
 		if (ret < 0) {
 			rsw2_err(MSG_GEN, "Failed to initialize port %d: %d\n", cur_port, ret);
-			goto port_init_err;
+			continue;
 		}
 		rsw2_info(MSG_GEN, "rswitch2_init_physical_port(%d) done\n", cur_port);
+
 		ndev = rsw2->ports[cur_port + rsw2->num_of_cpu_ports]->ndev;
 		for(cur_tx_q = 0; cur_tx_q < RSW2_LL_TX_PER_PORT_QUEUES; cur_tx_q++) {
 
@@ -3638,6 +3652,10 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 
 	for (cur_port = 0; cur_port < rsw2->num_of_tsn_ports + rsw2->num_of_cpu_ports; cur_port++) {
 		struct net_device *ndev;
+
+		if(!rsw2->ports[cur_port])
+			continue;
+
 		ndev = rsw2->ports[cur_port ]->ndev;
 		ret = register_netdev(ndev);
 		if (ret < 0) {
@@ -3694,10 +3712,12 @@ bat_init_err:
 void rswitch2_eth_exit(struct rswitch2_drv *rsw2)
 {
 	struct rswitch2_eth_port *eth_port;
-	unsigned int cur_irq;
+	uint cur_irq;
 	int i;
 	size_t ts_ring_size;
 	uint ring_entries;
+	uint cur_port;
+	uint total_ports = rsw2->num_of_cpu_ports + rsw2->num_of_tsn_ports;
 
 	/* Set max frame size to zero to avoid data is stored in internal RAM */
 	for( i = 0; i < 8; i++) {
@@ -3713,15 +3733,16 @@ void rswitch2_eth_exit(struct rswitch2_drv *rsw2)
 		free_irq(rsw2->status_irqs[cur_irq], rsw2);
 	}
 
-
-	while (rsw2->ports_intialized > 0) {
+	for (cur_port = 0; cur_port < total_ports; cur_port++) {
 		struct net_device *ndev;
 		struct rswitch2_internal_port *intern_port;
 		struct rswitch2_physical_port *phy_port;
 
-		rsw2->ports_intialized--;
 
-		eth_port = rsw2->ports[rsw2->ports_intialized];
+		eth_port = rsw2->ports[cur_port];
+		if(!eth_port)
+			continue;
+
 		ndev = eth_port->ndev;
 		intern_port = eth_port->intern_port;
 		phy_port = eth_port->phy_port;

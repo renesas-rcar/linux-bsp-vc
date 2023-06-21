@@ -90,7 +90,6 @@ struct rswitch2_drv {
 	struct reset_control *sd_rst;
 	u32 num_of_cpu_ports;
 	u32 num_of_tsn_ports;
-	u32 ports_intialized;
 	bool serdes_common_init_done;
 	struct rswitch2_eth_port **ports;
 
