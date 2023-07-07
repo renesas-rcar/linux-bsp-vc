@@ -177,7 +177,7 @@
 	pinctrl-names = "default", "state_uhs";
 
 	vmmc-supply = <&vcc_sdhi>;
-	vqmmc-supply = <&vcc_sdhi>;
+	vqmmc-supply = <&vccq_sdhi>;
 	cd-gpios = <&gpio1 23 GPIO_ACTIVE_LOW>;
 	bus-width = <4>;
 };
@@ -266,8 +266,7 @@
 };
 
 &pciec1 {
-	// Previously, enabling this caused a hang
-	status = "disabled";
+	status = "okay";
 };
 
 &pcie_bus_clk {
