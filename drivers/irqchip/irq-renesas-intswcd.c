@@ -13,11 +13,15 @@ struct intswcd_handler_data;
 
 struct intswcd {
 	void __iomem *regs;
+	struct device *dev;
 	const struct intswcd_info *ii;
 	struct irq_domain *domain;
+	unsigned int *hwirq_flags;
 	raw_spinlock_t lock;
 	struct intswcd_handler_data *hd[];
 };
+
+#define INTSWCD_HWIRQ_FLAG_FORCE_LEVEL		BIT(0)
 
 struct intswcd_handler_data {
 	struct intswcd *swcd;
@@ -99,7 +103,8 @@ static int intswcd_irq_map(struct irq_domain *domain, unsigned int irq,
 		return -EINVAL;
 	ihi = &swcd->ii->ihi[hwirq];
 
-	if (ihi->type == INTSWCD_LEVEL) {
+	if (ihi->type == INTSWCD_LEVEL ||
+	    (swcd->hwirq_flags[hwirq] & INTSWCD_HWIRQ_FLAG_FORCE_LEVEL)) {
 		irq_set_status_flags(irq, IRQ_LEVEL);
 		handler = handle_level_irq;
 	} else {
@@ -117,22 +122,61 @@ static int intswcd_irq_xlate(struct irq_domain *domain, struct device_node *dn,
 		unsigned long *out_hwirq, unsigned int *out_type)
 {
 	struct intswcd *swcd = domain->host_data;
-	unsigned int hwirq;
+	unsigned int hwirq, type, dt_type;
 	const struct intswcd_hwirq_info *ihi;
 
-	if (intspec_size != 1)
+	if (intspec_size < 1) {
+		dev_err(swcd->dev, "%pOF: empty interrupt definition\n", dn);
 		return -EINVAL;
-	hwirq = intspec[0];
+	}
 
-	if (hwirq >= swcd->ii->ihi_nr)
+	hwirq = intspec[0];
+	if (hwirq >= swcd->ii->ihi_nr) {
+		dev_err(swcd->dev, "%pOF: hwirq %d is out of range\n",
+			dn, hwirq);
 		return -EINVAL;
+	}
+
 	ihi = &swcd->ii->ihi[hwirq];
-	if (!ihi->type)
+	if (!ihi->type) {
+		dev_err(swcd->dev,
+			"%pOF: hwirq %d is not defined in the driver\n",
+			dn, hwirq);
 		return -EINVAL;
+	}
+
+	type = ihi->type == INTSWCD_EDGE ?
+		IRQ_TYPE_EDGE_RISING : IRQ_TYPE_LEVEL_HIGH;
+
+	if (intspec_size >= 2) {
+		dt_type = intspec[1];
+
+		/* As a quirk, can force level hanling for INTSWCD_EDGE */
+		if (ihi->type == INTSWCD_EDGE &&
+		    (dt_type == IRQ_TYPE_LEVEL_HIGH ||
+		     dt_type == IRQ_TYPE_LEVEL_LOW)) {
+			dev_info(swcd->dev,
+				"%pOF: force handling hwirq %d as level\n",
+				dn, hwirq);
+			swcd->hwirq_flags[hwirq] |=
+				INTSWCD_HWIRQ_FLAG_FORCE_LEVEL;
+			type = dt_type;
+		} else if (dt_type != type) {
+			dev_err(swcd->dev,
+				"%pOF: incompatible trigger type %d for hwirq %d\n",
+				dn, dt_type, hwirq);
+			return -EINVAL;
+		}
+	}
+
+	if (intspec_size > 2) {
+		dev_err(swcd->dev, "%pOF: unparseable interrupt definition\n",
+			dn);
+		return -EINVAL;
+	}
 
 	*out_hwirq = hwirq;
-	*out_type = ihi->type == INTSWCD_EDGE ?
-		    IRQ_TYPE_EDGE_RISING : IRQ_TYPE_LEVEL_HIGH;
+	*out_type = type;
 
 	return 0;
 }
@@ -241,9 +285,15 @@ static int intswcd_probe(struct platform_device *pdev)
 			GFP_KERNEL);
 	if (!swcd)
 		return -ENOMEM;
+	swcd->dev = &pdev->dev;
 	swcd->ii = ii;
 
 	raw_spin_lock_init(&swcd->lock);
+
+	swcd->hwirq_flags = devm_kzalloc(swcd->dev,
+			ii->ihi_nr * sizeof(*swcd->hwirq_flags), GFP_KERNEL);
+	if (!swcd->hwirq_flags)
+		return -ENOMEM;
 
 	for (i = 0; i < ii->ihi_nr; i++) {
 		ihi = &ii->ihi[i];
@@ -273,7 +323,7 @@ static int intswcd_probe(struct platform_device *pdev)
 		}
 
 		/* create and populate handler data object */
-		hd = devm_kzalloc(&pdev->dev, struct_size(hd, hwirq, hwirq_nr),
+		hd = devm_kzalloc(swcd->dev, struct_size(hd, hwirq, hwirq_nr),
 				GFP_KERNEL);
 		if (!hd)
 			return -ENOMEM;
@@ -292,22 +342,22 @@ static int intswcd_probe(struct platform_device *pdev)
 
 	swcd->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(swcd->regs)) {
-		dev_err(&pdev->dev, "failed to map registers\n");
+		dev_err(swcd->dev, "failed to map registers\n");
 		return PTR_ERR(swcd->regs);
 	}
 
-	ret = intswcd_parse_interrupt_base(&pdev->dev, "first-level-interrupt",
+	ret = intswcd_parse_interrupt_base(swcd->dev, "first-level-interrupt",
 			&level_args);
 	if (ret)
 		return ret;
-	ret = intswcd_parse_interrupt_base(&pdev->dev, "first-edge-interrupt",
+	ret = intswcd_parse_interrupt_base(swcd->dev, "first-edge-interrupt",
 			&edge_args);
 	if (ret)
 		return ret;
 
 	intswcd_init_hw(swcd);
 
-	swcd->domain = irq_domain_add_linear(pdev->dev.of_node, ii->ihi_nr,
+	swcd->domain = irq_domain_add_linear(swcd->dev->of_node, ii->ihi_nr,
 			&intswcd_domain_ops, swcd);
 	if (!swcd->domain)
 		return -ENOMEM;
@@ -324,7 +374,7 @@ static int intswcd_probe(struct platform_device *pdev)
 
 		ret = irq_create_of_mapping(&args);
 		if (ret < 0) {
-			dev_err(&pdev->dev, "could not map parent for %s/%d\n",
+			dev_err(swcd->dev, "could not map parent for %s/%d\n",
 				ihi->type == INTSWCD_EDGE ? "edge" : "level",
 				ihi->parent_irq_offset);
 			goto map_err;
