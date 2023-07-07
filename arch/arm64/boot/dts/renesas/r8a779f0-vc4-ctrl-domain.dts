@@ -200,7 +200,7 @@
 		pinctrl-names = "default";
 
 		interrupt-parent = <&intswcd>;
-		interrupts = <R8A779F0_INTSWCD_INTP35>;
+		interrupts = <R8A779F0_INTSWCD_INTP35 IRQ_TYPE_LEVEL_LOW>;
 
 		tx-cut-through-mode = /bits/ 8 <0>;
 
@@ -226,7 +226,7 @@
 		pinctrl-names = "default";
 
 		interrupt-parent = <&intswcd>;
-		interrupts = <R8A779F0_INTSWCD_INTP34>;
+		interrupts = <R8A779F0_INTSWCD_INTP34 IRQ_TYPE_LEVEL_LOW>;
 
 		tx-cut-through-mode = /bits/ 8 <0>;
 
@@ -252,7 +252,7 @@
 		pinctrl-names = "default";
 
 		interrupt-parent = <&intswcd>;
-		interrupts = <R8A779F0_INTSWCD_INTP33>;
+		interrupts = <R8A779F0_INTSWCD_INTP33 IRQ_TYPE_LEVEL_LOW>;
 
 		tx-cut-through-mode = /bits/ 8 <0>;
 
