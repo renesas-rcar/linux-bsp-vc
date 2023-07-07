@@ -76,10 +76,9 @@ static void intswcd_irq_ack(struct irq_data *d)
 	struct intswcd *swcd = d->domain->host_data;
 	const struct intswcd_hwirq_info *ihi = &swcd->ii->ihi[d->hwirq];
 
-	if (WARN_ON_ONCE(ihi->type != INTSWCD_EDGE))
-		return;
-
-	iowrite32(ihi->mask, edge_clr_reg(swcd, ihi->reg));
+	/* This is called both for level and for edge irqs */
+	if (ihi->type == INTSWCD_EDGE)
+		iowrite32(ihi->mask, edge_clr_reg(swcd, ihi->reg));
 }
 
 static struct irq_chip intswcd_irq_chip = {
