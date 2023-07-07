@@ -886,14 +886,16 @@ static int lan865x_probe(struct spi_device *spi)
 	timer_setup(&priv->tc6_timer, timer_callback, 0);
 	mod_timer(&priv->tc6_timer, jiffies + msecs_to_jiffies(TIMEOUT));
 
-	priv->irq_task = kthread_run(irq_handler, priv, "irq_task");
+	priv->irq_task = kthread_run(irq_handler, priv, "%s irq_task",
+				     dev_name(&spi->dev));
 	if (IS_ERR(priv->irq_task)) {
 		ret = PTR_ERR(priv->irq_task);
 		goto error_irq_task;
 	}
 	sched_set_fifo(priv->irq_task);
 
-	priv->ns_task = kthread_run(ns_handler, priv, "ns_task");
+	priv->ns_task = kthread_run(ns_handler, priv, "%s ns_task",
+				    dev_name(&spi->dev));
 	if (IS_ERR(priv->ns_task)) {
 		ret = PTR_ERR(priv->ns_task);
 		goto error_ns_task;
