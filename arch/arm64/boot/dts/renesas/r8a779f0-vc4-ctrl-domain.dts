@@ -184,6 +184,28 @@
 	};
 };
 
+&intswcd {
+	quirks {
+		intp35 {
+			interrupt = <R8A779F0_INTSWCD_INTP35>;
+			force-level-low;
+			setup = <0xdfed4b0c 0x4>;
+		};
+
+		intp34 {
+			interrupt = <R8A779F0_INTSWCD_INTP34>;
+			force-level-low;
+			setup = <0xdfed4b08 0x4>;
+		};
+
+		intp33 {
+			interrupt = <R8A779F0_INTSWCD_INTP33>;
+			force-level-low;
+			setup = <0xdfed4b04 0x4>;
+		};
+	};
+};
+
 &mspi0 {
 	status = "okay";
 
@@ -200,7 +222,7 @@
 		pinctrl-names = "default";
 
 		interrupt-parent = <&intswcd>;
-		interrupts = <R8A779F0_INTSWCD_INTP35 IRQ_TYPE_LEVEL_LOW>;
+		interrupts = <R8A779F0_INTSWCD_INTP35>;
 
 		tx-cut-through-mode = /bits/ 8 <0>;
 
@@ -226,7 +248,7 @@
 		pinctrl-names = "default";
 
 		interrupt-parent = <&intswcd>;
-		interrupts = <R8A779F0_INTSWCD_INTP34 IRQ_TYPE_LEVEL_LOW>;
+		interrupts = <R8A779F0_INTSWCD_INTP34>;
 
 		tx-cut-through-mode = /bits/ 8 <0>;
 
@@ -252,7 +274,7 @@
 		pinctrl-names = "default";
 
 		interrupt-parent = <&intswcd>;
-		interrupts = <R8A779F0_INTSWCD_INTP33 IRQ_TYPE_LEVEL_LOW>;
+		interrupts = <R8A779F0_INTSWCD_INTP33>;
 
 		tx-cut-through-mode = /bits/ 8 <0>;
 
