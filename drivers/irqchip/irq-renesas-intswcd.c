@@ -21,7 +21,12 @@ struct intswcd {
 	struct intswcd_handler_data *hd[];
 };
 
-#define INTSWCD_HWIRQ_FLAG_FORCE_LEVEL		BIT(0)
+#define INTSWCD_HWIRQ_FLAG_FORCE_LEVEL_HIGH	BIT(0)
+#define INTSWCD_HWIRQ_FLAG_FORCE_LEVEL_LOW	BIT(1)
+
+#define INTSWCD_HWIRQ_FLAG_FORCE_LEVEL \
+		(INTSWCD_HWIRQ_FLAG_FORCE_LEVEL_HIGH | \
+		 INTSWCD_HWIRQ_FLAG_FORCE_LEVEL_LOW)
 
 struct intswcd_handler_data {
 	struct intswcd *swcd;
@@ -122,57 +127,34 @@ static int intswcd_irq_xlate(struct irq_domain *domain, struct device_node *dn,
 		unsigned long *out_hwirq, unsigned int *out_type)
 {
 	struct intswcd *swcd = domain->host_data;
-	unsigned int hwirq, type, dt_type;
+	unsigned int hwirq, type;
 	const struct intswcd_hwirq_info *ihi;
 
-	if (intspec_size < 1) {
-		dev_err(swcd->dev, "%pOF: empty interrupt definition\n", dn);
+	if (intspec_size != 1)
 		return -EINVAL;
-	}
 
 	hwirq = intspec[0];
 	if (hwirq >= swcd->ii->ihi_nr) {
-		dev_err(swcd->dev, "%pOF: hwirq %d is out of range\n",
-			dn, hwirq);
+		dev_err(swcd->dev, "hwirq %d is out of range\n", hwirq);
 		return -EINVAL;
 	}
 
 	ihi = &swcd->ii->ihi[hwirq];
 	if (!ihi->type) {
-		dev_err(swcd->dev,
-			"%pOF: hwirq %d is not defined in the driver\n",
-			dn, hwirq);
+		dev_err(swcd->dev, "hwirq %d is not defined in the driver\n",
+				hwirq);
 		return -EINVAL;
 	}
 
-	type = ihi->type == INTSWCD_EDGE ?
-		IRQ_TYPE_EDGE_RISING : IRQ_TYPE_LEVEL_HIGH;
-
-	if (intspec_size >= 2) {
-		dt_type = intspec[1];
-
-		/* As a quirk, can force level hanling for INTSWCD_EDGE */
-		if (ihi->type == INTSWCD_EDGE &&
-		    (dt_type == IRQ_TYPE_LEVEL_HIGH ||
-		     dt_type == IRQ_TYPE_LEVEL_LOW)) {
-			dev_info(swcd->dev,
-				"%pOF: force handling hwirq %d as level\n",
-				dn, hwirq);
-			swcd->hwirq_flags[hwirq] |=
-				INTSWCD_HWIRQ_FLAG_FORCE_LEVEL;
-			type = dt_type;
-		} else if (dt_type != type) {
-			dev_err(swcd->dev,
-				"%pOF: incompatible trigger type %d for hwirq %d\n",
-				dn, dt_type, hwirq);
-			return -EINVAL;
-		}
-	}
-
-	if (intspec_size > 2) {
-		dev_err(swcd->dev, "%pOF: unparseable interrupt definition\n",
-			dn);
-		return -EINVAL;
+	if (swcd->hwirq_flags[hwirq] & INTSWCD_HWIRQ_FLAG_FORCE_LEVEL) {
+		dev_info(swcd->dev, "forcing level handling for hwirq %d\n",
+				hwirq);
+		type = (swcd->hwirq_flags[hwirq] &
+				INTSWCD_HWIRQ_FLAG_FORCE_LEVEL_HIGH) ?
+			IRQ_TYPE_LEVEL_HIGH : IRQ_TYPE_LEVEL_LOW;
+	} else {
+		type = ihi->type == INTSWCD_EDGE ?
+			IRQ_TYPE_EDGE_RISING : IRQ_TYPE_LEVEL_HIGH;
 	}
 
 	*out_hwirq = hwirq;
@@ -245,6 +227,72 @@ static int intswcd_parse_interrupt_base(struct device *dev,
 	}
 
 	return 0;
+}
+
+static void intswcd_add_level_flag(struct intswcd *swcd, unsigned int hwirq,
+		struct device_node *node, unsigned int flag)
+{
+	if (swcd->hwirq_flags[hwirq] & INTSWCD_HWIRQ_FLAG_FORCE_LEVEL) {
+		dev_warn(swcd->dev,
+			"%pOF: ignoring conflicting flag for hwirq %d\n",
+			node, hwirq);
+		return;
+	}
+
+	swcd->hwirq_flags[hwirq] |= flag;
+}
+
+static void intswcd_parse_quirks(struct intswcd *swcd)
+{
+	struct device_node *parent, *node;
+	unsigned int hwirq;
+	unsigned int addr, value;
+	void __iomem *reg;
+
+	parent = of_get_child_by_name(swcd->dev->of_node, "quirks");
+	if (!parent)
+		return;
+
+	for_each_child_of_node(parent, node) {
+		if (of_property_read_u32(node, "interrupt", &hwirq) != 0) {
+			dev_warn(swcd->dev,
+				"could not parse interrupt property from %pOF\n",
+				node);
+			continue;
+		}
+		if (hwirq >= swcd->ii->ihi_nr) {
+			dev_warn(swcd->dev,
+				"interrupt property in %pOF is out of range\n",
+				node);
+			continue;
+		}
+
+		if (of_property_read_bool(node, "force-level-high")) {
+			intswcd_add_level_flag(swcd, hwirq, node,
+				INTSWCD_HWIRQ_FLAG_FORCE_LEVEL_HIGH);
+		}
+		if (of_property_read_bool(node, "force-level-low")) {
+			intswcd_add_level_flag(swcd, hwirq, node,
+				INTSWCD_HWIRQ_FLAG_FORCE_LEVEL_LOW);
+		}
+
+		/* Temporary helper to setup the glitch filter.
+		 * FIXME: this shall be done using pinctrl */
+		if ((of_property_read_u32_index(node, "setup", 0, &addr) == 0) &&
+		     of_property_read_u32_index(node, "setup", 1, &value) == 0) {
+			dev_info(swcd->dev,
+				"setup: %pOF: writing 0x%x to 0x%x\n",
+				node, value, addr);
+
+			reg = ioremap(addr, sizeof(value));
+			if (reg == NULL) {
+				dev_warn(swcd->dev, "failed to map\n");
+			} else {
+				iowrite32(value, reg);
+				iounmap(reg);
+			}
+		}
+	}
 }
 
 static void intswcd_init_hw(struct intswcd *swcd)
@@ -354,6 +402,8 @@ static int intswcd_probe(struct platform_device *pdev)
 			&edge_args);
 	if (ret)
 		return ret;
+
+	intswcd_parse_quirks(swcd);
 
 	intswcd_init_hw(swcd);
 
