@@ -21,7 +21,7 @@
 
 	tsn1_phy_2g5: ethernet-phy@0 {
 		reg = <0>;
-		compatible = "ethernet-phy-id0000.0000";
+		compatible = "ethernet-phy-ieee802.3-c45";
 		status = "okay";
 	};
 };
