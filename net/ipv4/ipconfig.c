@@ -65,6 +65,7 @@
 #include <net/ip.h>
 #include <net/ipconfig.h>
 #include <net/route.h>
+#include <net/rswitch2.h>
 
 #include <linux/uaccess.h>
 #include <net/checksum.h>
@@ -198,9 +199,24 @@ struct ic_device {
 static struct ic_device *ic_first_dev __initdata;	/* List of open device */
 static struct ic_device *ic_dev __initdata;		/* Selected device */
 
+static bool __init ic_is_companion_dev(struct net_device *dev, struct net_device *ic_dev)
+{
+	if (netdev_uses_dsa(dev))
+		return true;
+
+#ifdef CONFIG_RENESAS_RSWITCH2
+	if (rswitch2_is_physical_port(dev, ic_dev))
+		return true;
+#endif
+
+	return false;
+}
+
 static bool __init ic_is_init_dev(struct net_device *dev)
 {
 	if (dev->flags & IFF_LOOPBACK)
+		return false;
+	if (ic_is_companion_dev(dev, NULL))
 		return false;
 	return user_dev_name[0] ? !strcmp(dev->name, user_dev_name) :
 	    (!(dev->flags & IFF_LOOPBACK) &&
@@ -218,12 +234,14 @@ static int __init ic_open_devs(void)
 	last = &ic_first_dev;
 	rtnl_lock();
 
-	/* bring loopback and DSA master network devices up first */
+	/* bring loopback and companion network devices up first */
 	for_each_netdev(&init_net, dev) {
-		if (!(dev->flags & IFF_LOOPBACK) && !netdev_uses_dsa(dev))
+		if (!(dev->flags & IFF_LOOPBACK) && !ic_is_companion_dev(dev, NULL))
 			continue;
 		if (dev_change_flags(dev, dev->flags | IFF_UP, NULL) < 0)
 			pr_err("IP-Config: Failed to open %s\n", dev->name);
+		else
+			pr_debug("IP-Config: %s UP\n", dev->name);
 	}
 
 	for_each_netdev(&init_net, dev) {
@@ -315,11 +333,23 @@ static void __init ic_close_devs(void)
 	while ((d = next)) {
 		next = d->next;
 		dev = d->dev;
-		if (d != ic_dev && !netdev_uses_dsa(dev)) {
+		if (d != ic_dev) {
 			pr_debug("IP-Config: Downing %s\n", dev->name);
 			dev_change_flags(dev, d->flags, NULL);
 		}
 		kfree(d);
+	}
+
+	/* bring down unused companion network devices */
+	for_each_netdev(&init_net, dev) {
+		if (ic_dev && ic_is_companion_dev(dev, ic_dev->dev)) {
+			pr_debug("IP-Config: Keeping %s up\n", dev->name);
+			continue;
+		}
+		if (ic_is_companion_dev(dev, NULL)) {
+			pr_debug("IP-Config: Downing %s\n", dev->name);
+			dev_change_flags(dev, d->flags, NULL);
+		}
 	}
 	rtnl_unlock();
 }
