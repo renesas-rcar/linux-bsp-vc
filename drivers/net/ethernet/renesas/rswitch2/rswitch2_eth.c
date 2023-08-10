@@ -25,6 +25,8 @@
 
 #include <linux/of_platform.h>
 
+#include <net/rswitch2.h>
+
 #include "rswitch2.h"
 #include "rswitch2_eth.h"
 #include "rswitch2_gwca.h"
@@ -3519,6 +3521,30 @@ static void rswitch2_disable_ports(struct rswitch2_drv *rsw2)
 		}
 
 	}
+}
+
+bool rswitch2_is_physical_port(struct net_device *ndev, struct net_device *ref_ndev)
+{
+	struct rswitch2_eth_port *eth_port, *ref_eth_port;
+
+	if (ndev->netdev_ops != &rswitch2_netdev_ops)
+		return false;		/* rdev is not from rswitch2 */
+
+	if (ref_ndev && ref_ndev->netdev_ops != &rswitch2_netdev_ops)
+		return false;		/* ref_ndev is not from rswitch2 */
+
+	eth_port = netdev_priv(ndev);
+	if (eth_port->intern_port)
+		return false;		/* CPU port */
+
+	if (!ref_ndev)
+		return true;		/* ndev is a physical port, no ref_ndev */
+
+	ref_eth_port = netdev_priv(ref_ndev);
+	if (!ref_eth_port->intern_port)
+		return false;		/* ref_ndev is not an internal port */
+
+	return eth_port->rsw2 == ref_eth_port->rsw2;
 }
 
 int rswitch2_eth_init(struct rswitch2_drv *rsw2)
