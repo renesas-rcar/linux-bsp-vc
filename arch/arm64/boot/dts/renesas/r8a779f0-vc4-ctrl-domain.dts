@@ -212,7 +212,7 @@
 	pinctrl-0 = <&mspi0_pins>;
 	pinctrl-names = "default";
 
-	t1s@0 {
+	t1s0: t1s@0 {
 		compatible = "microchip,lan865x";
 		reg = <0>;
 
@@ -238,7 +238,7 @@
 	pinctrl-0 = <&mspi1_pins>;
 	pinctrl-names = "default";
 
-	t1s@0 {
+	t1s1: t1s@0 {
 		compatible = "microchip,lan865x";
 		reg = <0>;
 
@@ -264,7 +264,7 @@
 	pinctrl-0 = <&mspi4_pins>;
 	pinctrl-names = "default";
 
-	t1s@0 {
+	t1s2: t1s@0 {
 		compatible = "microchip,lan865x";
 		reg = <0>;
 
