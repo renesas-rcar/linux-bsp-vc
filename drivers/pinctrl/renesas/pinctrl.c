@@ -144,7 +144,8 @@ static int sh_pfc_dt_subnode_to_map(struct pinctrl_dev *pctldev,
 		return ret;
 	}
 
-	ret = pinconf_generic_parse_dt_config(np, NULL, &configs, &num_configs);
+	ret = pinconf_generic_parse_dt_config(np, pctldev,
+					      &configs, &num_configs);
 	if (ret < 0)
 		return ret;
 
@@ -586,6 +587,9 @@ static bool sh_pfc_pinconf_validate(struct sh_pfc *pfc, unsigned int _pin,
 		return pin->configs & SH_PFC_PIN_CFG_IO_VOLTAGE;
 
 	default:
+		if (pfc->info->ops && pfc->info->ops->pinconf_validate)
+			return pfc->info->ops->pinconf_validate(pfc, _pin,
+								param);
 		return false;
 	}
 }
@@ -658,8 +662,17 @@ static int sh_pfc_pinconf_get(struct pinctrl_dev *pctldev, unsigned _pin,
 		break;
 	}
 
-	default:
-		return -ENOTSUPP;
+	default: {
+		int ret = -ENOTSUPP;
+
+		if (pfc->info->ops && pfc->info->ops->pinconf_get) {
+			spin_lock_irqsave(&pfc->lock, flags);
+			ret = pfc->info->ops->pinconf_get(pfc, _pin, config);
+			spin_unlock_irqrestore(&pfc->lock, flags);
+		}
+
+		return ret;
+	}
 	}
 
 	*config = pinconf_to_config_packed(param, arg);
@@ -739,8 +752,18 @@ static int sh_pfc_pinconf_set(struct pinctrl_dev *pctldev, unsigned _pin,
 			break;
 		}
 
-		default:
-			return -ENOTSUPP;
+		default: {
+			int ret = -ENOTSUPP;
+
+			if (pfc->info->ops && pfc->info->ops->pinconf_set) {
+				spin_lock_irqsave(&pfc->lock, flags);
+				ret = pfc->info->ops->pinconf_set(pfc, _pin,
+								  configs[i]);
+				spin_unlock_irqrestore(&pfc->lock, flags);
+			}
+
+			return ret;
+		}
 		}
 	} /* for each config */
 
@@ -828,6 +851,9 @@ int sh_pfc_register_pinctrl(struct sh_pfc *pfc)
 	pmx->pctl_desc.confops = &sh_pfc_pinconf_ops;
 	pmx->pctl_desc.pins = pmx->pins;
 	pmx->pctl_desc.npins = pfc->info->nr_pins;
+	pmx->pctl_desc.num_custom_params = pfc->info->num_custom_params;
+	pmx->pctl_desc.custom_params = pfc->info->custom_params;
+	pmx->pctl_desc.custom_conf_items = pfc->info->custom_conf_items;
 
 	ret = devm_pinctrl_register_and_init(pfc->dev, &pmx->pctl_desc, pmx,
 					     &pmx->pctl);

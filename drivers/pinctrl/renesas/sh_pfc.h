@@ -273,6 +273,12 @@ struct sh_pfc_soc_operations {
 	void (*set_bias)(struct sh_pfc *pfc, unsigned int pin,
 			 unsigned int bias);
 	int (*pin_to_pocctrl)(struct sh_pfc *pfc, unsigned int pin, u32 *pocctrl);
+	bool (*pinconf_validate)(struct sh_pfc *pfc, unsigned int pin,
+				 enum pin_config_param param);
+	int (*pinconf_get)(struct sh_pfc *pfc, unsigned int pin,
+			   unsigned long *config);
+	int (*pinconf_set)(struct sh_pfc *pfc, unsigned int pin,
+			   unsigned long config);
 };
 
 struct sh_pfc_soc_info {
@@ -310,6 +316,10 @@ struct sh_pfc_soc_info {
 	unsigned int pinmux_data_size;
 
 	u32 unlock_reg;		/* can be literal address or mask */
+
+	unsigned int num_custom_params;
+	const struct pinconf_generic_params *custom_params;
+	const struct pin_config_item *custom_conf_items;
 };
 
 extern const struct sh_pfc_soc_info emev2_pinmux_info;
