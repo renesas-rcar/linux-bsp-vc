@@ -10,8 +10,9 @@
 #include <linux/errno.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <dt-bindings/pinctrl/pfc-r8a779f0.h>
 
-#include "sh_pfc.h"
+#include "core.h"
 
 #define CFG_FLAGS (SH_PFC_PIN_CFG_DRIVE_STRENGTH | SH_PFC_PIN_CFG_PULL_UP_DOWN)
 
@@ -3422,6 +3423,96 @@ static const struct pinmux_drive_reg pinmux_drive_regs[] = {
 	{ },
 };
 
+#define FCLACTL_INTP0_REG		0xdfed4700
+#define FCLACTL_INTP1_REG		0xdfed4704
+#define FCLACTL_INTP2_REG		0xdfed4708
+#define FCLACTL_INTP3_REG		0xdfed470c
+#define FCLACTL_INTP4_REG		0xdfed4710
+#define FCLACTL_INTP5_REG		0xdfed4714
+#define FCLACTL_INTP6_REG		0xdfed4718
+#define FCLACTL_INTP7_REG		0xdfed471c
+#define FCLACTL_INTP8_REG		0xdfed4800
+#define FCLACTL_INTP9_REG		0xdfed4804
+#define FCLACTL_INTP10_REG		0xdfed4808
+#define FCLACTL_INTP11_REG		0xdfed480c
+#define FCLACTL_INTP12_REG		0xdfed4810
+#define FCLACTL_INTP13_REG		0xdfed4814
+#define FCLACTL_INTP14_REG		0xdfed4818
+#define FCLACTL_INTP15_REG		0xdfed481c
+#define FCLACTL_INTP16_REG		0xdfed4900
+#define FCLACTL_INTP17_REG		0xdfed4904
+#define FCLACTL_INTP18_REG		0xdfed4908
+#define FCLACTL_INTP19_REG		0xdfed490c
+#define FCLACTL_INTP20_REG		0xdfed4910
+#define FCLACTL_INTP21_REG		0xdfed4914
+#define FCLACTL_INTP22_REG		0xdfed4918
+#define FCLACTL_INTP23_REG		0xdfed491c
+#define FCLACTL_INTP24_REG		0xdfed4a00
+#define FCLACTL_INTP25_REG		0xdfed4a04
+#define FCLACTL_INTP26_REG		0xdfed4a08
+#define FCLACTL_INTP27_REG		0xdfed4a0c
+#define FCLACTL_INTP28_REG		0xdfed4a10
+#define FCLACTL_INTP29_REG		0xdfed4a14
+#define FCLACTL_INTP30_REG		0xdfed4a18
+#define FCLACTL_INTP31_REG		0xdfed4a1c
+#define FCLACTL_INTP32_REG		0xdfed4b00
+#define FCLACTL_INTP33_REG		0xdfed4b04
+#define FCLACTL_INTP34_REG		0xdfed4b08
+#define FCLACTL_INTP35_REG		0xdfed4b0c
+#define FCLACTL_INTP36_REG		0xdfed4b10
+#define FCLACTL_INTP37_REG		0xdfed4b14
+
+/*
+ * Note: there are duplicate pins in fclactl_intp_regs[] table, because several
+ *       pins have two different INTP function assigned. Since such INTP
+ *       functions can't be used together anyway, it is harmless to set
+ *       FCLACTL for both of them on request to set any.
+ */
+
+struct {
+	unsigned int pin;
+	u32 reg;
+} fclactl_intp_regs[] = {
+	{ RCAR_GP_PIN(7,  1), FCLACTL_INTP0_REG  },
+	{ RCAR_GP_PIN(7,  3), FCLACTL_INTP1_REG  },
+	{ RCAR_GP_PIN(7,  5), FCLACTL_INTP2_REG  },
+	{ RCAR_GP_PIN(7,  7), FCLACTL_INTP3_REG  },
+	{ RCAR_GP_PIN(7,  9), FCLACTL_INTP4_REG  },
+	{ RCAR_GP_PIN(7, 11), FCLACTL_INTP5_REG  },
+	{ RCAR_GP_PIN(7, 13), FCLACTL_INTP6_REG  },
+	{ RCAR_GP_PIN(7, 15), FCLACTL_INTP7_REG  },
+	{ RCAR_GP_PIN(7, 17), FCLACTL_INTP8_REG  },
+	{ RCAR_GP_PIN(7, 19), FCLACTL_INTP9_REG  },
+	{ RCAR_GP_PIN(7, 21), FCLACTL_INTP10_REG },
+	{ RCAR_GP_PIN(7, 23), FCLACTL_INTP11_REG },
+	{ RCAR_GP_PIN(7, 25), FCLACTL_INTP12_REG },
+	{ RCAR_GP_PIN(7, 27), FCLACTL_INTP13_REG },
+	{ RCAR_GP_PIN(7, 29), FCLACTL_INTP14_REG },
+	{ RCAR_GP_PIN(7, 31), FCLACTL_INTP15_REG },
+	{ RCAR_GP_PIN(6, 15), FCLACTL_INTP16_REG },
+	{ RCAR_GP_PIN(6, 13), FCLACTL_INTP17_REG },
+	{ RCAR_GP_PIN(6, 11), FCLACTL_INTP18_REG },
+	{ RCAR_GP_PIN(6,  9), FCLACTL_INTP19_REG },
+	{ RCAR_GP_PIN(6,  7), FCLACTL_INTP20_REG },
+	{ RCAR_GP_PIN(6,  5), FCLACTL_INTP21_REG },
+	{ RCAR_GP_PIN(6,  3), FCLACTL_INTP22_REG },
+	{ RCAR_GP_PIN(6,  1), FCLACTL_INTP23_REG },
+	{ RCAR_GP_PIN(7, 17), FCLACTL_INTP24_REG },
+	{ RCAR_GP_PIN(7, 19), FCLACTL_INTP25_REG },
+	{ RCAR_GP_PIN(7, 21), FCLACTL_INTP26_REG },
+	{ RCAR_GP_PIN(7, 23), FCLACTL_INTP27_REG },
+	{ RCAR_GP_PIN(7, 25), FCLACTL_INTP28_REG },
+	{ RCAR_GP_PIN(7, 27), FCLACTL_INTP29_REG },
+	{ RCAR_GP_PIN(7, 29), FCLACTL_INTP30_REG },
+	{ RCAR_GP_PIN(7, 31), FCLACTL_INTP31_REG },
+	{ RCAR_GP_PIN(6, 21), FCLACTL_INTP32_REG },
+	{ RCAR_GP_PIN(6, 20), FCLACTL_INTP33_REG },
+	{ RCAR_GP_PIN(6, 19), FCLACTL_INTP34_REG },
+	{ RCAR_GP_PIN(6, 18), FCLACTL_INTP35_REG },
+	{ RCAR_GP_PIN(6, 17), FCLACTL_INTP36_REG },
+	{ RCAR_GP_PIN(6, 16), FCLACTL_INTP37_REG },
+};
+
 enum ioctrl_regs {
 	POC0,
 	POC1,
@@ -3432,6 +3523,44 @@ enum ioctrl_regs {
 	POC6,
 	POC7,
 	TD0SEL1,
+	FCLACTL_INTP0,
+	FCLACTL_INTP1,
+	FCLACTL_INTP2,
+	FCLACTL_INTP3,
+	FCLACTL_INTP4,
+	FCLACTL_INTP5,
+	FCLACTL_INTP6,
+	FCLACTL_INTP7,
+	FCLACTL_INTP8,
+	FCLACTL_INTP9,
+	FCLACTL_INTP10,
+	FCLACTL_INTP11,
+	FCLACTL_INTP12,
+	FCLACTL_INTP13,
+	FCLACTL_INTP14,
+	FCLACTL_INTP15,
+	FCLACTL_INTP16,
+	FCLACTL_INTP17,
+	FCLACTL_INTP18,
+	FCLACTL_INTP19,
+	FCLACTL_INTP20,
+	FCLACTL_INTP21,
+	FCLACTL_INTP22,
+	FCLACTL_INTP23,
+	FCLACTL_INTP24,
+	FCLACTL_INTP25,
+	FCLACTL_INTP26,
+	FCLACTL_INTP27,
+	FCLACTL_INTP28,
+	FCLACTL_INTP29,
+	FCLACTL_INTP30,
+	FCLACTL_INTP31,
+	FCLACTL_INTP32,
+	FCLACTL_INTP33,
+	FCLACTL_INTP34,
+	FCLACTL_INTP35,
+	FCLACTL_INTP36,
+	FCLACTL_INTP37,
 };
 
 static const struct pinmux_ioctrl_reg pinmux_ioctrl_regs[] = {
@@ -3444,6 +3573,44 @@ static const struct pinmux_ioctrl_reg pinmux_ioctrl_regs[] = {
 	[POC6] = { 0xdfd910a0, },
 	[POC7] = { 0xdfd918a0, },
 	[TD0SEL1] = { 0xe6058120, },
+	[FCLACTL_INTP0 ] = { FCLACTL_INTP0_REG,  },
+	[FCLACTL_INTP1 ] = { FCLACTL_INTP1_REG,  },
+	[FCLACTL_INTP2 ] = { FCLACTL_INTP2_REG,  },
+	[FCLACTL_INTP3 ] = { FCLACTL_INTP3_REG,  },
+	[FCLACTL_INTP4 ] = { FCLACTL_INTP4_REG,  },
+	[FCLACTL_INTP5 ] = { FCLACTL_INTP5_REG,  },
+	[FCLACTL_INTP6 ] = { FCLACTL_INTP6_REG,  },
+	[FCLACTL_INTP7 ] = { FCLACTL_INTP7_REG,  },
+	[FCLACTL_INTP8 ] = { FCLACTL_INTP8_REG,  },
+	[FCLACTL_INTP9 ] = { FCLACTL_INTP9_REG,  },
+	[FCLACTL_INTP10] = { FCLACTL_INTP10_REG, },
+	[FCLACTL_INTP11] = { FCLACTL_INTP11_REG, },
+	[FCLACTL_INTP12] = { FCLACTL_INTP12_REG, },
+	[FCLACTL_INTP13] = { FCLACTL_INTP13_REG, },
+	[FCLACTL_INTP14] = { FCLACTL_INTP14_REG, },
+	[FCLACTL_INTP15] = { FCLACTL_INTP15_REG, },
+	[FCLACTL_INTP16] = { FCLACTL_INTP16_REG, },
+	[FCLACTL_INTP17] = { FCLACTL_INTP17_REG, },
+	[FCLACTL_INTP18] = { FCLACTL_INTP18_REG, },
+	[FCLACTL_INTP19] = { FCLACTL_INTP19_REG, },
+	[FCLACTL_INTP20] = { FCLACTL_INTP20_REG, },
+	[FCLACTL_INTP21] = { FCLACTL_INTP21_REG, },
+	[FCLACTL_INTP22] = { FCLACTL_INTP22_REG, },
+	[FCLACTL_INTP23] = { FCLACTL_INTP23_REG, },
+	[FCLACTL_INTP24] = { FCLACTL_INTP24_REG, },
+	[FCLACTL_INTP25] = { FCLACTL_INTP25_REG, },
+	[FCLACTL_INTP26] = { FCLACTL_INTP26_REG, },
+	[FCLACTL_INTP27] = { FCLACTL_INTP27_REG, },
+	[FCLACTL_INTP28] = { FCLACTL_INTP28_REG, },
+	[FCLACTL_INTP29] = { FCLACTL_INTP29_REG, },
+	[FCLACTL_INTP30] = { FCLACTL_INTP30_REG, },
+	[FCLACTL_INTP31] = { FCLACTL_INTP31_REG, },
+	[FCLACTL_INTP32] = { FCLACTL_INTP32_REG, },
+	[FCLACTL_INTP33] = { FCLACTL_INTP33_REG, },
+	[FCLACTL_INTP34] = { FCLACTL_INTP34_REG, },
+	[FCLACTL_INTP35] = { FCLACTL_INTP35_REG, },
+	[FCLACTL_INTP36] = { FCLACTL_INTP36_REG, },
+	[FCLACTL_INTP37] = { FCLACTL_INTP37_REG, },
 	{ /* sentinel */ },
 };
 
@@ -3743,10 +3910,88 @@ static const struct pinmux_bias_reg pinmux_bias_regs[] = {
 	{ /* sentinel */ },
 };
 
+#define PIN_CONFIG_IRQ_DETECTOR_MODE	(PIN_CONFIG_END + 1)
+
+static const struct pinconf_generic_params r8a779f0_pinconf_params[] = {
+	{ "irq-detector-mode", PIN_CONFIG_IRQ_DETECTOR_MODE,
+		IRQ_DETECTOR_MODE_NONE },
+};
+
+#ifdef CONFIG_DEBUG_FS
+static const struct pin_config_item r8a779f0_pinconf_items[] = {
+	PCONFDUMP(PIN_CONFIG_IRQ_DETECTOR_MODE, "IRQ Detector mode",
+		  NULL, true),
+};
+#endif
+
+static bool r8a779f0_pinconf_validate(struct sh_pfc *pfc, unsigned int pin,
+		                      enum pin_config_param param)
+{
+	int i;
+
+	if (param == PIN_CONFIG_IRQ_DETECTOR_MODE) {
+		for (i = 0; i < ARRAY_SIZE(fclactl_intp_regs); i++) {
+			if (fclactl_intp_regs[i].pin == pin)
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static int r8a779f0_pinconf_get(struct sh_pfc *pfc, unsigned int pin,
+				unsigned long *config)
+{
+	enum pin_config_param param = pinconf_to_config_param(*config);
+	u32 val;
+	int ret = -ENOTSUPP;
+	int i;
+
+	if (param == PIN_CONFIG_IRQ_DETECTOR_MODE) {
+		for (i = 0; i < ARRAY_SIZE(fclactl_intp_regs); i++) {
+			/* For pins with several entries in table, use first */
+			if (fclactl_intp_regs[i].pin == pin) {
+				val = sh_pfc_read(pfc,
+						  fclactl_intp_regs[i].reg);
+				*config = pinconf_to_config_packed(param, val);
+				ret = 0;
+				break;
+			}
+		}
+	}
+
+	return ret;
+}
+
+static int r8a779f0_pinconf_set(struct sh_pfc *pfc, unsigned int pin,
+				unsigned long config)
+{
+	enum pin_config_param param = pinconf_to_config_param(config);
+	u32 val = pinconf_to_config_argument(config);
+	int ret = -ENOTSUPP;
+	int i;
+
+	if (param == PIN_CONFIG_IRQ_DETECTOR_MODE) {
+		for (i = 0; i < ARRAY_SIZE(fclactl_intp_regs); i++) {
+			/* For pins with several entries in table, set all */
+			if (fclactl_intp_regs[i].pin == pin) {
+				sh_pfc_write(pfc,
+					     fclactl_intp_regs[i].reg, val);
+				ret = 0;
+			}
+		}
+	}
+
+	return ret;
+}
+
 static const struct sh_pfc_soc_operations pinmux_ops = {
 	.pin_to_pocctrl = r8a779f0_pin_to_pocctrl,
 	.get_bias = rcar_pinmux_get_bias,
 	.set_bias = rcar_pinmux_set_bias,
+	.pinconf_validate = r8a779f0_pinconf_validate,
+	.pinconf_get = r8a779f0_pinconf_get,
+	.pinconf_set = r8a779f0_pinconf_set,
 };
 
 const struct sh_pfc_soc_info r8a779f0_pinmux_info = {
@@ -3770,4 +4015,10 @@ const struct sh_pfc_soc_info r8a779f0_pinmux_info = {
 
 	.pinmux_data = pinmux_data,
 	.pinmux_data_size = ARRAY_SIZE(pinmux_data),
+
+	.custom_params = r8a779f0_pinconf_params,
+	.num_custom_params = ARRAY_SIZE(r8a779f0_pinconf_params),
+#ifdef CONFIG_DEBUG_FS
+	.custom_conf_items = r8a779f0_pinconf_items,
+#endif
 };
