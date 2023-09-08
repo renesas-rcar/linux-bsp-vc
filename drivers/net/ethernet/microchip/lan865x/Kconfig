@@ -1,0 +1,5 @@
+config LAN865X
+	tristate "LAN865x support"
+	depends on SPI_MASTER
+	help
+	  Support for SPI-connected LAN855x 10Base-T1S transciever
