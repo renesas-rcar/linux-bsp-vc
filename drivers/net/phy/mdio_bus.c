@@ -27,7 +27,6 @@
 #include <linux/of_gpio.h>
 #include <linux/of_mdio.h>
 #include <linux/phy.h>
-#include <linux/reset.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -40,52 +39,10 @@
 
 #include "mdio-boardinfo.h"
 
-static int mdiobus_register_gpiod(struct mdio_device *mdiodev)
-{
-	/* Deassert the optional reset signal */
-	mdiodev->reset_gpio = gpiod_get_optional(&mdiodev->dev,
-						 "reset", GPIOD_OUT_LOW);
-	if (IS_ERR(mdiodev->reset_gpio))
-		return PTR_ERR(mdiodev->reset_gpio);
-
-	if (mdiodev->reset_gpio)
-		gpiod_set_consumer_name(mdiodev->reset_gpio, "PHY reset");
-
-	return 0;
-}
-
-static int mdiobus_register_reset(struct mdio_device *mdiodev)
-{
-	struct reset_control *reset;
-
-	reset = reset_control_get_optional_exclusive(&mdiodev->dev, "phy");
-	if (IS_ERR(reset))
-		return PTR_ERR(reset);
-
-	mdiodev->reset_ctrl = reset;
-
-	return 0;
-}
-
 int mdiobus_register_device(struct mdio_device *mdiodev)
 {
-	int err;
-
 	if (mdiodev->bus->mdio_map[mdiodev->addr])
 		return -EBUSY;
-
-	if (mdiodev->flags & MDIO_DEVICE_FLAG_PHY) {
-		err = mdiobus_register_gpiod(mdiodev);
-		if (err)
-			return err;
-
-		err = mdiobus_register_reset(mdiodev);
-		if (err)
-			return err;
-
-		/* Assert the reset signal */
-		mdio_device_reset(mdiodev, 1);
-	}
 
 	mdiodev->bus->mdio_map[mdiodev->addr] = mdiodev;
 
@@ -97,8 +54,6 @@ int mdiobus_unregister_device(struct mdio_device *mdiodev)
 {
 	if (mdiodev->bus->mdio_map[mdiodev->addr] != mdiodev)
 		return -EINVAL;
-
-	reset_control_put(mdiodev->reset_ctrl);
 
 	mdiodev->bus->mdio_map[mdiodev->addr] = NULL;
 
@@ -434,41 +389,6 @@ struct mii_bus *of_mdio_find_bus(struct device_node *mdio_bus_np)
 	return d ? to_mii_bus(d) : NULL;
 }
 EXPORT_SYMBOL(of_mdio_find_bus);
-
-/* Walk the list of subnodes of a mdio bus and look for a node that
- * matches the mdio device's address with its 'reg' property. If
- * found, set the of_node pointer for the mdio device. This allows
- * auto-probed phy devices to be supplied with information passed in
- * via DT.
- */
-static void of_mdiobus_link_mdiodev(struct mii_bus *bus,
-				    struct mdio_device *mdiodev)
-{
-	struct device *dev = &mdiodev->dev;
-	struct device_node *child;
-
-	if (dev->of_node || !bus->dev.of_node)
-		return;
-
-	for_each_available_child_of_node(bus->dev.of_node, child) {
-		int addr;
-
-		addr = of_mdio_parse_addr(dev, child);
-		if (addr < 0)
-			continue;
-
-		if (addr == mdiodev->addr) {
-			dev->of_node = child;
-			dev->fwnode = of_fwnode_handle(child);
-			return;
-		}
-	}
-}
-#else /* !IS_ENABLED(CONFIG_OF_MDIO) */
-static inline void of_mdiobus_link_mdiodev(struct mii_bus *mdio,
-					   struct mdio_device *mdiodev)
-{
-}
 #endif
 
 /**
@@ -616,9 +536,6 @@ void mdiobus_unregister(struct mii_bus *bus)
 		if (!mdiodev)
 			continue;
 
-		if (mdiodev->reset_gpio)
-			gpiod_put(mdiodev->reset_gpio);
-
 		mdiodev->device_remove(mdiodev);
 		mdiodev->device_free(mdiodev);
 	}
@@ -668,37 +585,49 @@ EXPORT_SYMBOL(mdiobus_free);
  */
 struct phy_device *mdiobus_scan(struct mii_bus *bus, int addr)
 {
-	struct phy_device *phydev = ERR_PTR(-ENODEV);
+	struct phy_device *phydev;
 	int err;
+
+#if IS_ENABLED(CONFIG_OF_MDIO)
+	struct device_node *child = NULL;
+
+	if (bus->dev.of_node) {
+		for_each_available_child_of_node(bus->dev.of_node, child) {
+			if (addr == of_mdio_parse_addr(&bus->dev, child))
+				break;
+		}
+	}
+
+	if (child)
+		phydev = of_phy_device_initialize(child, bus, addr);
+	else
+#endif
+	phydev = phy_device_initialize(bus, addr);
 
 	switch (bus->probe_capabilities) {
 	case MDIOBUS_NO_CAP:
 	case MDIOBUS_C22:
-		phydev = get_phy_device(bus, addr, false);
+		err = phy_device_probe_ids(phydev, false);
 		break;
 	case MDIOBUS_C45:
-		phydev = get_phy_device(bus, addr, true);
+		err = phy_device_probe_ids(phydev, true);
 		break;
 	case MDIOBUS_C22_C45:
-		phydev = get_phy_device(bus, addr, false);
-		if (IS_ERR(phydev))
-			phydev = get_phy_device(bus, addr, true);
+		err = phy_device_probe_ids(phydev, false);
+		if (err)
+			err = phy_device_probe_ids(phydev, true);
 		break;
 	}
 
-	if (IS_ERR(phydev))
-		return phydev;
-
-	/*
-	 * For DT, see if the auto-probed phy has a correspoding child
-	 * in the bus node, and set the of_node pointer in this case.
-	 */
-	of_mdiobus_link_mdiodev(bus, &phydev->mdio);
+	if (err) {
+		phy_device_free(phydev);
+		return ERR_PTR(err);
+	}
 
 	err = phy_device_register(phydev);
 	if (err) {
 		phy_device_free(phydev);
-		return ERR_PTR(-ENODEV);
+		return ERR_PTR(err);
 	}
 
 	return phydev;

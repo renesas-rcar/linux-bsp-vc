@@ -60,15 +60,19 @@ static struct mii_timestamper *of_find_mii_timestamper(struct device_node *node)
 	return register_mii_timestamper(arg.np, arg.args[0]);
 }
 
-int of_mdiobus_phy_device_register(struct mii_bus *mdio, struct phy_device *phy,
-			      struct device_node *child, u32 addr)
+struct phy_device *of_phy_device_initialize(struct device_node *child,
+					    struct mii_bus *mdio, u32 addr)
 {
+	struct phy_device *phy;
 	int rc;
+
+	phy = phy_device_initialize(mdio, addr);
+	if (IS_ERR(phy))
+		return phy;
 
 	rc = of_irq_get(child, 0);
 	if (rc == -EPROBE_DEFER)
-		return rc;
-
+		goto err_irq;
 	if (rc > 0) {
 		phy->irq = rc;
 		mdio->irq[addr] = rc;
@@ -84,25 +88,21 @@ int of_mdiobus_phy_device_register(struct mii_bus *mdio, struct phy_device *phy,
 	of_property_read_u32(child, "reset-deassert-us",
 			     &phy->mdio.reset_deassert_delay);
 
-	/* Associate the OF node with the device structure so it
-	 * can be looked up later */
-	of_node_get(child);
-	phy->mdio.dev.of_node = child;
+	phy->mdio.dev.of_node = of_node_get(child);
 	phy->mdio.dev.fwnode = of_fwnode_handle(child);
 
-	/* All data is now stored in the phy struct;
-	 * register it */
-	rc = phy_device_register(phy);
-	if (rc) {
-		of_node_put(child);
-		return rc;
-	}
+	rc = phy_device_attach_suppliers(phy);
+	if (rc)
+		goto err_suppliers;
 
-	dev_dbg(&mdio->dev, "registered phy %pOFn at address %i\n",
-		child, addr);
-	return 0;
+	return phy;
+
+err_suppliers:
+err_irq:
+	phy_device_free(phy);
+	return ERR_PTR(rc);
 }
-EXPORT_SYMBOL(of_mdiobus_phy_device_register);
+EXPORT_SYMBOL(of_phy_device_initialize);
 
 static int of_mdiobus_register_phy(struct mii_bus *mdio,
 				    struct device_node *child, u32 addr)
@@ -117,26 +117,25 @@ static int of_mdiobus_register_phy(struct mii_bus *mdio,
 	if (IS_ERR(mii_ts))
 		return PTR_ERR(mii_ts);
 
+	phy = of_phy_device_initialize(child, mdio, addr);
+	if (IS_ERR(phy)) {
+		rc = PTR_ERR(phy);
+		goto err_phy_initialize;
+	}
+
 	is_c45 = of_device_is_compatible(child,
 					 "ethernet-phy-ieee802.3-c45");
 
 	if (!is_c45 && !of_get_phy_id(child, &phy_id))
-		phy = phy_device_create(mdio, addr, phy_id, 0, NULL);
+		rc = phy_device_assign_ids(phy, phy_id, 0, NULL);
 	else
-		phy = get_phy_device(mdio, addr, is_c45);
-	if (IS_ERR(phy)) {
-		if (mii_ts)
-			unregister_mii_timestamper(mii_ts);
-		return PTR_ERR(phy);
-	}
+		rc = phy_device_probe_ids(phy, is_c45);
+	if (rc)
+		goto err_phy_ids;
 
-	rc = of_mdiobus_phy_device_register(mdio, phy, child, addr);
-	if (rc) {
-		if (mii_ts)
-			unregister_mii_timestamper(mii_ts);
-		phy_device_free(phy);
-		return rc;
-	}
+	rc = phy_device_register(phy);
+	if (rc)
+		goto err_phy_register;
 
 	/* phy->mii_ts may already be defined by the PHY driver. A
 	 * mii_timestamper probed via the device tree will still have
@@ -145,7 +144,18 @@ static int of_mdiobus_register_phy(struct mii_bus *mdio,
 	if (mii_ts)
 		phy->mii_ts = mii_ts;
 
+	dev_dbg(&mdio->dev, "registered phy %pOFn at address %i\n",
+		child, addr);
 	return 0;
+
+err_phy_register:
+err_phy_ids:
+	phy_device_free(phy);
+err_phy_initialize:
+	if (mii_ts)
+		unregister_mii_timestamper(mii_ts);
+
+	return rc;
 }
 
 static int of_mdiobus_register_device(struct mii_bus *mdio,

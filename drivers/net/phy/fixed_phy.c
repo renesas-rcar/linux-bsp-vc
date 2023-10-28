@@ -18,6 +18,7 @@
 #include <linux/err.h>
 #include <linux/slab.h>
 #include <linux/of.h>
+#include <linux/of_mdio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/idr.h>
 #include <linux/netdevice.h>
@@ -254,10 +255,22 @@ static struct phy_device *__fixed_phy_register(unsigned int irq,
 		return ERR_PTR(ret);
 	}
 
-	phy = get_phy_device(fmb->mii_bus, phy_addr, false);
+#if IS_ENABLED(CONFIG_OF_MDIO)
+	if (np)
+		phy = of_phy_device_initialize(np, fmb->mii_bus, phy_addr);
+	else
+#endif
+	phy = phy_device_initialize(fmb->mii_bus, phy_addr);
 	if (IS_ERR(phy)) {
 		fixed_phy_del(phy_addr);
-		return ERR_PTR(-EINVAL);
+		return phy;
+	}
+
+	ret = phy_device_probe_ids(phy, false);
+	if (ret) {
+		phy_device_free(phy);
+		fixed_phy_del(phy_addr);
+		return ERR_PTR(ret);
 	}
 
 	/* propagate the fixed link values to struct phy_device */
@@ -269,8 +282,6 @@ static struct phy_device *__fixed_phy_register(unsigned int irq,
 		phy->asym_pause = status->asym_pause;
 	}
 
-	of_node_get(np);
-	phy->mdio.dev.of_node = np;
 	phy->is_pseudo_fixed_link = true;
 
 	switch (status->speed) {
@@ -299,7 +310,6 @@ static struct phy_device *__fixed_phy_register(unsigned int irq,
 	ret = phy_device_register(phy);
 	if (ret) {
 		phy_device_free(phy);
-		of_node_put(np);
 		fixed_phy_del(phy_addr);
 		return ERR_PTR(ret);
 	}

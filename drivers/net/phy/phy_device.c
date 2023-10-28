@@ -214,6 +214,10 @@ static void phy_mdio_device_free(struct mdio_device *mdiodev)
 
 static void phy_device_release(struct device *dev)
 {
+	struct phy_device *phydev = to_phy_device(dev);
+
+	mdio_device_release_suppliers(&phydev->mdio);
+
 	kfree(to_phy_device(dev));
 }
 
