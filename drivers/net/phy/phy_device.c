@@ -871,43 +871,77 @@ static int get_phy_c22_id(struct mii_bus *bus, int addr, u32 *phy_id)
 }
 
 /**
+ * phy_device_probe_ids - probe at PHY's address for PHY ids
+ * @phydev: PHY device object initialized by phy_device_initialize()
+ * @is_c45: If true the PHY uses the 802.3 clause 45 protocol
+ *
+ * Probe for a PHY device at @phydev's bus address.
+ *
+ * When probing for a clause 22 PHY, then read the ID registers.
+ *
+ * When probing for a clause 45 PHY, read the "devices in package" registers.
+ * If the "devices in package" appears valid, read the ID registers for each
+ * MMD.
+ *
+ * On success, call phy_device_assign_ids() to complete PHY device object
+ * creation.
+ */
+int phy_device_probe_ids(struct phy_device *phydev, bool is_c45)
+{
+	struct mii_bus *bus = phydev->mdio.bus;
+	int addr = phydev->mdio.addr;
+	struct phy_c45_device_ids c45_ids;
+	u32 phy_id = 0;
+	int ret;
+
+	c45_ids.devices_in_package = 0;
+	c45_ids.mmds_present = 0;
+	memset(c45_ids.device_ids, 0xff, sizeof(c45_ids.device_ids));
+
+	phy_device_reset(phydev, 0);
+
+	if (is_c45)
+		ret = get_phy_c45_ids(bus, addr, &c45_ids);
+	else
+		ret = get_phy_c22_id(bus, addr, &phy_id);
+
+	phy_device_reset(phydev, 1);
+
+	if (ret)
+		return ret;
+
+	return phy_device_assign_ids(phydev, phy_id, is_c45, &c45_ids);
+}
+EXPORT_SYMBOL(phy_device_probe_ids);
+
+/**
  * get_phy_device - reads the specified PHY device and returns its @phy_device
  *		    struct
  * @bus: the target MII bus
  * @addr: PHY address on the MII bus
  * @is_c45: If true the PHY uses the 802.3 clause 45 protocol
  *
- * Probe for a PHY at @addr on @bus.
+ * Probe for a PHY at @addr on @bus. On success, return an allocated
+ * &struct phy_device. Otherwise, return the error code.
  *
- * When probing for a clause 22 PHY, then read the ID registers. If we find
- * a valid ID, allocate and return a &struct phy_device.
- *
- * When probing for a clause 45 PHY, read the "devices in package" registers.
- * If the "devices in package" appears valid, read the ID registers for each
- * MMD, allocate and return a &struct phy_device.
- *
- * Returns an allocated &struct phy_device on success, %-ENODEV if there is
- * no PHY present, or %-EIO on bus access error.
+ * Internally, use phy_device_probe_ids() to do the probe.
  */
 struct phy_device *get_phy_device(struct mii_bus *bus, int addr, bool is_c45)
 {
-	struct phy_c45_device_ids c45_ids;
-	u32 phy_id = 0;
-	int r;
+	struct phy_device *phydev;
+	int ret;
 
-	c45_ids.devices_in_package = 0;
-	c45_ids.mmds_present = 0;
-	memset(c45_ids.device_ids, 0xff, sizeof(c45_ids.device_ids));
+	phydev = phy_device_initialize(bus, addr);
+	if (IS_ERR(phydev))
+		return phydev;
 
-	if (is_c45)
-		r = get_phy_c45_ids(bus, addr, &c45_ids);
-	else
-		r = get_phy_c22_id(bus, addr, &phy_id);
+	ret = phy_device_probe_ids(phydev, is_c45);
+	if (ret) {
+		phy_device_free(phydev);
+		return ERR_PTR(ret);
+	}
 
-	if (r)
-		return ERR_PTR(r);
-
-	return phy_device_create(bus, addr, phy_id, is_c45, &c45_ids);
+	return phydev;
 }
 EXPORT_SYMBOL(get_phy_device);
 

@@ -1349,6 +1349,7 @@ int phy_modify_paged(struct phy_device *phydev, int page, u32 regnum,
 struct phy_device *phy_device_initialize(struct mii_bus *bus, int addr);
 int phy_device_assign_ids(struct phy_device *dev, u32 phy_id, bool is_c45,
 			  struct phy_c45_device_ids *c45_ids);
+int phy_device_probe_ids(struct phy_device *dev, bool is_c45);
 struct phy_device *phy_device_create(struct mii_bus *bus, int addr, u32 phy_id,
 				     bool is_c45,
 				     struct phy_c45_device_ids *c45_ids);
