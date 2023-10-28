@@ -577,53 +577,61 @@ static int phy_request_driver_module(struct phy_device *dev, u32 phy_id)
 	return 0;
 }
 
-struct phy_device *phy_device_create(struct mii_bus *bus, int addr, u32 phy_id,
-				     bool is_c45,
-				     struct phy_c45_device_ids *c45_ids)
+struct phy_device *phy_device_initialize(struct mii_bus *bus, int addr)
 {
-	struct phy_device *dev;
+	struct phy_device *phydev;
 	struct mdio_device *mdiodev;
-	int ret = 0;
+	struct device *dev;
 
 	/* We allocate the device, and initialize the default values */
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-	if (!dev)
+	phydev = kzalloc(sizeof(*phydev), GFP_KERNEL);
+	if (!phydev)
 		return ERR_PTR(-ENOMEM);
+	mdiodev = &phydev->mdio;
+	dev = &mdiodev->dev;
 
-	mdiodev = &dev->mdio;
-	mdiodev->dev.parent = &bus->dev;
-	mdiodev->dev.bus = &mdio_bus_type;
-	mdiodev->dev.type = &mdio_bus_phy_type;
+	dev_set_name(dev, PHY_ID_FMT, bus->id, addr);
+	dev->parent = &bus->dev;
+	dev->bus = &mdio_bus_type;
+	dev->type = &mdio_bus_phy_type;
+	device_initialize(dev);
+
 	mdiodev->bus = bus;
-	mdiodev->bus_match = phy_bus_match;
 	mdiodev->addr = addr;
 	mdiodev->flags = MDIO_DEVICE_FLAG_PHY;
 	mdiodev->device_free = phy_mdio_device_free;
 	mdiodev->device_remove = phy_mdio_device_remove;
 
-	dev->speed = SPEED_UNKNOWN;
-	dev->duplex = DUPLEX_UNKNOWN;
-	dev->pause = 0;
-	dev->asym_pause = 0;
-	dev->link = 0;
-	dev->port = PORT_TP;
-	dev->interface = PHY_INTERFACE_MODE_GMII;
+	phydev->speed = SPEED_UNKNOWN;
+	phydev->duplex = DUPLEX_UNKNOWN;
+	phydev->autoneg = AUTONEG_ENABLE;
+	phydev->state = PHY_DOWN;
+	phydev->pause = 0;
+	phydev->asym_pause = 0;
+	phydev->link = 0;
+	phydev->port = PORT_TP;
+	phydev->interface = PHY_INTERFACE_MODE_GMII;
 
-	dev->autoneg = AUTONEG_ENABLE;
+	phydev->irq = bus->irq[addr];
 
-	dev->is_c45 = is_c45;
-	dev->phy_id = phy_id;
+	mutex_init(&phydev->lock);
+	INIT_DELAYED_WORK(&phydev->state_queue, phy_state_machine);
+
+	return phydev;
+}
+EXPORT_SYMBOL(phy_device_initialize);
+
+int phy_device_assign_ids(struct phy_device *phydev, u32 phy_id, bool is_c45,
+			  struct phy_c45_device_ids *c45_ids)
+{
+	struct mdio_device *mdiodev = &phydev->mdio;
+	int ret = 0;
+
+	phydev->is_c45 = is_c45;
+	phydev->phy_id = phy_id;
 	if (c45_ids)
-		dev->c45_ids = *c45_ids;
-	dev->irq = bus->irq[addr];
-
-	dev_set_name(&mdiodev->dev, PHY_ID_FMT, bus->id, addr);
-	device_initialize(&mdiodev->dev);
-
-	dev->state = PHY_DOWN;
-
-	mutex_init(&dev->lock);
-	INIT_DELAYED_WORK(&dev->state_queue, phy_state_machine);
+		phydev->c45_ids = *c45_ids;
+	mdiodev->bus_match = phy_bus_match;
 
 	/* Request the appropriate module unconditionally; don't
 	 * bother trying to do so only if it isn't already loaded,
@@ -643,21 +651,37 @@ struct phy_device *phy_device_create(struct mii_bus *bus, int addr, u32 phy_id,
 			if (c45_ids->device_ids[i] == 0xffffffff)
 				continue;
 
-			ret = phy_request_driver_module(dev,
+			ret = phy_request_driver_module(phydev,
 						c45_ids->device_ids[i]);
 			if (ret)
 				break;
 		}
 	} else {
-		ret = phy_request_driver_module(dev, phy_id);
+		ret = phy_request_driver_module(phydev, phy_id);
 	}
 
+	return ret;
+}
+EXPORT_SYMBOL(phy_device_assign_ids);
+
+struct phy_device *phy_device_create(struct mii_bus *bus, int addr, u32 phy_id,
+				     bool is_c45,
+				     struct phy_c45_device_ids *c45_ids)
+{
+	struct phy_device *phydev;
+	int ret = 0;
+
+	phydev = phy_device_initialize(bus, addr);
+	if (IS_ERR(phydev))
+		return phydev;
+
+	ret = phy_device_assign_ids(phydev, phy_id, is_c45, c45_ids);
 	if (ret) {
-		put_device(&mdiodev->dev);
-		dev = ERR_PTR(ret);
+		phy_device_free(phydev);
+		return ERR_PTR(ret);
 	}
 
-	return dev;
+	return phydev;
 }
 EXPORT_SYMBOL(phy_device_create);
 
