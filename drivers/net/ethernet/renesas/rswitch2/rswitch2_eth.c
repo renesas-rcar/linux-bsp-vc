@@ -93,20 +93,17 @@ static int rswitch2_gwca_init(struct rswitch2_drv *rsw2)
 		goto err_out;
 	}
 
-
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_reset);
-		if (ret != 0) {
-			rsw2_err(MSG_GEN, "Failed to set GWCA reset state\n");
-			goto err_out;
-		}
-
+	if (ret != 0) {
+		rsw2_err(MSG_GEN, "Failed to set GWCA reset state\n");
+		goto err_out;
+	}
 
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_disable);
-		if (ret != 0) {
-			rsw2_err(MSG_GEN, "Failed to set GWCA disable state\n");
-			goto err_out;
-		}
-
+	if (ret != 0) {
+		rsw2_err(MSG_GEN, "Failed to set GWCA disable state\n");
+		goto err_out;
+	}
 
 	ret = rswitch2_gwca_set_state(rsw2, gwmc_config);
 	if (ret != 0) {
@@ -281,11 +278,10 @@ static void rswitch2_phy_state_change(struct net_device *ndev)
 	phydev = ndev->phydev;
 
 	rsw2_info(MSG_GEN, "Link change(%d): %s uses %s at %d Mbps\n", phydev->link, ndev->name, phy_modes(phydev->interface), phydev->speed);
-	if(phydev->speed == SPEED_10000)
+	if (phydev->speed == SPEED_10000)
 		return;
 
-	if(!phydev->link) {
-
+	if (!phydev->link) {
 		void __iomem *etha_base_addr;
 		phy_interface_t phy_iface;
 		int speed;
@@ -296,7 +292,7 @@ static void rswitch2_phy_state_change(struct net_device *ndev)
 
 		/* ETHA state machine will lock up due to SerDes connection in S4 ES 1.0
 		 * Lockup can be release by switching SerDes to USXGMII */
-		if(phy_port->phy_iface != PHY_INTERFACE_MODE_USXGMII) {
+		if (phy_port->phy_iface != PHY_INTERFACE_MODE_USXGMII) {
 			reg_val = FIELD_PREP(EAMC_OPC, emac_disable);
 			iowrite32(reg_val, etha_base_addr + RSW2_ETHA_EAMC);
 
@@ -324,22 +320,19 @@ static void rswitch2_phy_state_change(struct net_device *ndev)
 
 		rsw2_notice(MSG_GEN, "================= Link Up start (%s) ==================\n", ndev->name);
 
-		if(phy_port->phy_iface != PHY_INTERFACE_MODE_USXGMII) {
+		if (phy_port->phy_iface != PHY_INTERFACE_MODE_USXGMII) {
 			phy_port_num = eth_port->port_num - eth_port->rsw2->num_of_cpu_ports;
 
+			ret = rswitch2_emac_set_state(ndev, emac_config);
+			if (ret < 0)
+				rsw2_err(MSG_GEN, "Port set state 'config' failed\n");
+			else
+				rsw2_dbg(MSG_GEN, "Port set state 'config' SUCCEEDED\n");
 
-		ret = rswitch2_emac_set_state(ndev, emac_config);
-		if (ret < 0) {
-			rsw2_err(MSG_GEN, "Port set state 'config' failed\n");
-		}
-		else {
-			rsw2_dbg(MSG_GEN, "Port set state 'config' SUCCEEDED\n");
-		}
+			reg_val = ioread32(phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
+			reg_val = reg_val & ~0x1Fu;
 
-		reg_val = ioread32(phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
-		reg_val = reg_val & ~0x1Fu;
-
-		switch (phydev->speed) {
+			switch (phydev->speed) {
 			case SPEED_100:
 				reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_100mbps);
 				reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_gmii);
@@ -368,28 +361,24 @@ static void rswitch2_phy_state_change(struct net_device *ndev)
 				rsw2_err(MSG_GEN, "Unsupported Speed\n");
 				spin_unlock_irqrestore(&rsw2->lock, flags);
 				return;
-		}
+			}
 
-		rsw2_notice(MSG_GEN, "Link change: %s uses %s at %d Mbps\n", ndev->name, phy_modes(phydev->interface), phydev->speed);
+			rsw2_notice(MSG_GEN, "Link change: %s uses %s at %d Mbps\n", ndev->name, phy_modes(phydev->interface), phydev->speed);
 
-		iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
-		rsw2_dbg(MSG_GEN, "reg_val=0x%.8x (expected): 0x%.8x\n", ioread32(phy_port->rmac_base_addr + RSW2_RMAC_MPIC), reg_val);
+			iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
+			rsw2_dbg(MSG_GEN, "reg_val=0x%.8x (expected): 0x%.8x\n", ioread32(phy_port->rmac_base_addr + RSW2_RMAC_MPIC), reg_val);
 
-		ret = rswitch2_emac_set_state(ndev, emac_disable);
-		if (ret < 0) {
-			rsw2_err(MSG_GEN, "Port set state 'disable' failed\n");
-		}
-		else {
-			rsw2_dbg(MSG_GEN, "Port set state 'disable' SUCCEEDED\n");
-		}
+			ret = rswitch2_emac_set_state(ndev, emac_disable);
+			if (ret < 0)
+				rsw2_err(MSG_GEN, "Port set state 'disable' failed\n");
+			else
+				rsw2_dbg(MSG_GEN, "Port set state 'disable' SUCCEEDED\n");
 
-		ret = rswitch2_emac_set_state(ndev, emac_operation);
-		if (ret < 0) {
-			rsw2_err(MSG_GEN, "Port set state 'operation' failed\n");
-		}
-		else {
-			rsw2_dbg(MSG_GEN, "Port set state 'operation' SUCCEEDED\n");
-		}
+			ret = rswitch2_emac_set_state(ndev, emac_operation);
+			if (ret < 0)
+				rsw2_err(MSG_GEN, "Port set state 'operation' failed\n");
+			else
+				rsw2_dbg(MSG_GEN, "Port set state 'operation' SUCCEEDED\n");
 		}
 
 		rswitch2_serdes_init(ndev, true);
@@ -402,15 +391,14 @@ static void rswitch2_phy_state_change(struct net_device *ndev)
 	if (netif_msg_link(rsw2)) {
 		int phy_speed = 0;
 
-		if(phydev->link)
+		if (phydev->link)
 			phy_speed =phydev->speed;
 
 		phy_print_status(phydev);
 
 		rsw2_info(MSG_GEN, "Link status changed. PHY %d UID 0x%08x Link = %d Speed = %d\n",
 				  phydev->mdio.addr, phydev->phy_id, phydev->link, phy_speed);
-	}
-	else {
+	} else {
 		rsw2_dbg(MSG_GEN,"PHY state change but no msg link!\n");
 	}
 }
@@ -766,7 +754,6 @@ static void rswitch2_serdes_check_operation(struct timer_list *t)
 	unsigned long flags;
 	u32 reg_val;
 
-
 	/* FIXME: May there more elegant way to get eth_port /rsw2 data? */
 	struct rswitch2_drv *rsw2;
 	struct net_device *ndev = phy_port->phy->attached_dev;
@@ -777,15 +764,13 @@ static void rswitch2_serdes_check_operation(struct timer_list *t)
 
 	spin_lock_irqsave(&rsw2->lock, flags);
 
-
 	if (phy_port->serdes_usxgmii_op_cnt < RSW2_SERDES_OP_RETRIES) {
 		//Link status is latched, for current status read twice
 		rswitch2_serdes_read32(phy_port->serdes_chan_addr, SR_XS_PCS_STS1, BANK_300);
 		reg_val = rswitch2_serdes_read32(phy_port->serdes_chan_addr, SR_XS_PCS_STS1, BANK_300);
 		if (reg_val & 0x04) {
 			rsw2_notice(MSG_SERDES, "SerDes USXGMII is operational on port %s %s (retries = %d)\n", phy_port->mii_bus->name, phy_port->mii_bus->id, phy_port->serdes_usxgmii_op_cnt);
-		}
-		else {
+		} else {
 			rsw2_notice(MSG_SERDES, "Resetting SerDes USXGMII on port %s %s (retries = %d)\n", phy_port->mii_bus->name, phy_port->mii_bus->id, phy_port->serdes_usxgmii_op_cnt);
 
 
@@ -798,8 +783,7 @@ static void rswitch2_serdes_check_operation(struct timer_list *t)
 			phy_port->serdes_usxgmii_op_cnt++;
 			mod_timer(&phy_port->serdes_usxgmii_op_timer, jiffies + msecs_to_jiffies(RSW2_SERDES_OP_TIMER_INTERVALL));
 		}
-	}
-	else {
+	} else {
 		rsw2_err(MSG_SERDES, "Could not bring SerDes USXGMII on port %s %s into operational state. Giving up!\n", phy_port->mii_bus->name, phy_port->mii_bus->id);
 	}
 
@@ -832,7 +816,7 @@ static int rswitch2_serdes_init(struct net_device *ndev, bool check_op)
 	//printk("%s: sw0p%d  phy_mode=%d\n", __FUNCTION__, port_num, ndev->phydev->interface );
 	switch (phy_port->phy_iface) {
 	case PHY_INTERFACE_MODE_SGMII:
-		if((phy_port->phy->speed != SPEED_100) && (phy_port->phy->speed != SPEED_1000)) {
+		if ((phy_port->phy->speed != SPEED_100) && (phy_port->phy->speed != SPEED_1000)) {
 			phy_speed = SPEED_100;
 			rsw2_notice(MSG_SERDES, "No valid default speed. Setting to %d Mbit/s\n", phy_speed);
 		} else
@@ -842,7 +826,7 @@ static int rswitch2_serdes_init(struct net_device *ndev, bool check_op)
 		break;
 
 	case PHY_INTERFACE_MODE_USXGMII:
-		if(phy_port->phy->speed != SPEED_2500) {
+		if (phy_port->phy->speed != SPEED_2500) {
 			phy_speed = SPEED_2500;
 			rsw2_notice(MSG_SERDES, "No valid default speed. Setting to %d Mbit/s\n", phy_speed);
 		} else
@@ -943,8 +927,6 @@ static void rswitch2_stat_timer(struct timer_list *t)
 
 	mod_timer(&eth_port->stat_timer, jiffies + msecs_to_jiffies(RSW2_STAT_TIMER_INTERVALL));
 	spin_unlock_irqrestore(&eth_port->rsw2->lock, flags);
-
-
 }
 
 /*static int rswitch2_mac_set_speed(struct rswitch2_eth_port *eth_port)
@@ -1019,7 +1001,7 @@ static int rswitch2_eth_open(struct net_device *ndev)
 	/* Gateway port */
 	if (intern_port != NULL) {
 		int cur_q;
-		const uint 	num_of_rx_q = ARRAY_SIZE(intern_port->rx_q);
+		const uint num_of_rx_q = ARRAY_SIZE(intern_port->rx_q);
 
 		ret = rswitch2_gwca_set_state(rsw2, gwmc_operation);
 		if (ret != 0) {
@@ -1043,8 +1025,7 @@ static int rswitch2_eth_open(struct net_device *ndev)
 	}
 	else {
 		int cur_q;
-		const uint 	num_of_rx_q = ARRAY_SIZE(phy_port->rx_q);
-
+		const uint num_of_rx_q = ARRAY_SIZE(phy_port->rx_q);
 
 		rsw2_notice(MSG_GEN, "physical port open(): '%s'\n", ndev->name);
 		for (cur_q = 0; cur_q < num_of_rx_q; cur_q++) {
@@ -1053,13 +1034,11 @@ static int rswitch2_eth_open(struct net_device *ndev)
 
 		netif_tx_start_all_queues(ndev);
 
-
 		ret = rswitch2_serdes_init(ndev, false);
 		if (ret != 0) {
 			rsw2_err(MSG_SERDES, "%s: rswitch2_serdes_init failed: %d\n", ndev->name, ret);
 			return ret;
-		}
-		else {
+		} else {
 			rsw2_info(MSG_SERDES, "%s: rswitch2_serdes_init SUCCESS\n", ndev->name);
 		}
 
@@ -1068,7 +1047,6 @@ static int rswitch2_eth_open(struct net_device *ndev)
 		if (phy_port != NULL) {
 			rsw2_info(MSG_SERDES, "physical port open(): '%s'\n", ndev->name);
 			phy_start(ndev->phydev);
-
 		}
 
 		phy_attached_info(ndev->phydev);
@@ -1087,7 +1065,7 @@ rswitch2_netdev_get_rx_q(struct net_device *ndev, uint q, struct rsw2_rx_q_data 
 	intern_port = eth_port->intern_port;
 	phy_port = eth_port->phy_port;
 
-	if(intern_port)
+	if (intern_port)
 		*rx_q = &intern_port->rx_q[q];
 	else
 		*rx_q = &phy_port->rx_q[q];
@@ -1106,7 +1084,7 @@ rswitch2_netdev_get_tx_q(struct net_device *ndev, uint q, struct rsw2_tx_q_data 
 	intern_port = eth_port->intern_port;
 	phy_port = eth_port->phy_port;
 
-	if(intern_port)
+	if (intern_port)
 		*tx_q = &intern_port->tx_q[q];
 	else
 		*tx_q = &phy_port->tx_q[q];
@@ -1130,11 +1108,10 @@ static void rswitch2_disable_rx(struct net_device *ndev)
 	intern_port = eth_port->intern_port;
 	phy_port = eth_port->phy_port;
 
-	if(intern_port) {
+	if (intern_port)
 		num_of_rx_queues = ARRAY_SIZE(intern_port->rx_q);
-	} else {
+	else
 		num_of_rx_queues = ARRAY_SIZE(phy_port->rx_q);
-	}
 
 	for (q = 0; q < num_of_rx_queues; q++) {
 		u32 reg_queue;
@@ -1168,17 +1145,15 @@ static int rswitch2_tx_free(struct net_device *ndev, int q)
 	u32 data_ptr = 0;
 	unsigned int data_len = 0;
 
-
 	eth_port = netdev_priv(ndev);
 	rsw2 = eth_port->rsw2;
 
 	intern_port = eth_port->intern_port;
 	phy_port = eth_port->phy_port;
-	if(intern_port) {
+	if (intern_port)
 		tx_q = &intern_port->tx_q[q];
-	} else {
+	else
 		tx_q = &phy_port->tx_q[q];
-	}
 
 	while (tx_q->cur_desc - tx_q->dirty_desc > 0) {
 		entry = tx_q->dirty_desc % tx_q->entries;
@@ -1189,7 +1164,6 @@ static int rswitch2_tx_free(struct net_device *ndev, int q)
 
 		/* Descriptor type must be checked before all other reads */
 		dma_rmb();
-
 
 		/* Free the original skb */
 		if (tx_q->skb[entry]) {
@@ -1287,7 +1261,6 @@ static int rswitch2_eth_close(struct net_device *ndev)
 			rswitch2_tx_free(ndev, cur_q);
 		}
 		phy_stop(ndev->phydev);
-
 	}
 
 	return 0;
@@ -1319,11 +1292,10 @@ static bool rswitch2_rx(struct net_device *ndev, int budget, int q)
 
 	intern_port = eth_port->intern_port;
 	phy_port = eth_port->phy_port;
-	if(intern_port) {
+	if (intern_port)
 		rx_q = &intern_port->rx_q[q];
-	} else {
+	else
 		rx_q = &phy_port->rx_q[q];
-	}
 	rsw2 = eth_port->rsw2;
 
 
@@ -1335,7 +1307,7 @@ static bool rswitch2_rx(struct net_device *ndev, int budget, int q)
 		rx_desc = &rx_q->desc_ring[entry];
 		//printk("Abs. Q: %d: RX desc. entry %d of %ld\n", q + rx_q->offset, entry, rx_q->entries);
 
-		if(FIELD_GET(RSW2_DESC_DT, rx_desc->die_dt) == DT_FEMPTY)
+		if (FIELD_GET(RSW2_DESC_DT, rx_desc->die_dt) == DT_FEMPTY)
 			break;
 
 		/* Descriptor type must be checked before all other reads */
@@ -1362,7 +1334,7 @@ static bool rswitch2_rx(struct net_device *ndev, int budget, int q)
 		napi_gro_receive(&rx_q->napi, skb);
 
 		// TODO
-		if(intern_port) {
+		if (intern_port) {
 			intern_port->rx_pkt_cnt++;
 			intern_port->rx_byte_cnt += pkt_len;
 		}
@@ -1435,11 +1407,10 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
 
 	intern_port = eth_port->intern_port;
 	phy_port = eth_port->phy_port;
-	if(intern_port) {
+	if (intern_port)
 		q = (rx_q - &intern_port->rx_q[0]);
-	} else {
+	else
 		q = (rx_q - &phy_port->rx_q[0]);
-	}
 
 	reg_queue = (q + rx_q->offset) / 32;
 	bit_queue = (q + rx_q->offset) % 32;
@@ -1448,14 +1419,13 @@ static int rswitch2_poll(struct napi_struct *napi, int budget)
 
 	work_done = rswitch2_rx(ndev, budget, q);
 	rearm_irq = napi_complete_done(napi, work_done);
-	if(rearm_irq) {
+	if (rearm_irq) {
 		/* Re-enable RX interrupts*/
 		spin_lock_irqsave(&rsw2->lock, flags);
 		iowrite32((1 << bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDIS(reg_queue));
 		iowrite32((1 << bit_queue), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWDIE(reg_queue));
 		spin_unlock_irqrestore(&rsw2->lock, flags);
-	}
-	else {
+	} else {
 		/* FIXME: Remove this. Just left for debugging purpose */
 		rsw2_notice(MSG_RXTX, "NAPI says: don't rearm\n");
 	}
@@ -1479,7 +1449,6 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 	unsigned long flags;
 	char *data_ptr;
 	unsigned int data_len;
-
 
 	/* Get current q */
 	q = skb_get_queue_mapping(skb);
@@ -1542,7 +1511,6 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 			skb_tx_timestamp(skb);
 		}
 
-
 		/* HW won't process descriptor until type is set,
 		 * ensure all other items have been written
 		 */
@@ -1603,7 +1571,6 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 				tx_desc->info_ds = cpu_to_le16(RSWITCH2_MAX_DESC_SIZE);
 				data_len -= RSWITCH2_MAX_DESC_SIZE;
 				tx_q->skb[entry] = NULL;
-
 			}
 
 			if (eth_port->phy_port) {
@@ -1612,14 +1579,13 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 				tx_desc->info1 |= FIELD_PREP(RSW2_DESC_INFO1_FMT, direct_desc);
 				tx_desc->info1 |= FIELD_PREP(RSW2_DESC_INFO1_DV, 1 << port_num);
 			}
-			if(FIELD_GET(RSW2_DESC_DT, dt_type) != DT_FSTART) {
+			if (FIELD_GET(RSW2_DESC_DT, dt_type) != DT_FSTART) {
 				//printk("dt_type: %d\n", dt_type);
-			tx_desc->die_dt = dt_type;
+				tx_desc->die_dt = dt_type;
 			}
 		} while (data_len > 0);
 		dma_wmb();
 		tx_start_desc->die_dt = FIELD_PREP(RSW2_DESC_DT, DT_FSTART);
-
 	}
 
 	/* On multi descriptor transmit, the last entry holds the skb data */
@@ -1636,7 +1602,7 @@ static netdev_tx_t rswitch2_eth_start_xmit(struct sk_buff *skb, struct net_devic
 	spin_unlock_irqrestore(&rsw2->lock, flags);
 
 	/* TODO:: Make generic eth_port counter and use RMAC counters on phy_port */
-	if(eth_port->intern_port) {
+	if (eth_port->intern_port) {
 		eth_port->intern_port->tx_pkt_cnt++;
 		eth_port->intern_port->tx_byte_cnt += skb->len;
 	}
@@ -1646,7 +1612,8 @@ exit:
 	return NETDEV_TX_OK;
 }
 
-static void rswitch2_get_ts(struct rswitch2_drv *rsw2) {
+static void rswitch2_get_ts(struct rswitch2_drv *rsw2)
+{
 	struct rswitch2_eth_port *eth_port;
 	struct rswitch2_physical_port *phy_port;
 	struct rswitch2_dma_ts_desc *ts_desc;
@@ -1657,7 +1624,6 @@ static void rswitch2_get_ts(struct rswitch2_drv *rsw2) {
 	uint src_port_num;
 	uint dest_port_num;
 	uint entry;
-
 
 	ring_entries = rsw2->num_of_tsn_ports * MAX_TS_Q_ENTRIES_PER_PORT;
 	entry = (rsw2->ts_cur_desc) % ring_entries;
@@ -1694,7 +1660,6 @@ static void rswitch2_get_ts(struct rswitch2_drv *rsw2) {
 		entry = (rsw2->ts_cur_desc) % ring_entries;
 		ts_desc = &rsw2->ts_desc_ring[entry];
 	}
-
 }
 
 static irqreturn_t rswitch2_status_interrupt(int irq, void *dev_id)
@@ -1709,7 +1674,7 @@ static irqreturn_t rswitch2_status_interrupt(int irq, void *dev_id)
 	reg_val = ioread32(rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWTSDIS);
 
 	rsw2_dbg(MSG_GEN, "GWTSDIS: 0x%.8x\n", reg_val);
-	if((reg_val & BIT(0)) == BIT(0)) {
+	if ((reg_val & BIT(0)) == BIT(0)) {
 		/* Mask IRQ */
 		iowrite32(BIT(0), rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWTSDID);
 		spin_unlock_irqrestore(&rsw2->lock, flags);
@@ -1749,7 +1714,6 @@ static irqreturn_t rswitch2_eth_interrupt(int irq, void *dev_id)
 	}
 	spin_unlock_irqrestore(&rsw2->lock, flags);
 
-
 	for (reg_num = 0; reg_num < RSWITCH2_CHAIN_REG_NUM; reg_num++) {
 		reg_val = irq_status[reg_num] & irq_active[reg_num];
 
@@ -1770,11 +1734,12 @@ static irqreturn_t rswitch2_eth_interrupt(int irq, void *dev_id)
 
 				if (napi_schedule_prep(cur_napi))
 					__napi_schedule(cur_napi);
-				else
+				else {
 					/* Although this is no real problem, it shouldn't happen.
 					 * It wastes CPU time with unnecessary IRQ handling
 					 */
 					rsw2_warn(MSG_RXTX, "NAPI is already running Q: %d\n", cur_queue);
+				}
 			}
 		}
 	}
@@ -1811,7 +1776,7 @@ static struct net_device_stats *rswitch2_eth_get_stats(struct net_device *ndev)
 	spin_lock_irqsave(&eth_port->rsw2->lock, flags);
 
 	/* Only internal ports can TX */
-	if(intern_port) {
+	if (intern_port) {
 		nstats->rx_packets = intern_port->rx_pkt_cnt;
 		nstats->tx_packets = intern_port->tx_pkt_cnt;
 		nstats->rx_bytes = intern_port->rx_byte_cnt;
@@ -1824,7 +1789,7 @@ static struct net_device_stats *rswitch2_eth_get_stats(struct net_device *ndev)
 		nstats->rx_missed_errors = 0;
 		nstats->rx_over_errors = 0;
 
-	} else if(phy_port) {
+	} else if (phy_port) {
 		rswitch2_phy_port_update_stats(phy_port);
 		nstats->rx_packets = phy_port->rx_pkt_cnt;
 		nstats->tx_packets = phy_port->tx_pkt_cnt;
@@ -1868,13 +1833,12 @@ static int rswitch2_hwstamp_get(struct net_device *ndev, struct ifreq *req)
 	phy_port = eth_port->phy_port;
 
 
-	if(intern_port) {
+	if (intern_port) {
 		rsw2_err(MSG_GEN, "HW get intern port!?\n");
 		return -EINVAL;
 	}
 	rsw2 = eth_port->rsw2;
 	ptp_priv = rsw2->ptp_drv;
-
 
 	config.flags = 0;
 	config.tx_type = ptp_priv->tstamp_tx_ctrl ? HWTSTAMP_TX_ON :
@@ -1910,7 +1874,7 @@ static int rswitch2_hwstamp_set(struct net_device *ndev, struct ifreq *req)
 	intern_port = eth_port->intern_port;
 	phy_port = eth_port->phy_port;
 
-	if(intern_port) {
+	if (intern_port) {
 		rsw2_err(MSG_GEN, "HW set intern port!?\n");
 		return -EINVAL;
 	}
@@ -2043,7 +2007,6 @@ static void rswitch2_port_get_mac_addr(struct net_device *port_ndev)
 }
 #endif
 
-
 static void rswitch2_intern_set_mac_addr(struct net_device *ndev)
 {
 	struct rswitch2_drv *rsw2;
@@ -2067,7 +2030,6 @@ static void rswitch2_intern_set_mac_addr(struct net_device *ndev)
 	iowrite32(reg_val, ((volatile void __iomem *)ndev->base_addr) + RSW2_GCWA_GWMAC1);
 }
 
-
 static int rswitch2_eth_mac_addr(struct net_device *ndev, void *p)
 {
 	struct rswitch2_drv *rsw2;
@@ -2075,7 +2037,6 @@ static int rswitch2_eth_mac_addr(struct net_device *ndev, void *p)
 	struct sockaddr *addr = p;
 	u8 old_macaddr[ETH_ALEN];
 	u8 *new_macaddr;
-
 
 	eth_port = netdev_priv(ndev);
 	rsw2 = eth_port->rsw2;
@@ -2099,8 +2060,7 @@ static int rswitch2_eth_mac_addr(struct net_device *ndev, void *p)
 
 	memcpy(ndev->dev_addr, addr->sa_data, ETH_ALEN);
 
-
-	if(eth_port->intern_port) {
+	if (eth_port->intern_port) {
 		rswitch2_intern_set_mac_addr(ndev);
 	} else {
 		/* Update fwd engine */
@@ -2108,13 +2068,12 @@ static int rswitch2_eth_mac_addr(struct net_device *ndev, void *p)
 	}
 	rsw2_fwd_del_l2_entry(rsw2, old_macaddr);
 
-
 	return 0;
 }
 
 static const struct net_device_ops rswitch2_netdev_ops = {
-	.ndo_open				= rswitch2_eth_open,
-	.ndo_stop				= rswitch2_eth_close,
+	.ndo_open			= rswitch2_eth_open,
+	.ndo_stop			= rswitch2_eth_close,
 	.ndo_start_xmit			= rswitch2_eth_start_xmit,
 	.ndo_select_queue		= rswitch2_eth_select_queue,
 	.ndo_get_stats			= rswitch2_eth_get_stats,
@@ -2123,7 +2082,7 @@ static const struct net_device_ops rswitch2_netdev_ops = {
 	.ndo_do_ioctl			= rswitch2_eth_do_ioctl,
 	.ndo_change_mtu			= rswitch2_eth_change_mtu,
 	.ndo_validate_addr		= eth_validate_addr,
-	.ndo_set_mac_address	= rswitch2_eth_mac_addr,
+	.ndo_set_mac_address		= rswitch2_eth_mac_addr,
 };
 
 
@@ -2139,10 +2098,8 @@ static int rswitch2_ts_ring_init(struct rswitch2_drv *rsw2)
 	u32 reg_val;
 	int ret;
 
-
 	rsw2->ts_cur_desc = 0;
 	rsw2->ts_dirty_desc = 0;
-
 
 	/* Create BAT entry for TS descriptors */
 	bat_entry = dma_alloc_coherent(rsw2->dev, sizeof(*bat_entry), &rsw2->bat_ts_dma_addr, GFP_KERNEL);
@@ -2153,7 +2110,6 @@ static int rswitch2_ts_ring_init(struct rswitch2_drv *rsw2)
 	rsw2->bat_ts_addr = bat_entry;
 
 	rsw2_info(MSG_RXTX, "BAT TS: BAT entry is at 0x%px DMA: (DMA: 0x%llx)\n", bat_entry, rsw2->bat_ts_dma_addr);
-
 
 	ring_entries = rsw2->num_of_tsn_ports * MAX_TS_Q_ENTRIES_PER_PORT;
 	ts_ring_size = sizeof(*ts_desc) * (ring_entries + 1);
@@ -2206,11 +2162,8 @@ dma_alloc_err:
 	dma_free_coherent(rsw2->dev, sizeof(*bat_entry), rsw2->bat_ts_addr, rsw2->bat_ts_dma_addr);
 
 bat_alloc_err:
-
 	return ret;
 }
-
-
 
 /* Allocate descriptor base address table */
 static int rswitch2_bat_init(struct rswitch2_drv *rsw2)
@@ -2248,7 +2201,6 @@ static int rswitch2_bat_init(struct rswitch2_drv *rsw2)
 		rsw2->bat_addr[i] = &bat_entry[i];
 	}
 
-
 	for (i = rsw2_be_tx_q_0; i < rsw2_be_tx_q_max_entry; i++) {
 		//pr_info("Creating BAT entry for queue %d (TX queue %d)\n", i, (i - RSW2_BE_TX_Q_OFFSET));
 		bat_entry[i].die_dt = FIELD_PREP(RSW2_DESC_DT, DT_EOS);
@@ -2271,7 +2223,6 @@ dma_alloc_err:
 	kfree(rsw2->bat_addr);
 
 bat_ptr_alloc_err:
-
 	return ret;
 }
 
@@ -2382,7 +2333,6 @@ static int rswitch2_rx_ring_init(struct net_device *ndev, uint q, uint q_offset)
 
 	rx_q->desc_ring = dma_alloc_coherent(rsw2->dev, ring_size,
 					     	 	 	 	 &rx_q->desc_dma, GFP_KERNEL);
-
 	if (!rx_q->desc_ring)
 		goto dma_alloc_err;
 
@@ -2439,8 +2389,6 @@ tx_skb_err:
 	return -ENOMEM;
 }
 
-
-
 static int rswitch2_tx_ring_format(struct net_device *ndev, int q)
 {
 	struct rswitch2_eth_port *eth_port;
@@ -2483,8 +2431,6 @@ static int rswitch2_tx_ring_format(struct net_device *ndev, int q)
 
 	return 0;
 }
-
-
 
 static u32 rswitch2_get_msglevel(struct net_device *ndev)
 {
@@ -2664,7 +2610,6 @@ static int rswitch2_phy_ethtool_set_link_ksettings(struct net_device *ndev,
 	if (!phydev)
 		return -ENODEV;
 
-
 	if (cmd->base.phy_address != phydev->mdio.addr)
 		return -EINVAL;
 
@@ -2707,12 +2652,11 @@ static int rswitch2_phy_ethtool_set_link_ksettings(struct net_device *ndev,
 	return 0;
 }
 
-
 static const struct ethtool_ops rswitch2_ethtool_ops = {
-	.nway_reset			= phy_ethtool_nway_reset,
+	.nway_reset		= phy_ethtool_nway_reset,
 	.get_msglevel		= rswitch2_get_msglevel,
 	.set_msglevel		= rswitch2_set_msglevel,
-	.get_link			= ethtool_op_get_link,
+	.get_link		= ethtool_op_get_link,
 	.get_strings		= rswitch2_get_strings,
 	.get_ethtool_stats	= rswitch2_get_ethtool_stats,
 	.get_sset_count		= rswicth2_get_sset_count,
@@ -2721,8 +2665,6 @@ static const struct ethtool_ops rswitch2_ethtool_ops = {
 	.get_ts_info		= rswitch2_get_ts_info,
 	.get_link_ksettings	= phy_ethtool_get_link_ksettings,
 	.set_link_ksettings	= rswitch2_phy_ethtool_set_link_ksettings,
-	.get_wol			= NULL,
-	.set_wol			= NULL,
 };
 
 
@@ -2751,21 +2693,21 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 	//phy_iface = eth_port->rsw2->port_data[eth_port->port_num-1].phy_iface;
 	phy_iface = phy_port->phy_iface;
 	switch (phy_iface) {
-		case PHY_INTERFACE_MODE_SGMII :
-			//speed may chage during link up. MII is fixed
-			speed = 1000;
-			reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_1000mbps);
-			reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_gmii);
-			break;
-		case PHY_INTERFACE_MODE_USXGMII :
-			//speed may chage during link up. MII is fixed
-			speed = 2500;
-			reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_2500mbps);
-			reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_xgmii);
-			break;
-		default:
-			rsw2_err(MSG_GEN, "Unsupported MAC xMII format %s (%d) on port %d\n",phy_modes(phy_iface), phy_iface, eth_port->port_num-1);
-			//return -EINVAL;
+	case PHY_INTERFACE_MODE_SGMII :
+		//speed may chage during link up. MII is fixed
+		speed = 1000;
+		reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_1000mbps);
+		reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_gmii);
+		break;
+	case PHY_INTERFACE_MODE_USXGMII :
+		//speed may chage during link up. MII is fixed
+		speed = 2500;
+		reg_val |= FIELD_PREP(MPIC_LSC, rsw2_rmac_2500mbps);
+		reg_val |= FIELD_PREP(MPIC_PIS, rsw2_rmac_xgmii);
+		break;
+	default:
+		rsw2_err(MSG_GEN, "Unsupported MAC xMII format %s (%d) on port %d\n",phy_modes(phy_iface), phy_iface, eth_port->port_num-1);
+		//return -EINVAL;
 	}
 
 	iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MPIC);
@@ -2774,7 +2716,6 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 	reg_val = ioread32(phy_port->rmac_base_addr + RSW2_RMAC_MPSM);
 	reg_val |= MPSM_MFF;
 	iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MPSM);
-
 
 	/* Enable broad-/multi-/uni-cast reception of eMAC and pMAC frames*/
 	reg_val = MRAFC_BCENE;
@@ -2785,9 +2726,6 @@ static void rswitch2_init_port_mac(struct net_device *port_ndev)
 	reg_val |= MRAFC_UCENP;
 	iowrite32(reg_val, phy_port->rmac_base_addr + RSW2_RMAC_MRAFC);
 }
-
-
-
 
 static void rswitch2_init_mac_addr(struct net_device *ndev)
 {
@@ -2801,24 +2739,21 @@ static void rswitch2_init_mac_addr(struct net_device *ndev)
 	eth_port = netdev_priv(ndev);
 	rsw2 = eth_port->rsw2;
 
-
 	port_node = rswitch2_get_port_node(rsw2, (eth_port->port_num - rsw2->num_of_cpu_ports));
 //	dev_node = ndev->dev.of_node;
 	ndev->dev.of_node = port_node;
 
-	if(eth_port->intern_port) {
+	if (eth_port->intern_port) {
 		ret = eth_platform_get_mac_address(rsw2->dev, ndev->dev_addr);
 		if ((ret == 0) && is_valid_ether_addr(ndev->dev_addr)) {
 			/* device tree or NVMEM values are valid so use them */
 			rsw2_info(MSG_GEN, "MAC: '%s' Got valid MAC from eth_platform_get_mac_address()\n", ndev->name);
 
-		}
-		else {
+		} else {
 			rsw2_info(MSG_GEN, "MAC: '%s' INVALID from eth_platform_get_mac_address()\n", ndev->name);
 			eth_hw_addr_random(ndev);
 		}
-	}
-	else {
+	} else {
 		/* Although this calls of_get_mac_addr_nvmem() internally
 		 * it can't succeed because it expects dev.of_node to belong to
 		 * a platform device, which is not possible for the 'port' sub-node
@@ -2844,17 +2779,14 @@ static void rswitch2_init_mac_addr(struct net_device *ndev)
 			ndev->name);
 
 //	ndev->dev.of_node = dev_node;
-
 }
-
-
-
 
 // FIXME: don't re-invent base functions
 static void rswitch_modify(void __iomem *addr, u32 reg, u32 clear, u32 set)
 {
 	iowrite32((ioread32(addr + reg) & ~clear) | set, addr + reg);
 }
+
 // FIXME
 #define MMIS1_CLEAR_FLAGS       0xf
 
@@ -2919,9 +2851,6 @@ static int rswitch2_mdio_access(struct net_device *ndev, bool read,
 
 		/* Clear read completion flag */
 		rswitch_modify(phy_port->rmac_base_addr, RSW2_RMAC_MMIS1, MMIS1_PRACS, MMIS1_PRACS);
-
-
-
 	} else {
 		reg_val = MPSM_PSME | MPSM_MFF;
 		iowrite32((data << 16) | (pop << 13) | (devad << 8) | (phyad << 3) | reg_val,
@@ -3104,13 +3033,12 @@ static int rswitch2_get_phy_config(struct net_device *ndev)
 	phy_port = eth_port->phy_port;
 
 	port_node = rswitch2_get_port_node(rsw2, (eth_port->port_num - rsw2->num_of_cpu_ports));
-	if(port_node) {
+	if (port_node) {
 		ret = of_get_phy_mode(port_node, &phy_port->phy_iface);
 		if (ret != 0) {
 			rsw2_err(MSG_GEN, "of_get_phy_mode failed\n");
 			return -ENODEV;
-		}
-		else {
+		} else {
 			rsw2_info(MSG_GEN, "Got phy_iface mode: %s (%d)\n", phy_modes(phy_port->phy_iface), phy_port->phy_iface);
 		}
 	}
@@ -3154,14 +3082,12 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 	port_ndev->base_addr = (unsigned long)rsw2->etha_base_addrs[port_num];
 	rsw2_dbg(MSG_GEN, "Phy port %d: rsw2->etha_base_addrs[%d] = 0x%px\n", port_num, port_num, rsw2->etha_base_addrs[port_num]);
 
-
 	/* FIXME */
 	port_ndev->irq = rsw2->rxtx_irqs[port_num];
 
 	phy_port->rmac_base_addr = rsw2->etha_base_addrs[port_num] + RSW2_RMAC_OFFSET;
 	phy_port->serdes_chan_addr = rsw2->serdes_base_addr
 			+ (RSW2_SERDES_CHANNEL_OFFSET * port_num);
-
 
 	strncpy(port_ndev->name, RSW2_NETDEV_BASENAME, sizeof(port_ndev->name) - sizeof(port_name) - 1);
 	port_name_len = snprintf(port_name, sizeof(port_name), "p%1u", eth_port->port_num-1);
@@ -3213,7 +3139,6 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 		goto cleanup_phy_port;
 	}
 
-
 	/* Link Verification */
 	/* TODO CMARD: I'm not sure if this is the correct position. The link verification
 	 * is a feature to ask the far end MAC if it is pre-emption capable. But this can
@@ -3251,7 +3176,6 @@ static int rswitch2_init_physical_port(struct rswitch2_drv *rsw2, unsigned int p
 	}
 
 	rswitch2_port_set_mac_addr(port_ndev);
-
 
 #if 0
 	ret = rswitch2_phy_init(port_ndev, port_num);
@@ -3723,7 +3647,7 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 	}
 
 	/* Request data IRQs */
-	for(cur_irq = 0; cur_irq < rsw2->num_of_rxtx_irqs; cur_irq++) {
+	for (cur_irq = 0; cur_irq < rsw2->num_of_rxtx_irqs; cur_irq++) {
 		ret = request_irq(rsw2->rxtx_irqs[cur_irq], rswitch2_eth_interrupt, IRQ_TYPE_LEVEL_HIGH,
 						RSWITCH2_NAME, rsw2);
 		if (ret < 0) {
@@ -3733,7 +3657,7 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 	}
 
 	/* Request status IRQs */
-	for(cur_irq = 0; cur_irq < rsw2->num_of_status_irqs; cur_irq++) {
+	for (cur_irq = 0; cur_irq < rsw2->num_of_status_irqs; cur_irq++) {
 		ret = request_irq(rsw2->status_irqs[cur_irq], rswitch2_status_interrupt, IRQ_TYPE_LEVEL_HIGH,
 						RSWITCH2_NAME, rsw2);
 		if (ret < 0) {
@@ -3743,7 +3667,7 @@ int rswitch2_eth_init(struct rswitch2_drv *rsw2)
 	}
 
 	/* Set max frame size to enable data storage in internal RAM */
-	for( i = 0; i < 8; i++) {
+	for (i = 0; i < 8; i++) {
 		iowrite32(0xFFFF, rsw2->gwca_base_addrs[0] +RSW2_GCWA_GWRMFSC(i));
 	}
 
@@ -3776,10 +3700,10 @@ void rswitch2_eth_exit(struct rswitch2_drv *rsw2)
 	iowrite32(0xFF, rsw2->gwca_base_addrs[0] + RSW2_GCWA_GWRDQC);
 
 
-	for(cur_irq = 0; cur_irq < rsw2->num_of_rxtx_irqs; cur_irq++) {
+	for (cur_irq = 0; cur_irq < rsw2->num_of_rxtx_irqs; cur_irq++) {
 		free_irq(rsw2->rxtx_irqs[cur_irq], rsw2);
 	}
-	for(cur_irq = 0; cur_irq < rsw2->num_of_status_irqs; cur_irq++) {
+	for (cur_irq = 0; cur_irq < rsw2->num_of_status_irqs; cur_irq++) {
 		free_irq(rsw2->status_irqs[cur_irq], rsw2);
 	}
 
@@ -3798,17 +3722,17 @@ void rswitch2_eth_exit(struct rswitch2_drv *rsw2)
 		phy_port = eth_port->phy_port;
 
 		rtnl_lock();
-		if(netif_running(ndev))
+		if (netif_running(ndev))
 			dev_close(ndev);
 		rtnl_unlock();
 
 		if (phy_port) {
-            uint cur_q;
-            uint num_of_rx_queues;
-            uint num_of_tx_queues;
+			uint cur_q;
+			uint num_of_rx_queues;
+			uint num_of_tx_queues;
 
-            phy_disconnect(phy_port->phy);
-            phy_device_remove(phy_port->phy);
+			phy_disconnect(phy_port->phy);
+			phy_device_remove(phy_port->phy);
 			phy_device_free(phy_port->phy);
 
 			mdiobus_unregister(phy_port->mii_bus);

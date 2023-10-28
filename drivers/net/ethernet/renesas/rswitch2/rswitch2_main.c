@@ -109,7 +109,6 @@ int rswitch2_init(struct rswitch2_drv *rsw2)
 
 	rsw2_notice(MSG_GEN, "PTP clock initialized\n");
 
-
 	ret = rswitch2_fwd_init(rsw2);
 	if (ret < 0)
 		goto err_fwd_init;

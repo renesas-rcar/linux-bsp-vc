@@ -88,8 +88,6 @@ static int rswitch2_mii_reset(struct mii_bus *bus)
 	return 0;
 }
 
-
-
 /* FIXME: Per Port!!! */
 static int rswitch2_register_mii_bus(struct rswitch2_drv *rsw2)
 {
@@ -126,8 +124,6 @@ out:
 }
 #endif
 
-
-
 static void rswitch2_platf_set_base_addr(struct rswitch2_drv *rsw2)
 {
 	u8 __iomem *base_addr = rsw2->base_addr;
@@ -155,15 +151,13 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 	int irq;
 	int ret;
 
-
 	pdev = container_of(rsw2->dev, struct platform_device, dev);
 
 	dn_irqs = of_get_property(rsw2->dev->of_node, "interrupt-names", &dt_prop_len);
 	if (!dn_irqs) {
 		rsw2_err(MSG_GEN, "No irqs specified in device tree\n");
 		return -EINVAL;
-	}
-	else {
+	} else {
 		rsw2_dbg(MSG_GEN, "Got irq array of len %d  from device tree nodes\n", dt_prop_len);
 	}
 
@@ -172,7 +166,6 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 	if (!irq_names)
 		return -ENOMEM;
 
-
 	ret = of_property_read_string_array(rsw2->dev->of_node, "interrupt-names",
 			irq_names, RSWITCH2_MAX_IRQS);
 	if (ret < 0)
@@ -180,7 +173,7 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 
 	dt_max_irqs = (unsigned int)ret;
 
-	for(dt_cur_irq = 0; dt_cur_irq < dt_max_irqs; dt_cur_irq++) {
+	for (dt_cur_irq = 0; dt_cur_irq < dt_max_irqs; dt_cur_irq++) {
 		size_t prop_str_len;
 
 		prop_str_len = strlen(irq_names[dt_cur_irq]);
@@ -188,7 +181,7 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 		rsw2_info(MSG_GEN, "Got irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
 
 		/* FIXME: Check if DT string is shorter than sizeof(RSW2_GWCA0_NAME) - 1 */
-		if(prop_str_len > sizeof(RSW2_GWCA0_NAME)) {
+		if (prop_str_len > sizeof(RSW2_GWCA0_NAME)) {
 
 			ret = strncmp(irq_names[dt_cur_irq], RSW2_GWCA0_NAME, sizeof(RSW2_GWCA0_NAME) - 1);
 			if(ret == 0) {
@@ -202,9 +195,9 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 				rsw2_dbg(MSG_GEN, "Got irq %d '%s' from DT index %d\n", irq, irq_names[dt_cur_irq], dt_cur_irq);
 
 				ret = strncmp(irq_type_str, "rxtx", 4);
-				if(ret == 0) {
+				if (ret == 0) {
 					rsw2_info(MSG_GEN, "Registering RXTX irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
-					if(rsw2->num_of_rxtx_irqs >=  RSWITCH2_MAX_RXTX_IRQS) {
+					if (rsw2->num_of_rxtx_irqs >=  RSWITCH2_MAX_RXTX_IRQS) {
 						rsw2_err(MSG_GEN, "Too many RXTX interrupts\n");
 						// FIXME: free memory
 						return -EINVAL;
@@ -212,9 +205,7 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 					}
 					rsw2->rxtx_irqs[rsw2->num_of_rxtx_irqs] = irq;
 					rsw2->num_of_rxtx_irqs++;
-
-				}
-				else {
+				} else {
 					rsw2_info(MSG_GEN, "Registering status irq #%.02d '%s'\n", dt_cur_irq, irq_names[dt_cur_irq]);
 					if(rsw2->num_of_status_irqs >=  RSWITCH2_MAX_STATUS_IRQS) {
 						rsw2_err(MSG_GEN, "Too many status interrupts\n");
@@ -224,7 +215,6 @@ static int rswitch2_platf_request_irqs(struct rswitch2_drv *rsw2)
 					}
 					rsw2->status_irqs[rsw2->num_of_status_irqs] = irq;
 					rsw2->num_of_status_irqs++;
-
 				}
 			}
 		}
@@ -247,7 +237,7 @@ static phy_interface_t rswitch2_get_phy_inferface(const char *phy_mode_str) {
 	phy_interface_t intf = PHY_INTERFACE_MODE_NA;
 	const int elem = ARRAY_SIZE(rsw2_phy_mode_xlate_tbl);
 
-	for(i = 0; i < elem; i++) {
+	for (i = 0; i < elem; i++) {
 		int ret;
 		ret = strcmp(phy_mode_str, rsw2_phy_mode_xlate_tbl[i].dt_str);
 		//printk("Comparing '%s' <-> '%s'\n", phy_mode_str, rsw2_phy_mode_xlate_tbl[i].dt_str);
@@ -272,10 +262,8 @@ static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 
 	int ret = 0;
 
-
 	pdev = container_of(rsw2->dev, struct platform_device, dev);
 	rsw2_dbg(MSG_GEN, "rswitch2_platf_set_port_data(): pdev is at 0x%px\n", pdev);
-
 
 	//total_ports = rsw2->num_of_cpu_ports + rsw2->num_of_tsn_ports;
 #ifdef  RSW2_DEPRECATED
@@ -331,8 +319,6 @@ static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 						"e6800000.ethernet-ffffffff", 0x00);
 	pr_info("Port 3 PHY ID: '%s'\n", cur_port_data->phy_id);
 
-
-
 	ports = of_get_child_by_name(rsw2->dev->of_node, "ports");
 	if (!ports) {
 		dev_err(rsw2->dev, "No ports specified in device tree\n");
@@ -344,15 +330,13 @@ static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 
 
 	dt_port_num = of_get_child_count(ports);
-	if(dt_port_num > rsw2->num_of_tsn_ports) {
+	if (dt_port_num > rsw2->num_of_tsn_ports) {
 		dev_err(rsw2->dev, "%d ports specified in device tree, but maximum %d ports supported.\n",
 				dt_port_num, rsw2->num_of_tsn_ports);
 		return -EINVAL;
-	}
-	else {
+	} else {
 		dev_info(rsw2->dev, "DT specifies %d Ethernet ports\n", dt_port_num);
 	}
-
 
 	cur_port_num = 0;
 
@@ -396,7 +380,6 @@ static int rswitch2_platf_set_port_data(struct rswitch2_drv *rsw2)
 	return ret;
 }
 
-
 static int rswitch2_platf_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -413,7 +396,6 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Invalid resources, check device tree\n");
 		return -EINVAL;
 	}
-
 
 	drv_priv = devm_kzalloc(&pdev->dev, sizeof(*drv_priv), GFP_KERNEL);
 	if (!drv_priv) {
@@ -514,7 +496,6 @@ static int rswitch2_platf_probe(struct platform_device *pdev)
 
 	rsw2_dbg(MSG_GEN,"pdev->dev.power.disable_depth:: %d\n", pdev->dev.power.disable_depth);
 
-
 	device_set_wakeup_capable(&pdev->dev, 1);
 
 	/* Init RSwitch2 core */
@@ -548,16 +529,13 @@ out_drv_priv_mem:
 }
 
 /* Clean up */
-//static void rswitch2_pci_remove(struct pci_dev *pdev)
 static int rswitch2_platf_remove(struct platform_device *pdev)
 {
 	struct rswitch2_platf_driver_priv *drv_priv = platform_get_drvdata(pdev);
 
-
 	if (drv_priv) {
 		if (drv_priv->rsw2) {
 			struct rswitch2_drv *rsw2 = drv_priv->rsw2;
-
 
 			rswitch2_exit(drv_priv->rsw2);
 
@@ -582,7 +560,6 @@ static int rswitch2_platf_remove(struct platform_device *pdev)
 			kfree(drv_priv->rsw2->etha_base_addrs);
 			kfree(drv_priv->rsw2);
 		}
-
 
 		devm_kfree(&pdev->dev, drv_priv);
 		platform_set_drvdata(pdev, NULL);
@@ -682,7 +659,6 @@ static const struct of_device_id rswitch2_platf_of_table[] = {
 	{ }
 };
 MODULE_DEVICE_TABLE(of, rswitch2_platf_of_table);
-
 
 static struct platform_driver rswitch2_platf_drv = {
 	.probe = rswitch2_platf_probe,

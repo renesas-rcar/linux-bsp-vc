@@ -11,57 +11,57 @@
 #include "rswitch2.h"
 #include "rswitch2_fwd.h"
 
-static int rsw2_fwd_find_free_cascade_filter_slot(struct rswitch2_drv *rsw2) {
+static int rsw2_fwd_find_free_cascade_filter_slot(struct rswitch2_drv *rsw2)
+{
 
 	u32 filter_conf;
 	uint slot_num;
 
-	for(slot_num = 0; slot_num < RSW2_FWD_THBF_N; slot_num++) {
+	for (slot_num = 0; slot_num < RSW2_FWD_THBF_N; slot_num++) {
 		filter_conf = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWCFC(slot_num));
 
-		if(filter_conf == 0) {
+		if (filter_conf == 0) {
 			rsw2_info(MSG_FWD, "Cascade filter slot %d is unused\n", slot_num);
 
 			break;
 		}
 	}
 
-	if(slot_num >= RSW2_FWD_THBF_N) {
+	if (slot_num >= RSW2_FWD_THBF_N) {
 		return -EFILTER_LIST_FULL;
 	}
 
-	return (int) slot_num;
+	return (int)slot_num;
 }
 
 
-static int rsw2_fwd_find_free_3byte_filter_slot(struct rswitch2_drv *rsw2) {
+static int rsw2_fwd_find_free_3byte_filter_slot(struct rswitch2_drv *rsw2)
+{
 	u32 filter_conf;
 	u32 filter_val0;
 	u32 filter_val1;
 	uint slot_num;
 
-	for(slot_num = 0; slot_num < RSW2_FWD_THBF_N; slot_num++) {
+	for (slot_num = 0; slot_num < RSW2_FWD_THBF_N; slot_num++) {
 		filter_conf = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWTHBFC(slot_num));
 		filter_val0 = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWTHBFV0C(slot_num));
 		filter_val1 = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWTHBFV1C(slot_num));
 
-		if((filter_conf == 0) && (filter_val0 == 0) && (filter_val1 == 0)) {
+		if ((filter_conf == 0) && (filter_val0 == 0) && (filter_val1 == 0)) {
 			//printk("3byte filter slot %d is unused\n", slot_num);
 
 			break;
 		}
 	}
 
-	if(slot_num >= RSW2_FWD_THBF_N) {
+	if (slot_num >= RSW2_FWD_THBF_N)
 		return -EFILTER_LIST_FULL;
-	}
 
-
-	return (int) slot_num;
+	return (int)slot_num;
 }
 
-static int rsw2_fwd_add_cascade_filter(struct rswitch2_drv *rsw2, struct cascade_filter *filter) {
-
+static int rsw2_fwd_add_cascade_filter(struct rswitch2_drv *rsw2, struct cascade_filter *filter)
+{
 	int ret;
 	u32 filter_conf;
 
@@ -69,9 +69,8 @@ static int rsw2_fwd_add_cascade_filter(struct rswitch2_drv *rsw2, struct cascade
 	uint filter_map_entry;
 
 	ret = rsw2_fwd_find_free_cascade_filter_slot(rsw2);
-	if(ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	filter_slot = (uint)ret;
 	filter->stream_id = filter_slot;
@@ -79,7 +78,7 @@ static int rsw2_fwd_add_cascade_filter(struct rswitch2_drv *rsw2, struct cascade
 	filter_conf = FIELD_PREP(FWCFC_CFPFFV, filter->pframe_bitmap);
 	filter_conf |= FIELD_PREP(FWCFC_CFEFFV, filter->eframe_bitmap);
 
-	for(filter_map_entry = 0; filter_map_entry < RSW2_FWD_CFMF_N; filter_map_entry++) {
+	for (filter_map_entry = 0; filter_map_entry < RSW2_FWD_CFMF_N; filter_map_entry++) {
 		u32 reg_val;
 
 		reg_val = FIELD_PREP(FWCFMC_CFFV, filter->entry[filter_map_entry].enabled);
@@ -102,17 +101,15 @@ static int rsw2_fwd_add_3byte_filter(struct rswitch2_drv *rsw2, struct three_byt
 	uint filter_slot;
 
 	ret = rsw2_fwd_find_free_3byte_filter_slot(rsw2);
-	if(ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	filter_slot = (uint)ret;
 
 	filter_conf = FIELD_PREP(FWTHBFC_THBFUM, filter->mode);
 	filter_conf |= FIELD_PREP(FWTHBFC_THBFOV, filter->offset);
 
-
-	switch(filter->mode) {
+	switch (filter->mode) {
 	case pf_mask_mode:
 		filter_val0  = FIELD_PREP(FWTHBFV0C_THBFV0B0, filter->m.val[2]);
 		filter_val0 |= FIELD_PREP(FWTHBFV0C_THBFV0B1, filter->m.val[1]);
@@ -156,7 +153,6 @@ static int rsw2_fwd_add_3byte_filter(struct rswitch2_drv *rsw2, struct three_byt
 		break;
 	}
 
-
 	iowrite32(filter_val0, rsw2->fwd_base_addr + RSW2_FWD_FWTHBFV0C(filter_slot));
 	iowrite32(filter_val1, rsw2->fwd_base_addr + RSW2_FWD_FWTHBFV1C(filter_slot));
 	iowrite32(filter_conf, rsw2->fwd_base_addr + RSW2_FWD_FWTHBFC(filter_slot));
@@ -164,8 +160,8 @@ static int rsw2_fwd_add_3byte_filter(struct rswitch2_drv *rsw2, struct three_byt
 	return ret;
 }
 
-static int rsw2_fwd_add_l3_entry(struct rswitch2_drv *rsw2, u32 stream_id, u32 src_port_vec, u32 dest_port_vec, u32 cpu_q) {
-
+static int rsw2_fwd_add_l3_entry(struct rswitch2_drv *rsw2, u32 stream_id, u32 src_port_vec, u32 dest_port_vec, u32 cpu_q)
+{
 	int ret;
 	u32 reg_val;
 
@@ -204,18 +200,17 @@ static int rsw2_fwd_add_l3_entry(struct rswitch2_drv *rsw2, u32 stream_id, u32 s
 	}
 
 	reg_val = ioread32(rsw2->fwd_base_addr + RSW2_FWD_FWLTHTLR);
-	if(FIELD_GET(FWLTHTLR_LTHLF, reg_val)) {
+	if (FIELD_GET(FWLTHTLR_LTHLF, reg_val)) {
 		/* FIXME: Check others error bits */
 		rsw2_err(MSG_FWD, "Learning failed\n");
-	}
-	else {
+	} else {
 		rsw2_info(MSG_FWD, "Learning succeeded\n");
 	}
 	return ret;
 }
 
-int rsw2_fwd_add_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr, u32 src_port_vec, u32 dest_port_vec, u32 cpu_q) {
-
+int rsw2_fwd_add_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr, u32 src_port_vec, u32 dest_port_vec, u32 cpu_q)
+{
 	int ret;
 	u32 reg_val;
 
@@ -256,11 +251,10 @@ int rsw2_fwd_add_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr, u32 src_
 	return 0;
 }
 
-int rsw2_fwd_del_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr) {
+int rsw2_fwd_del_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr)
+{
 	int ret;
 	u32 reg_val;
-
-
 
 	reg_val = FIELD_PREP(FWMACTL0_MACED, 1);
 	iowrite32(reg_val, rsw2->fwd_base_addr + RSW2_FWD_FWMACTL0);
@@ -288,10 +282,6 @@ int rsw2_fwd_del_l2_entry(struct rswitch2_drv *rsw2, const u8 *macaddr) {
 	return 0;
 }
 
-
-
-
-
 int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 {
 	int cur_port;
@@ -300,7 +290,6 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 	int ret;
 
 	/* Simple static forward configuration to allow access to internal port */
-
 
 	/* Enable access for both APBs */
 	/* TODO: Needs to be checked on S4 */
@@ -319,7 +308,6 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 
 	// FIXME: check if needed
 	reg_val |= FWPC0_L2SE;
-
 
 	for (cur_port = 0; cur_port < num_of_ports; cur_port++) {
 		iowrite32(reg_val, rsw2->fwd_base_addr + RSW2_FWD_FWPC0(cur_port));
@@ -403,7 +391,6 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 	}
 #endif
 
-
 	/* Configure aging */
 	reg_val = FIELD_PREP(FWMACAGUSP_MACAGUSP, 0x4E);
 	iowrite32(reg_val, rsw2->fwd_base_addr + RSW2_FWD_FWMACAGUSP);
@@ -472,7 +459,7 @@ int rswitch2_fwd_init(struct rswitch2_drv *rsw2)
 
 		memset(cc_filter, 0 , sizeof(cc_filter));
 
-		for( i = 0; i < 3; i++) {
+		for (i = 0; i < 3; i++) {
 			set_bit(i, &cc_filter[i].eframe_bitmap);
 			set_bit(i, &cc_filter[i].pframe_bitmap);
 
