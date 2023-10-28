@@ -506,20 +506,28 @@ static void tja1102_p1_register(struct work_struct *work)
 			continue;
 		}
 
-		/* Real PHY ID of Port 1 is 0 */
-		phy = phy_device_create(bus, addr, PHY_ID_TJA1102, false, NULL);
+		phy = of_phy_device_initialize(child, bus, addr);
 		if (IS_ERR(phy)) {
 			dev_err(dev, "Can't create PHY device for Port 1: %i\n",
 				addr);
 			continue;
 		}
 
-		/* Overwrite parent device. phy_device_create() set parent to
-		 * the mii_bus->dev, which is not correct in case.
+		/* Overwrite parent device. phy_device_initialize() set parent
+		 * to the mii_bus->dev, which is not correct in case.
 		 */
 		phy->mdio.dev.parent = dev;
 
-		ret = of_mdiobus_phy_device_register(bus, phy, child, addr);
+		/* Real PHY ID of Port 1 is 0 */
+		if (phy_device_assign_ids(phy, PHY_ID_TJA1102, false, NULL)) {
+			dev_err(dev,
+				"Can't assign PHY device id for Port 1: %i\n",
+				addr);
+			phy_device_free(phy);
+			continue;
+		}
+
+		ret = phy_device_register(phy);
 		if (ret) {
 			/* All resources needed for Port 1 should be already
 			 * available for Port 0. Both ports use the same

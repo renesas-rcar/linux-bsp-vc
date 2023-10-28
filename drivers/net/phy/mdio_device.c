@@ -69,6 +69,48 @@ struct mdio_device *mdio_device_create(struct mii_bus *bus, int addr)
 }
 EXPORT_SYMBOL(mdio_device_create);
 
+int mdio_device_attach_suppliers(struct mdio_device *mdiodev)
+{
+	struct gpio_desc *reset_gpio;
+	struct reset_control *reset;
+	int ret;
+
+	reset_gpio = gpiod_get_optional(&mdiodev->dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(reset_gpio)) {
+		ret = PTR_ERR(reset_gpio);
+		goto gpio_err;
+	}
+
+	reset = reset_control_get_optional_exclusive(&mdiodev->dev, "phy");
+	if (IS_ERR(reset)) {
+		ret = PTR_ERR(reset);
+		goto reset_err;
+	}
+
+	mdiodev->reset_gpio = reset_gpio;
+	if (reset_gpio)
+		gpiod_set_consumer_name(reset_gpio, "PHY reset");
+	mdiodev->reset_ctrl = reset;
+
+	/* Assert the reset signal */
+	mdio_device_reset(mdiodev, 1);
+
+	return 0;
+
+reset_err:
+	gpiod_put(reset_gpio);
+gpio_err:
+	return ret;
+}
+EXPORT_SYMBOL(mdio_device_attach_suppliers);
+
+void mdio_device_release_suppliers(struct mdio_device *mdiodev)
+{
+	gpiod_put(mdiodev->reset_gpio);
+	reset_control_put(mdiodev->reset_ctrl);
+}
+EXPORT_SYMBOL(mdio_device_release_suppliers);
+
 /**
  * mdio_device_register - Register the mdio device on the MDIO bus
  * @mdiodev: mdio_device structure to be added to the MDIO bus
