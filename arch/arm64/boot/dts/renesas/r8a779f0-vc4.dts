@@ -263,10 +263,14 @@
 
 	pinctrl-0 = <&pcie0_pins>;
 	pinctrl-names = "default";
+
+	max-link-speed = <2>;
 };
 
 &pciec1 {
 	status = "okay";
+
+	max-link-speed = <2>;
 };
 
 &pcie_bus_clk {
