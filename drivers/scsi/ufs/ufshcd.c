@@ -8270,23 +8270,27 @@ static void ufshcd_hba_exit(struct ufs_hba *hba)
 static int
 ufshcd_send_request_sense(struct ufs_hba *hba, struct scsi_device *sdp)
 {
+	/* On ufs-renesas with WDC SDINDDH6-64G rev 1724 connected, observe
+	 * REQUEST_SENSE returning OCS_MISMATCH_DATA_BUF_SIZE error if size
+	 * is less than 20 */
+	unsigned char size = max_t(unsigned char, UFS_SENSE_SIZE, 20);
 	unsigned char cmd[6] = {REQUEST_SENSE,
 				0,
 				0,
 				0,
-				UFS_SENSE_SIZE,
+				size,
 				0};
 	char *buffer;
 	int ret;
 
-	buffer = kzalloc(UFS_SENSE_SIZE, GFP_KERNEL);
+	buffer = kzalloc(size, GFP_KERNEL);
 	if (!buffer) {
 		ret = -ENOMEM;
 		goto out;
 	}
 
 	ret = scsi_execute(sdp, cmd, DMA_FROM_DEVICE, buffer,
-			UFS_SENSE_SIZE, NULL, NULL,
+			size, NULL, NULL,
 			msecs_to_jiffies(1000), 3, 0, RQF_PM, NULL);
 	if (ret)
 		pr_err("%s: failed with err %d\n", __func__, ret);
