@@ -15,6 +15,7 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/reset.h>
 #include <linux/sys_soc.h>
 
 #include "ufshcd.h"
@@ -704,6 +705,22 @@ MODULE_DEVICE_TABLE(of, ufs_renesas_of_match);
 
 static int ufs_renesas_probe(struct platform_device *pdev)
 {
+	struct reset_control *reset;
+	int ret;
+
+	/* If UFS controller was used by bootloader, driver fails to initialize without
+	 * controller being reset */
+	reset = reset_control_get_exclusive(&pdev->dev, NULL);
+	if (IS_ERR(reset))
+		dev_err(&pdev->dev, "failed ti get reset control\n");
+	else {
+		ret = reset_control_reset(reset);
+		if (ret)
+			dev_err(&pdev->dev, "failed to reset\n");
+
+		reset_control_put(reset);
+	}
+
 	return ufshcd_pltfrm_init(pdev, &ufs_renesas_vops);
 }
 
