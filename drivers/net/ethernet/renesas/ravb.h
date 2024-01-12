@@ -74,6 +74,7 @@ enum ravb_reg {
 	CDAR21	= 0x0064,
 	ESR	= 0x0088,
 	APSR	= 0x008C,	/* R-Car Gen3 only */
+	RIMR	= 0x008C,	/* R-Car S4 only */
 	RCR	= 0x0090,
 	RQC0	= 0x0094,
 	RQC1	= 0x0098,
@@ -329,6 +330,11 @@ enum APSR_BIT {
 	APSR_DM			= 0x00006000,	/* Undocumented? */
 	APSR_DM_RDM		= 0x00002000,
 	APSR_DM_TDM		= 0x00004000,
+};
+
+/* RIMR */
+enum RIMR_BIT {
+	RIMR_SPEED_100		= 0x00000001,
 };
 
 /* RCR */

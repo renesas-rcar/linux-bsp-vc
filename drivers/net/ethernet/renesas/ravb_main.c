@@ -50,6 +50,7 @@ static const char *ravb_tx_irqs[NUM_TX_QUEUE] = {
 	"ch19", /* RAVB_NC */
 };
 
+static const struct soc_device_attribute r8a779f0[];
 static const struct soc_device_attribute r8a779g0[];
 
 void ravb_modify(struct net_device *ndev, enum ravb_reg reg, u32 clear,
@@ -87,6 +88,10 @@ static int ravb_config(struct net_device *ndev)
 static void ravb_set_rate(struct net_device *ndev)
 {
 	struct ravb_private *priv = netdev_priv(ndev);
+
+	/* On S4, there is no GECMR */
+	if (soc_device_match(r8a779f0))
+		return;
 
 	switch (priv->speed) {
 	case 100:		/* 100BASE */
@@ -471,6 +476,11 @@ static int ravb_dmac_init(struct net_device *ndev)
 	ravb_write(ndev, RIC2_QFE0 | RIC2_QFE1 | RIC2_RFFE, RIC2);
 	/* Frame transmitted, timestamp FIFO updated */
 	ravb_write(ndev, TIC_FTE0 | TIC_FTE1, TIC);
+
+	/* On R-Car S4, this register write is needed to set 100 MBps
+	 * (this driver does not currently support 10 MBps) */
+	if (soc_device_match(r8a779f0))
+		ravb_write(ndev, RIMR_SPEED_100, RIMR);
 
 	/* Setting the control will start the AVB-DMAC process. */
 	ravb_modify(ndev, CCC, CCC_OPC, CCC_OPC_OPERATION);
@@ -980,6 +990,11 @@ static const struct soc_device_attribute r8a7795es10[] = {
 	{ /* sentinel */ }
 };
 
+static const struct soc_device_attribute r8a779f0[] = {
+	{ .soc_id = "r8a779f0" },
+	{ /* sentinel */ }
+};
+
 static const struct soc_device_attribute r8a779g0[] = {
 	{ .soc_id = "r8a779g0" },
 	{ /* sentinel */ }
@@ -988,6 +1003,7 @@ static const struct soc_device_attribute r8a779g0[] = {
 static const struct soc_device_attribute ravb_quirks_match[] = {
 	{ .soc_id = "r8a77990", .revision = "ES1.*" },
 	{ .soc_id = "r8a77995", .revision = "ES1.*" },
+	{ .soc_id = "r8a779f0" },
 	{ /* sentinel */ }
 };
 
@@ -1930,6 +1946,7 @@ static const struct of_device_id ravb_match_table[] = {
 	{ .compatible = "renesas,etheravb-r8a77961", .data = (void *)RCAR_GEN3 },
 	{ .compatible = "renesas,etheravb-rcar-gen3", .data = (void *)RCAR_GEN3 },
 	{ .compatible = "renesas,etheravb-rcar-gen4", .data = (void *)RCAR_GEN4 },
+	{ .compatible = "renesas,etheravb-r8a779f0", .data = (void *)RCAR_GEN2 },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, ravb_match_table);
