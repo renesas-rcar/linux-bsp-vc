@@ -1186,6 +1186,12 @@ struct ravb_private {
 	unsigned txcidm:1;		/* TX Clock Internal Delay Mode */
 	unsigned rgmii_override:1;	/* Deprecated rgmii-*id behavior */
 	int num_tx_desc;		/* TX descriptors per packet */
+
+	void *bb_virt;
+	dma_addr_t bb_dma;
+	u32 bb_size;
+	unsigned long *bb_bitmap;
+	spinlock_t bb_lock;
 };
 
 static inline u32 ravb_read(struct net_device *ndev, enum ravb_reg reg)

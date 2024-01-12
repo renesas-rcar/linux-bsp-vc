@@ -34,6 +34,136 @@
 
 #include "ravb.h"
 
+#define BB_CHUNK_SHIFT		10
+#define BB_CHUNK_MASK		((1 << BB_CHUNK_SHIFT) - 1)
+#define BB_CHUNKS_FOR_SIZE(size) (((size) + BB_CHUNK_MASK) >> BB_CHUNK_SHIFT)
+#define BB_CHUNKS(priv)		BB_CHUNKS_FOR_SIZE(priv->bb_size)
+#define BB_BAD_OFFSET		0xFFFFFFFF
+
+static unsigned int ravb_bb_alloc_area(struct ravb_private *priv, size_t size)
+{
+	unsigned int pos;
+	unsigned long bits = BB_CHUNKS_FOR_SIZE(size);
+	bool found;
+	unsigned long flags;
+
+	spin_lock_irqsave(&priv->bb_lock, flags);
+	pos = bitmap_find_next_zero_area(priv->bb_bitmap, BB_CHUNKS(priv),
+			0, bits, 0);
+	found = (pos < BB_CHUNKS(priv));
+	if (found)
+		bitmap_set(priv->bb_bitmap, pos, bits);
+	spin_unlock_irqrestore(&priv->bb_lock, flags);
+
+	return found ? (pos << BB_CHUNK_SHIFT) : BB_BAD_OFFSET;
+}
+
+static void ravb_bb_free_area(struct ravb_private *priv,
+		unsigned int offset, size_t size)
+{
+	unsigned int pos = offset >> BB_CHUNK_SHIFT;
+	unsigned long bits = BB_CHUNKS_FOR_SIZE(size);
+	unsigned long flags;
+
+	BUG_ON(pos >= BB_CHUNKS(priv));
+	BUG_ON(pos + bits > BB_CHUNKS(priv));
+
+	spin_lock_irqsave(&priv->bb_lock, flags);
+	bitmap_clear(priv->bb_bitmap, pos, bits);
+	spin_unlock_irqrestore(&priv->bb_lock, flags);
+}
+
+static void *ravb_dma_alloc_coherent(struct net_device *ndev, size_t size,
+		dma_addr_t *dma_handle, gfp_t gfp)
+{
+	struct ravb_private *priv = netdev_priv(ndev);
+	unsigned int offset;
+
+	if (likely(priv->bb_virt == NULL))
+		return dma_alloc_coherent(ndev->dev.parent, size, dma_handle,
+					  gfp);
+
+	offset = ravb_bb_alloc_area(priv, size);
+	if (offset == BB_BAD_OFFSET)
+		return NULL;
+
+	*dma_handle = priv->bb_dma + offset;
+	return priv->bb_virt + offset;
+}
+
+static void ravb_dma_free_coherent(struct net_device *ndev, size_t size,
+		void *cpu_addr, dma_addr_t dma_handle)
+{
+	struct ravb_private *priv = netdev_priv(ndev);
+	unsigned int offset;
+
+	if (likely(priv->bb_virt == NULL)) {
+		dma_free_coherent(ndev->dev.parent, size, cpu_addr, dma_handle);
+		return;
+	}
+
+	BUG_ON(dma_handle < priv->bb_dma);
+	BUG_ON(dma_handle >= priv->bb_dma + priv->bb_size);
+	BUG_ON(dma_handle & BB_CHUNK_MASK);
+
+	offset = dma_handle - priv->bb_dma;
+
+	BUG_ON(cpu_addr != priv->bb_virt + offset);
+
+	ravb_bb_free_area(priv, offset, size);
+}
+
+static dma_addr_t ravb_dma_map_single(struct net_device *ndev, void *ptr,
+		size_t size, enum dma_data_direction dir)
+{
+	struct ravb_private *priv = netdev_priv(ndev);
+	unsigned long offset;
+
+	if (likely(priv->bb_virt == NULL))
+		return dma_map_single(ndev->dev.parent, ptr, size, dir);
+
+	offset = ravb_bb_alloc_area(priv, size);
+	if (offset == BB_BAD_OFFSET)
+		return DMA_MAPPING_ERROR;
+
+	if (dir == DMA_TO_DEVICE)
+		memcpy_toio(priv->bb_virt + offset, ptr, size);
+
+	return priv->bb_dma + offset;
+}
+
+static void ravb_dma_unmap_single(struct net_device *ndev, void *cpu_addr,
+		dma_addr_t dma_handle, size_t size, enum dma_data_direction dir)
+{
+	struct ravb_private *priv = netdev_priv(ndev);
+	unsigned long offset;
+
+	if (likely(priv->bb_virt == NULL)) {
+		dma_unmap_single(ndev->dev.parent, dma_handle, size, dir);
+		return;
+	}
+
+	BUG_ON(dma_handle < priv->bb_dma);
+	BUG_ON(dma_handle >= priv->bb_dma + priv->bb_size);
+	BUG_ON(dma_handle & BB_CHUNK_MASK);
+
+	offset = dma_handle - priv->bb_dma;
+
+	if (dir == DMA_FROM_DEVICE && cpu_addr != NULL)
+		memcpy_fromio(cpu_addr, priv->bb_virt + offset, size);
+
+	ravb_bb_free_area(priv, offset, size);
+}
+
+static void memset_coherent(struct ravb_private *priv,
+		void *dst, int val, size_t size)
+{
+	if (likely(priv->bb_virt == NULL))
+		memset(dst, val, size);
+	else
+		memset_io(dst, val, size);
+}
+
 #define RAVB_DEF_MSG_ENABLE \
 		(NETIF_MSG_LINK	  | \
 		 NETIF_MSG_TIMER  | \
@@ -202,8 +332,9 @@ static int ravb_tx_free(struct net_device *ndev, int q, bool free_txed_only)
 		size = le16_to_cpu(desc->ds_tagl) & TX_DS;
 		/* Free the original skb. */
 		if (priv->tx_skb[q][entry / num_tx_desc]) {
-			dma_unmap_single(ndev->dev.parent, le32_to_cpu(desc->dptr),
-					 size, DMA_TO_DEVICE);
+			ravb_dma_unmap_single(ndev,
+					      NULL, le32_to_cpu(desc->dptr),
+					      size, DMA_TO_DEVICE);
 			/* Last packet descriptor? */
 			if (entry % num_tx_desc == num_tx_desc - 1) {
 				entry /= num_tx_desc;
@@ -234,15 +365,16 @@ static void ravb_ring_free(struct net_device *ndev, int q)
 			struct ravb_ex_rx_desc *desc = &priv->rx_ring[q][i];
 
 			if (le16_to_cpu(desc->ds_cc) != 0)
-				dma_unmap_single(ndev->dev.parent,
-						 le32_to_cpu(desc->dptr),
-						 RX_BUF_SZ,
-						 DMA_FROM_DEVICE);
+				ravb_dma_unmap_single(ndev,
+						      NULL,
+						      le32_to_cpu(desc->dptr),
+						      RX_BUF_SZ,
+						      DMA_FROM_DEVICE);
 		}
 		ring_size = sizeof(struct ravb_ex_rx_desc) *
 			    (priv->num_rx_ring[q] + 1);
-		dma_free_coherent(ndev->dev.parent, ring_size, priv->rx_ring[q],
-				  priv->rx_desc_dma[q]);
+		ravb_dma_free_coherent(ndev, ring_size,
+				       priv->rx_ring[q], priv->rx_desc_dma[q]);
 		priv->rx_ring[q] = NULL;
 	}
 
@@ -251,8 +383,8 @@ static void ravb_ring_free(struct net_device *ndev, int q)
 
 		ring_size = sizeof(struct ravb_tx_desc) *
 			    (priv->num_tx_ring[q] * num_tx_desc + 1);
-		dma_free_coherent(ndev->dev.parent, ring_size, priv->tx_ring[q],
-				  priv->tx_desc_dma[q]);
+		ravb_dma_free_coherent(ndev, ring_size,
+				       priv->tx_ring[q], priv->tx_desc_dma[q]);
 		priv->tx_ring[q] = NULL;
 	}
 
@@ -294,15 +426,15 @@ static void ravb_ring_format(struct net_device *ndev, int q)
 	priv->dirty_rx[q] = 0;
 	priv->dirty_tx[q] = 0;
 
-	memset(priv->rx_ring[q], 0, rx_ring_size);
+	memset_coherent(priv, priv->rx_ring[q], 0, rx_ring_size);
 	/* Build RX ring buffer */
 	for (i = 0; i < priv->num_rx_ring[q]; i++) {
 		/* RX descriptor */
 		rx_desc = &priv->rx_ring[q][i];
 		rx_desc->ds_cc = cpu_to_le16(RX_BUF_SZ);
-		dma_addr = dma_map_single(ndev->dev.parent, priv->rx_skb[q][i]->data,
-					  RX_BUF_SZ,
-					  DMA_FROM_DEVICE);
+		dma_addr = ravb_dma_map_single(ndev,
+					       priv->rx_skb[q][i]->data,
+					       RX_BUF_SZ, DMA_FROM_DEVICE);
 		/* We just set the data size to 0 for a failed mapping which
 		 * should prevent DMA from happening...
 		 */
@@ -315,7 +447,7 @@ static void ravb_ring_format(struct net_device *ndev, int q)
 	rx_desc->dptr = cpu_to_le32((u32)priv->rx_desc_dma[q]);
 	rx_desc->die_dt = DT_LINKFIX; /* type */
 
-	memset(priv->tx_ring[q], 0, tx_ring_size);
+	memset_coherent(priv, priv->tx_ring[q], 0, tx_ring_size);
 	/* Build TX ring buffer */
 	for (i = 0, tx_desc = priv->tx_ring[q]; i < priv->num_tx_ring[q];
 	     i++, tx_desc++) {
@@ -374,9 +506,9 @@ static int ravb_ring_init(struct net_device *ndev, int q)
 
 	/* Allocate all RX descriptors. */
 	ring_size = sizeof(struct ravb_ex_rx_desc) * (priv->num_rx_ring[q] + 1);
-	priv->rx_ring[q] = dma_alloc_coherent(ndev->dev.parent, ring_size,
-					      &priv->rx_desc_dma[q],
-					      GFP_KERNEL);
+	priv->rx_ring[q] = ravb_dma_alloc_coherent(ndev, ring_size,
+						   &priv->rx_desc_dma[q],
+						   GFP_KERNEL);
 	if (!priv->rx_ring[q])
 		goto error;
 
@@ -385,9 +517,9 @@ static int ravb_ring_init(struct net_device *ndev, int q)
 	/* Allocate all TX descriptors. */
 	ring_size = sizeof(struct ravb_tx_desc) *
 		    (priv->num_tx_ring[q] * num_tx_desc + 1);
-	priv->tx_ring[q] = dma_alloc_coherent(ndev->dev.parent, ring_size,
-					      &priv->tx_desc_dma[q],
-					      GFP_KERNEL);
+	priv->tx_ring[q] = ravb_dma_alloc_coherent(ndev, ring_size,
+						   &priv->tx_desc_dma[q],
+						   GFP_KERNEL);
 	if (!priv->tx_ring[q])
 		goto error;
 
@@ -595,9 +727,11 @@ static bool ravb_rx(struct net_device *ndev, int *quota, int q)
 
 			skb = priv->rx_skb[q][entry];
 			priv->rx_skb[q][entry] = NULL;
-			dma_unmap_single(ndev->dev.parent, le32_to_cpu(desc->dptr),
-					 RX_BUF_SZ,
-					 DMA_FROM_DEVICE);
+			ravb_dma_unmap_single(ndev,
+					      skb->data,
+					      le32_to_cpu(desc->dptr),
+					      RX_BUF_SZ,
+					      DMA_FROM_DEVICE);
 			get_ts &= (q == RAVB_NC) ?
 					RAVB_RXTSTAMP_TYPE_V2_L2_EVENT :
 					~RAVB_RXTSTAMP_TYPE_V2_L2_EVENT;
@@ -638,9 +772,10 @@ static bool ravb_rx(struct net_device *ndev, int *quota, int q)
 			if (!skb)
 				break;	/* Better luck next round. */
 			ravb_set_buffer_align(skb);
-			dma_addr = dma_map_single(ndev->dev.parent, skb->data,
-						  le16_to_cpu(desc->ds_cc),
-						  DMA_FROM_DEVICE);
+			dma_addr = ravb_dma_map_single(ndev,
+						       skb->data,
+						       le16_to_cpu(desc->ds_cc),
+						       DMA_FROM_DEVICE);
 			skb_checksum_none_assert(skb);
 			/* We just set the data size to 0 for a failed mapping
 			 * which should prevent DMA  from happening...
@@ -1547,8 +1682,8 @@ static netdev_tx_t ravb_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 			len = DPTR_ALIGN;
 
 		memcpy(buffer, skb->data, len);
-		dma_addr = dma_map_single(ndev->dev.parent, buffer, len,
-					  DMA_TO_DEVICE);
+		dma_addr = ravb_dma_map_single(ndev, buffer, len,
+					       DMA_TO_DEVICE);
 		if (dma_mapping_error(ndev->dev.parent, dma_addr))
 			goto drop;
 
@@ -1558,8 +1693,8 @@ static netdev_tx_t ravb_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 
 		buffer = skb->data + len;
 		len = skb->len - len;
-		dma_addr = dma_map_single(ndev->dev.parent, buffer, len,
-					  DMA_TO_DEVICE);
+		dma_addr = ravb_dma_map_single(ndev, buffer, len,
+					       DMA_TO_DEVICE);
 		if (dma_mapping_error(ndev->dev.parent, dma_addr))
 			goto unmap;
 
@@ -1567,8 +1702,8 @@ static netdev_tx_t ravb_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	} else {
 		desc = &priv->tx_ring[q][entry];
 		len = skb->len;
-		dma_addr = dma_map_single(ndev->dev.parent, skb->data, skb->len,
-					  DMA_TO_DEVICE);
+		dma_addr = ravb_dma_map_single(ndev, skb->data, skb->len,
+					       DMA_TO_DEVICE);
 		if (dma_mapping_error(ndev->dev.parent, dma_addr))
 			goto drop;
 	}
@@ -1581,8 +1716,9 @@ static netdev_tx_t ravb_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 		if (!ts_skb) {
 			if (num_tx_desc > 1) {
 				desc--;
-				dma_unmap_single(ndev->dev.parent, dma_addr,
-						 len, DMA_TO_DEVICE);
+				ravb_dma_unmap_single(ndev,
+						      NULL, dma_addr, len,
+						      DMA_TO_DEVICE);
 			}
 			goto unmap;
 		}
@@ -1620,8 +1756,8 @@ exit:
 	return NETDEV_TX_OK;
 
 unmap:
-	dma_unmap_single(ndev->dev.parent, le32_to_cpu(desc->dptr),
-			 le16_to_cpu(desc->ds_tagl), DMA_TO_DEVICE);
+	ravb_dma_unmap_single(ndev, NULL, le32_to_cpu(desc->dptr),
+			      le16_to_cpu(desc->ds_tagl), DMA_TO_DEVICE);
 drop:
 	dev_kfree_skb_any(skb);
 	priv->tx_skb[q][entry / num_tx_desc] = NULL;
@@ -2059,6 +2195,7 @@ static int ravb_probe(struct platform_device *pdev)
 	int error, irq, q;
 	struct resource *res;
 	int i;
+	u32 bounce_buffer_def[3];
 
 	if (!np) {
 		dev_err(&pdev->dev,
@@ -2104,8 +2241,45 @@ static int ravb_probe(struct platform_device *pdev)
 	priv = netdev_priv(ndev);
 	priv->ndev = ndev;
 	priv->pdev = pdev;
-	priv->num_tx_ring[RAVB_BE] = BE_TX_RING_SIZE;
-	priv->num_rx_ring[RAVB_BE] = BE_RX_RING_SIZE;
+
+	error = of_property_read_u32_array(np, "bounce-buffer",
+			bounce_buffer_def, 3);
+	if (error == 0) {
+		u32 bb_phys = bounce_buffer_def[0];
+		priv->bb_dma = bounce_buffer_def[1];
+		priv->bb_size = bounce_buffer_def[2];
+
+		if ((bb_phys & BB_CHUNK_MASK) ||
+		    (priv->bb_dma & BB_CHUNK_MASK) ||
+		    priv->bb_size == 0 || (priv->bb_size & BB_CHUNK_MASK)) {
+			dev_err(&pdev->dev, "bad bounce-buffer setting\n");
+			error = -EINVAL;
+			goto out_release;
+		}
+
+		priv->bb_virt = ioremap(bb_phys, priv->bb_size);
+		if (priv->bb_virt == NULL) {
+			dev_err(&pdev->dev, "failed to map bounce buffer\n");
+			error = -ENOMEM;
+			goto out_release;
+		}
+
+		priv->bb_bitmap = bitmap_zalloc(BB_CHUNKS(priv), GFP_KERNEL);
+		if (priv->bb_bitmap == NULL) {
+			dev_err(&pdev->dev, "failed to allocate bounce buffer bitmap\n");
+			error = -ENOMEM;
+			goto out_release;
+		}
+
+		spin_lock_init(&priv->bb_lock);
+	} else if (error != -EINVAL)
+		dev_warn(&pdev->dev, "bounce-buffer definition parse error\n");
+
+
+	priv->num_tx_ring[RAVB_BE] =
+		priv->bb_virt ? BE_TX_RING_MIN : BE_TX_RING_SIZE;
+	priv->num_rx_ring[RAVB_BE] =
+		priv->bb_virt ? BE_RX_RING_MIN : BE_RX_RING_SIZE;
 	priv->num_tx_ring[RAVB_NC] = NC_TX_RING_SIZE;
 	priv->num_rx_ring[RAVB_NC] = NC_RX_RING_SIZE;
 	priv->addr = devm_ioremap_resource(&pdev->dev, res);
@@ -2197,8 +2371,9 @@ static int ravb_probe(struct platform_device *pdev)
 
 	/* Allocate descriptor base address table */
 	priv->desc_bat_size = sizeof(struct ravb_desc) * DBAT_ENTRY_NUM;
-	priv->desc_bat = dma_alloc_coherent(ndev->dev.parent, priv->desc_bat_size,
-					    &priv->desc_bat_dma, GFP_KERNEL);
+	priv->desc_bat = ravb_dma_alloc_coherent(ndev, priv->desc_bat_size,
+						 &priv->desc_bat_dma,
+						 GFP_KERNEL);
 	if (!priv->desc_bat) {
 		dev_err(&pdev->dev,
 			"Cannot allocate desc base address table (size %d bytes)\n",
@@ -2258,13 +2433,18 @@ out_napi_del:
 	netif_napi_del(&priv->napi[RAVB_BE]);
 	ravb_mdio_release(priv);
 out_dma_free:
-	dma_free_coherent(ndev->dev.parent, priv->desc_bat_size, priv->desc_bat,
-			  priv->desc_bat_dma);
+	ravb_dma_free_coherent(ndev, priv->desc_bat_size,
+			       priv->desc_bat, priv->desc_bat_dma);
 
 	/* Stop PTP Clock driver */
 	if (chip_id != RCAR_GEN2)
 		ravb_ptp_stop(ndev);
 out_release:
+	if (priv->bb_bitmap)
+		bitmap_free(priv->bb_bitmap);
+	if (priv->bb_virt)
+		iounmap(priv->bb_virt);
+
 	free_netdev(ndev);
 
 	pm_runtime_put(&pdev->dev);
@@ -2281,8 +2461,8 @@ static int ravb_remove(struct platform_device *pdev)
 	if (priv->chip_id != RCAR_GEN2)
 		ravb_ptp_stop(ndev);
 
-	dma_free_coherent(ndev->dev.parent, priv->desc_bat_size, priv->desc_bat,
-			  priv->desc_bat_dma);
+	ravb_dma_free_coherent(ndev, priv->desc_bat_size,
+			       priv->desc_bat, priv->desc_bat_dma);
 	/* Set reset mode */
 	ravb_write(ndev, CCC_OPC_RESET, CCC);
 	pm_runtime_put_sync(&pdev->dev);
@@ -2291,6 +2471,12 @@ static int ravb_remove(struct platform_device *pdev)
 	netif_napi_del(&priv->napi[RAVB_BE]);
 	ravb_mdio_release(priv);
 	pm_runtime_disable(&pdev->dev);
+
+	if (priv->bb_bitmap)
+		bitmap_free(priv->bb_bitmap);
+	if (priv->bb_virt)
+		iounmap(priv->bb_virt);
+
 	free_netdev(ndev);
 	platform_set_drvdata(pdev, NULL);
 
