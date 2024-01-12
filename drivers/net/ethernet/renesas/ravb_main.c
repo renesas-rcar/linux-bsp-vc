@@ -233,8 +233,7 @@ static void ravb_ring_free(struct net_device *ndev, int q)
 		for (i = 0; i < priv->num_rx_ring[q]; i++) {
 			struct ravb_ex_rx_desc *desc = &priv->rx_ring[q][i];
 
-			if (!dma_mapping_error(ndev->dev.parent,
-					       le32_to_cpu(desc->dptr)))
+			if (le16_to_cpu(desc->ds_cc) != 0)
 				dma_unmap_single(ndev->dev.parent,
 						 le32_to_cpu(desc->dptr),
 						 RX_BUF_SZ,
@@ -1506,7 +1505,7 @@ static netdev_tx_t ravb_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	struct ravb_tstamp_skb *ts_skb;
 	struct ravb_tx_desc *desc;
 	unsigned long flags;
-	u32 dma_addr;
+	dma_addr_t dma_addr;
 	void *buffer;
 	u32 entry;
 	u32 len;
