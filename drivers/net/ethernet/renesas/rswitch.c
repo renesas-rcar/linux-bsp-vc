@@ -1058,6 +1058,8 @@ struct rswitch_device {
 
 	int port;
 	struct rswitch_etha *etha;
+
+	struct net_device *brdev;	/* master bridge device */
 };
 
 struct rswitch_mfwd_mac_table_entry {
@@ -2481,6 +2483,17 @@ static const struct net_device_ops rswitch_netdev_ops = {
 	.ndo_set_mac_address = eth_mac_addr,
 };
 
+static bool rswitch_port_check(const struct net_device *ndev)
+{
+	struct rswitch_device *rdev;
+
+	if (ndev->netdev_ops != &rswitch_netdev_ops)
+		return false;
+
+	rdev = netdev_priv(ndev);
+	return !!rdev->etha;
+}
+
 static int rswitch_get_ts_info(struct net_device *ndev, struct ethtool_ts_info *info)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
@@ -3527,6 +3540,74 @@ static void rswitch_deinit(struct rswitch_private *priv)
 	rswitch_desc_free(priv);
 }
 
+static void rdev_join_bridge(struct rswitch_device *rdev,
+			    struct net_device *brdev)
+{
+	rdev->brdev = brdev;
+}
+
+static void rdev_leave_bridge(struct rswitch_device *rdev)
+{
+	rdev->brdev = NULL;
+}
+
+static int rswitch_netdevice_event(struct notifier_block *nb,
+				   unsigned long event, void *ptr)
+{
+	struct net_device *ndev = netdev_notifier_info_to_dev(ptr);
+	struct rswitch_device *rdev;
+	struct netdev_notifier_changeupper_info *info;
+
+	if (!rswitch_port_check(ndev))
+		return NOTIFY_DONE;
+	rdev = netdev_priv(ndev);
+
+	if (event != NETDEV_CHANGEUPPER)
+		return NOTIFY_DONE;
+	info = ptr;
+
+	if (!netif_is_bridge_master(info->upper_dev))
+		return NOTIFY_DONE;
+
+	if (info->linking)
+		rdev_join_bridge(rdev, info->upper_dev);
+	else
+		rdev_leave_bridge(rdev);
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block rswitch_netdevice_nb = {
+	.notifier_call = rswitch_netdevice_event,
+};
+static atomic_t rswitch_notifier_register_count;
+
+static int rswitch_register_notifiers(void)
+{
+	int ret;
+
+	if (atomic_inc_return(&rswitch_notifier_register_count) != 1)
+		return 0;
+
+	ret = register_netdevice_notifier(&rswitch_netdevice_nb);
+	if (ret)
+		goto register_netdevice_notifier_failed;
+
+	return 0;
+
+register_netdevice_notifier_failed:
+	atomic_dec(&rswitch_notifier_register_count);
+
+	return ret;
+}
+
+static void rswitch_unregister_notifiers(void)
+{
+	if (atomic_dec_return(&rswitch_notifier_register_count) == 0) {
+		unregister_netdevice_notifier(&rswitch_netdevice_nb);
+	}
+}
+
 static int renesas_eth_sw_probe(struct platform_device *pdev)
 {
 	struct rswitch_private *priv;
@@ -3616,7 +3697,17 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 		clk_enable(priv->phy_clk);
 	}
 
-	rswitch_init(priv);
+	ret = rswitch_init(priv);
+	if (ret)
+		return ret;
+
+	if (!parallel_mode) {
+		ret = rswitch_register_notifiers();
+		if (ret) {
+			rswitch_deinit(priv);
+			return ret;
+		}
+	}
 
 	device_set_wakeup_capable(&pdev->dev, 1);
 
@@ -3628,6 +3719,8 @@ static int renesas_eth_sw_remove(struct platform_device *pdev)
 	struct rswitch_private *priv = platform_get_drvdata(pdev);
 
 	if (!parallel_mode) {
+		rswitch_unregister_notifiers();
+
 		/* Disable R-Switch clock */
 		rs_write32(RCDC_RCD, priv->addr + RCDC);
 		rswitch_deinit(priv);
