@@ -9,6 +9,7 @@
 #include <linux/err.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
+#include <linux/if_bridge.h>
 #include <linux/if_vlan.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
@@ -26,6 +27,7 @@
 #include <linux/spinlock.h>
 #include <linux/reset.h>
 #include <linux/sys_soc.h>
+#include <net/switchdev.h>
 
 #include "rtsn_ptp.h"
 
@@ -1060,6 +1062,8 @@ struct rswitch_device {
 	struct rswitch_etha *etha;
 
 	struct net_device *brdev;	/* master bridge device */
+	unsigned int learning_requested : 1;
+	unsigned int forwarding_requested : 1;
 };
 
 struct rswitch_mfwd_mac_table_entry {
@@ -3551,6 +3555,13 @@ static void rdev_leave_bridge(struct rswitch_device *rdev)
 	rdev->brdev = NULL;
 }
 
+static void rdev_update_stp_state(struct rswitch_device *rdev, u8 stp_state)
+{
+	rdev->learning_requested = (stp_state == BR_STATE_LEARNING ||
+				    stp_state == BR_STATE_FORWARDING);
+	rdev->forwarding_requested = (stp_state == BR_STATE_FORWARDING);
+}
+
 static int rswitch_netdevice_event(struct notifier_block *nb,
 				   unsigned long event, void *ptr)
 {
@@ -3577,9 +3588,95 @@ static int rswitch_netdevice_event(struct notifier_block *nb,
 	return NOTIFY_OK;
 }
 
+static int rswitch_port_attr_set(struct net_device *ndev,
+				 const struct switchdev_attr *attr,
+				 struct switchdev_trans *trans)
+{
+	struct rswitch_device *rdev = netdev_priv(ndev);
+
+	switch (attr->id) {
+	case SWITCHDEV_ATTR_ID_PORT_STP_STATE:
+		if (switchdev_trans_ph_commit(trans))
+			rdev_update_stp_state(rdev, attr->u.stp_state);
+		return 0;
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int rswitch_port_obj_add(struct net_device *ndev,
+				const struct switchdev_obj *obj,
+				struct switchdev_trans *trans,
+				struct netlink_ext_ack *extack)
+{
+	return -EOPNOTSUPP;
+}
+
+static int rswitch_port_obj_del(struct net_device *ndev,
+				const struct switchdev_obj *obj)
+{
+	return -EOPNOTSUPP;
+}
+
+static int rswitch_switchdev_event(struct notifier_block *nb,
+				   unsigned long event, void *ptr)
+{
+	struct net_device *ndev = switchdev_notifier_info_to_dev(ptr);
+	int ret;
+
+	if (event == SWITCHDEV_PORT_ATTR_SET) {
+		ret = switchdev_handle_port_attr_set(ndev, ptr,
+						     rswitch_port_check,
+						     rswitch_port_attr_set);
+		return notifier_from_errno(ret);
+	}
+
+	if (!rswitch_port_check(ndev))
+		return NOTIFY_DONE;
+	return notifier_from_errno(-EOPNOTSUPP);
+}
+
+static int rswitch_switchdev_blocking_event(struct notifier_block *nb,
+					    unsigned long event, void *ptr)
+{
+	struct net_device *ndev = switchdev_notifier_info_to_dev(ptr);
+	int ret;
+
+	switch (event) {
+	case SWITCHDEV_PORT_OBJ_ADD:
+		ret = switchdev_handle_port_obj_add(ndev, ptr,
+						    rswitch_port_check,
+						    rswitch_port_obj_add);
+		break;
+	case SWITCHDEV_PORT_OBJ_DEL:
+		ret = switchdev_handle_port_obj_del(ndev, ptr,
+						    rswitch_port_check,
+						    rswitch_port_obj_del);
+		break;
+	case SWITCHDEV_PORT_ATTR_SET:
+		ret = switchdev_handle_port_attr_set(ndev, ptr,
+						     rswitch_port_check,
+						     rswitch_port_attr_set);
+		break;
+	default:
+		if (!rswitch_port_check(ndev))
+			return NOTIFY_DONE;
+		ret = -EOPNOTSUPP;
+	}
+
+	return notifier_from_errno(ret);
+}
+
 static struct notifier_block rswitch_netdevice_nb = {
 	.notifier_call = rswitch_netdevice_event,
 };
+static struct notifier_block rswitch_switchdev_nb = {
+	.notifier_call = rswitch_switchdev_event,
+};
+static struct notifier_block rswitch_switchdev_blocking_nb = {
+	.notifier_call = rswitch_switchdev_blocking_event,
+};
+
 static atomic_t rswitch_notifier_register_count;
 
 static int rswitch_register_notifiers(void)
@@ -3593,8 +3690,20 @@ static int rswitch_register_notifiers(void)
 	if (ret)
 		goto register_netdevice_notifier_failed;
 
+	ret = register_switchdev_notifier(&rswitch_switchdev_nb);
+	if (ret)
+		goto register_switchdev_notifier_failed;
+
+	ret = register_switchdev_blocking_notifier(&rswitch_switchdev_blocking_nb);
+	if (ret)
+		goto register_switchdev_blocking_notifier_failed;
+
 	return 0;
 
+register_switchdev_blocking_notifier_failed:
+	unregister_switchdev_notifier(&rswitch_switchdev_nb);
+register_switchdev_notifier_failed:
+	unregister_netdevice_notifier(&rswitch_netdevice_nb);
 register_netdevice_notifier_failed:
 	atomic_dec(&rswitch_notifier_register_count);
 
@@ -3604,6 +3713,8 @@ register_netdevice_notifier_failed:
 static void rswitch_unregister_notifiers(void)
 {
 	if (atomic_dec_return(&rswitch_notifier_register_count) == 0) {
+		unregister_switchdev_blocking_notifier(&rswitch_switchdev_blocking_nb);
+		unregister_switchdev_notifier(&rswitch_switchdev_nb);
 		unregister_netdevice_notifier(&rswitch_netdevice_nb);
 	}
 }
