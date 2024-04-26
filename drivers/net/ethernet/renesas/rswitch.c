@@ -47,6 +47,8 @@ static inline void rs_write32(u32 data, void *addr)
 #define RSWITCH_MAX_NUM_NDEV	8
 #define RSWITCH_MAX_NUM_CHAINS	128
 
+#define RSWITCH_MAC_ENTRY_W	10
+
 #define RSWITCH_SERDES_NUM	3
 
 #define RSWITCH_GWCA_IDX_TO_HW_NUM(i)	((i) + RSWITCH_MAX_NUM_ETHA)
@@ -820,6 +822,7 @@ enum rswitch_gwca_mode {
 #define FWPC0_IPDSA	BIT(12)
 #define FWPC0_IPHLA	BIT(18)
 #define FWPC0_MACSDA	BIT(20)
+#define FWPC0_MACSSA	BIT(23)
 #define FWPC0_MACHLA	BIT(26)
 #define FWPC0_MACHMA	BIT(27)
 #define FWPC0_VLANSA	BIT(28)
@@ -835,6 +838,11 @@ enum rswitch_gwca_mode {
 #define	FWPBFC_PBDV_MASK	GENMASK(RSWITCH_NUM_HW - 1, 0)
 
 #define FWPBFCSDC(j, i)         (FWPBFCSDC00 + (i) * 0x10 + (j) * 0x04)
+
+#define FWMACHEC_MACHMUE_MASK	GENMASK(16 + RSWITCH_MAC_ENTRY_W, 16)
+
+#define FWMACTIM_MACTIOG	BIT(0)
+#define FWMACTIM_MACTR		BIT(1)
 
 #define RSWITCH_SERDES_LOCAL_OFFSET             0x2600
 #define RSWITCH_SERDES_OFFSET                   0x0400
@@ -1063,7 +1071,9 @@ struct rswitch_device {
 
 	struct net_device *brdev;	/* master bridge device */
 	unsigned int learning_requested : 1;
+	unsigned int learning_offloaded : 1;
 	unsigned int forwarding_requested : 1;
+	unsigned int forwarding_offloaded : 1;
 };
 
 struct rswitch_mfwd_mac_table_entry {
@@ -1101,7 +1111,18 @@ struct rswitch_private {
 
 	spinlock_t lock;	/* lock interrupt registers' control */
 	struct clk *clk;
+
+	struct net_device *offload_brdev;
 };
+
+#define for_each_hw_rdev_from(_priv, _i, _from, _rdev) \
+	for (_i = _from; _i < ARRAY_SIZE(_priv->rdev); _i++) \
+		if ((_rdev = _priv->rdev[_i]) && _rdev->etha)
+
+#define for_each_hw_rdev(_priv, _i, _rdev) \
+	for_each_hw_rdev_from(_priv, _i, 0, _rdev)
+
+static void rswitch_update_l2_offload(struct rswitch_private *priv);
 
 static int num_etha_ports = 3;
 module_param(num_etha_ports, int, 0644);
@@ -2216,6 +2237,10 @@ static int rswitch_open(struct net_device *ndev)
 	iowrite32(GWCA_TS_IRQ_BIT, rdev->priv->addr + GWTSDIE);
 
 	rdev->priv->chan_running |= BIT(rdev->port);
+
+	if (rdev->brdev)
+		rswitch_update_l2_offload(rdev->priv);
+
 	return 0;
 };
 
@@ -2230,6 +2255,8 @@ static int rswitch_stop(struct net_device *ndev)
 	napi_disable(&rdev->napi);
 
 	rdev->priv->chan_running &= ~BIT(rdev->port);
+	if (rdev->brdev)
+		rswitch_update_l2_offload(rdev->priv);
 	if (!rdev->priv->chan_running)
 		iowrite32(GWCA_TS_IRQ_BIT, rdev->priv->addr + GWTSDID);
 
@@ -3366,9 +3393,9 @@ static int rswitch_gwca_ts_request_irqs(struct rswitch_private *priv)
 				0, GWCA_TS_IRQ_NAME, priv);
 }
 
-static void rswitch_fwd_init(struct rswitch_private *priv)
+static int rswitch_fwd_init(struct rswitch_private *priv)
 {
-	int i;
+	int i, ret;
 	int gwca_hw_idx = RSWITCH_HW_NUM_TO_GWCA_IDX(priv->gwca.index);
 	u32 all_ports = GENMASK(RSWITCH_NUM_HW - 1, 0);
 
@@ -3402,8 +3429,21 @@ static void rswitch_fwd_init(struct rswitch_private *priv)
 	/* For GWCA port, allow direct descriptors */
 	rswitch_modify(priv->addr, FWPC1(priv->gwca.index), 0, FWPC1_DDE);
 
+	/* Initialize hardware L2 forwarding table */
+
+	/* Allow entire table to be used for "unsecure" entries */
+	rswitch_modify(priv->addr, FWMACHEC, 0, FWMACHEC_MACHMUE_MASK);
+
+	/* Initialize MAC hash table */
+	rs_write32(FWMACTIM_MACTIOG, priv->addr + FWMACTIM);
+	ret = rswitch_reg_wait(priv->addr, FWMACTIM, FWMACTIM_MACTIOG, 0);
+	if (ret)
+		return ret;
+
 	/* TODO: add chrdev for fwd */
 	/* TODO: add proc for fwd */
+
+	return 0;
 }
 
 static int rswitch_init(struct rswitch_private *priv)
@@ -3468,7 +3508,10 @@ static int rswitch_init(struct rswitch_private *priv)
 			goto out;
 
 		rswitch_coma_init(priv);
-		rswitch_fwd_init(priv);
+
+		err = rswitch_fwd_init(priv);
+		if (err < 0)
+			goto out;
 	}
 
 	err = rtsn_ptp_init(priv->ptp_priv, RTSN_PTP_REG_LAYOUT_S4, RTSN_PTP_CLOCK_S4);
@@ -3544,15 +3587,140 @@ static void rswitch_deinit(struct rswitch_private *priv)
 	rswitch_desc_free(priv);
 }
 
+static bool rdev_for_l2_offload(struct rswitch_device *rdev)
+{
+	return rdev->priv->offload_brdev &&
+	       rdev->brdev == rdev->priv->offload_brdev &&
+	       (rdev->priv->chan_running & BIT(rdev->port));
+}
+
+static void rswitch_update_l2_offload(struct rswitch_private *priv)
+{
+	struct rswitch_device *rdev;
+	unsigned int i, all_ports_mask, fwd_mask;
+	bool learning_needed, forwarding_needed;
+
+	/* calculate fwd_mask with zeroes in bits corresponding to ports that
+	 * shall participate in hardware forwarding */
+	all_ports_mask = GENMASK(RSWITCH_NUM_HW - 1, 0);
+	fwd_mask = all_ports_mask;
+	for_each_hw_rdev(priv, i, rdev) {
+		if (rdev_for_l2_offload(rdev) && rdev->forwarding_requested)
+			fwd_mask &= ~BIT(rdev->port);
+	}
+
+	for_each_hw_rdev(priv, i, rdev) {
+		if (rdev_for_l2_offload(rdev)) {
+			learning_needed = rdev->learning_requested;
+			forwarding_needed = rdev->forwarding_requested;
+		} else {
+			learning_needed = false;
+			forwarding_needed = false;
+		}
+
+		if (!rdev->learning_offloaded && learning_needed) {
+			rswitch_modify(priv->addr, FWPC0(rdev->port),
+				0,
+				FWPC0_MACSSA | FWPC0_MACHLA | FWPC0_MACHMA);
+
+			rdev->learning_offloaded = true;
+			netdev_info(rdev->ndev, "starting hw learning\n");
+		}
+		if (rdev->learning_offloaded && !learning_needed) {
+			rswitch_modify(priv->addr, FWPC0(rdev->port),
+				FWPC0_MACSSA | FWPC0_MACHLA | FWPC0_MACHMA,
+				0);
+
+			rdev->learning_offloaded = false;
+			netdev_info(rdev->ndev, "stopping hw learning\n");
+		}
+
+		if (forwarding_needed) {
+			/* Update allowed offload destinations even for ports
+			 * with l2 offload enabled earlier.
+			 *
+			 * Do not allow L2 forwarding to self for hw port. */
+			rs_write32(FIELD_PREP(FWCP2_LTWFW_MASK,
+					      fwd_mask | BIT(rdev->port)),
+					priv->addr + FWPC2(i));
+
+			if (!rdev->forwarding_offloaded) {
+				rswitch_modify(priv->addr, FWPC0(rdev->port),
+					0,
+					FWPC0_MACSDA);
+
+				rdev->forwarding_offloaded = true;
+				netdev_info(rdev->ndev,
+						"starting hw forwarding\n");
+			}
+		} else if (rdev->forwarding_offloaded) {
+			rs_write32(FIELD_PREP(FWCP2_LTWFW_MASK, all_ports_mask),
+					priv->addr + FWPC2(i));
+
+			rswitch_modify(priv->addr, FWPC0(rdev->port),
+				FWPC0_MACSDA,
+				0);
+
+			rdev->forwarding_offloaded = false;
+			netdev_info(rdev->ndev, "stopping hw forwarding\n");
+		}
+	}
+}
+
+static void rswitch_update_offload_brdev(struct rswitch_private *priv)
+{
+	struct rswitch_device *rdev, *rdev2;
+	unsigned int i, i2;
+	struct net_device *offload_brdev = NULL;
+
+	for_each_hw_rdev(priv, i, rdev) {
+		if (!rdev->brdev)
+			continue;
+		for_each_hw_rdev_from(priv, i2, i + 1, rdev2) {
+			if (rdev2->brdev == rdev->brdev) {
+				offload_brdev = rdev->brdev;
+				break;
+			}
+		}
+		if (offload_brdev)
+			break;
+	}
+
+	if (offload_brdev == priv->offload_brdev)
+		return;
+
+	if (offload_brdev && !priv->offload_brdev)
+		dev_info(&priv->pdev->dev, "starting l2 offload for %s\n",
+				netdev_name(offload_brdev));
+	else if (!offload_brdev && priv->offload_brdev)
+		dev_info(&priv->pdev->dev, "stopping l2 offload for %s\n",
+				netdev_name(priv->offload_brdev));
+	else
+		dev_info(&priv->pdev->dev,
+				"changing l2 offload from %s to %s\n",
+				netdev_name(priv->offload_brdev),
+				netdev_name(offload_brdev));
+
+	priv->offload_brdev = offload_brdev;
+
+	/* FIXME: drop hw l2 table on bridge change? */
+
+	rswitch_update_l2_offload(priv);
+}
+
 static void rdev_join_bridge(struct rswitch_device *rdev,
 			    struct net_device *brdev)
 {
 	rdev->brdev = brdev;
+
+	rswitch_update_offload_brdev(rdev->priv);
 }
 
 static void rdev_leave_bridge(struct rswitch_device *rdev)
 {
 	rdev->brdev = NULL;
+
+	rswitch_update_offload_brdev(rdev->priv);
 }
 
 static void rdev_update_stp_state(struct rswitch_device *rdev, u8 stp_state)
@@ -3560,6 +3728,8 @@ static void rdev_update_stp_state(struct rswitch_device *rdev, u8 stp_state)
 	rdev->learning_requested = (stp_state == BR_STATE_LEARNING ||
 				    stp_state == BR_STATE_FORWARDING);
 	rdev->forwarding_requested = (stp_state == BR_STATE_FORWARDING);
+
+	rswitch_update_l2_offload(rdev->priv);
 }
 
 static int rswitch_netdevice_event(struct notifier_block *nb,
@@ -3957,8 +4127,9 @@ static int __maybe_unused rswitch_resume(struct device *dev)
 		if (ret)
 			return ret;
 
-		rswitch_fwd_init(priv);
-
+		ret = rswitch_fwd_init(priv);
+		if (ret)
+			return ret;
 	}
 
 	ret = rtsn_ptp_init(priv->ptp_priv, RTSN_PTP_REG_LAYOUT_S4, RTSN_PTP_CLOCK_S4);
