@@ -284,11 +284,7 @@ int phy_ethtool_ksettings_set(struct phy_device *phydev,
 		return -EINVAL;
 
 	if (autoneg == AUTONEG_DISABLE &&
-	    ((speed != SPEED_1000 &&
-	      speed != SPEED_100 &&
-	      speed != SPEED_10) ||
-	     (duplex != DUPLEX_HALF &&
-	      duplex != DUPLEX_FULL)))
+			!phy_check_valid(speed, duplex, phydev->supported))
 		return -EINVAL;
 
 	phydev->autoneg = autoneg;
