@@ -1087,10 +1087,6 @@ struct rswitch_private {
 	struct clk *clk;
 };
 
-static int num_ndev = 3;
-module_param(num_ndev, int, 0644);
-MODULE_PARM_DESC(num_ndev, "Number of creating network devices");
-
 static int num_etha_ports = 3;
 module_param(num_etha_ports, int, 0644);
 MODULE_PARM_DESC(num_etha_ports, "Number of using ETHA ports");
@@ -3302,14 +3298,14 @@ static int rswitch_init(struct rswitch_private *priv)
 	/* Hardware initializations */
 	if (!parallel_mode)
 		rswitch_clock_enable(priv);
-	for (i = 0; i < num_ndev; i++)
+	for (i = 0; i < num_etha_ports; i++)
 		rswitch_etha_read_mac_address(&priv->etha[i]);
 	rswitch_reset(priv);
 	err = rswitch_gwca_hw_init(priv);
 	if (err < 0)
 		goto out;
 
-	for (i = 0; i < num_ndev; i++) {
+	for (i = 0; i < num_etha_ports; i++) {
 		err = rswitch_ndev_create(priv, i);
 		if (err < 0)
 			goto out;
@@ -3338,7 +3334,7 @@ static int rswitch_init(struct rswitch_private *priv)
 		goto out;
 	/* Register devices so Linux network stack can access them now */
 
-	for (i = 0; i < num_ndev; i++) {
+	for (i = 0; i < num_etha_ports; i++) {
 		err = register_netdev(priv->rdev[i]->ndev);
 		if (err)
 			goto out;
@@ -3347,7 +3343,7 @@ static int rswitch_init(struct rswitch_private *priv)
 	return 0;
 
 out:
-	for (i--; i >= 0; i--)
+	for (i = 0; i < num_etha_ports; i++)
 		rswitch_ndev_unregister(priv, i);
 
 err_ts_queue_alloc:
@@ -3370,7 +3366,7 @@ static void rswitch_deinit(struct rswitch_private *priv)
 {
 	int i;
 
-	for (i = 0; i < num_ndev; i++) {
+	for (i = 0; i < num_etha_ports; i++) {
 		rswitch_deinit_rdev(priv, i);
 		rswitch_ndev_unregister(priv, i);
 	}
@@ -3410,10 +3406,8 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 	if (!parallel_mode)
 		parallel_mode = of_property_read_bool(pdev->dev.of_node, "parallel_mode");
 
-	if (parallel_mode) {
-		num_ndev = 1;
+	if (parallel_mode)
 		num_etha_ports = 1;
-	}
 
 	priv->ptp_priv->parallel_mode = parallel_mode;
 
@@ -3458,7 +3452,7 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 
 	/* Fixed to use GWCA1 */
 	priv->gwca.index = 4;
-	priv->gwca.num_chains = num_ndev * NUM_CHAINS_PER_NDEV;
+	priv->gwca.num_chains = num_etha_ports * NUM_CHAINS_PER_NDEV;
 	priv->gwca.chains = devm_kcalloc(&pdev->dev, priv->gwca.num_chains,
 					 sizeof(*priv->gwca.chains), GFP_KERNEL);
 	if (!priv->gwca.chains)
@@ -3505,7 +3499,7 @@ static int __maybe_unused rswitch_suspend(struct device *dev)
 	struct rswitch_private *priv = dev_get_drvdata(dev);
 	int i;
 
-	for (i = 0; i < num_ndev; i++) {
+	for (i = 0; i < num_etha_ports; i++) {
 		struct net_device *ndev = priv->rdev[i]->ndev;
 
 		if (priv->rdev[i]->tx_chain->index < 0)
@@ -3605,7 +3599,7 @@ static int __maybe_unused rswitch_resume(struct device *dev)
 	if (ret)
 		return ret;
 
-	for (i = 0; i < num_ndev; i++) {
+	for (i = 0; i < num_etha_ports; i++) {
 		struct net_device *ndev = priv->rdev[i]->ndev;
 
 		if (priv->rdev[i]->tx_chain->index >= 0) {
@@ -3619,7 +3613,7 @@ static int __maybe_unused rswitch_resume(struct device *dev)
 		}
 	}
 
-	if (err == num_ndev) {
+	if (err == num_etha_ports) {
 		rswitch_gwca_ts_queue_free(priv);
 		rswitch_desc_free(priv);
 
