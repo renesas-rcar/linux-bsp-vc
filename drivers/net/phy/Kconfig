@@ -207,6 +207,9 @@ config MARVELL_88Q2XXX_PHY
 	  Support for the Marvell 88Q2XXX 100/1000BASE-T1 Automotive Ethernet
 	  PHYs.
 
+config MARVELL_88Q2110_PHY
+	tristate "Proprietary driver for Marvell 88Q2110 PHY"
+
 config MICREL_PHY
 	tristate "Micrel PHYs"
 	help
