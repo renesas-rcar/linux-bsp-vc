@@ -999,6 +999,7 @@ struct rswitch_etha {
 	enum rswitch_etha_mode mode;
 	u32 psmcs;
 	u8 mac_addr[MAX_ADDR_LEN];
+	bool mac_addr_write_pending;
 	int link;
 	int speed;
 	bool needs_usgmii_serdes_check;
@@ -1491,6 +1492,15 @@ static void rswitch_etha_read_mac_address(struct rswitch_etha *etha)
 	mac[3] = (mrmac1 >> 16) & 0xFF;
 	mac[4] = (mrmac1 >>  8) & 0xFF;
 	mac[5] = (mrmac1 >>  0) & 0xFF;
+}
+
+static void rswitch_etha_write_mac_address(struct rswitch_etha *etha)
+{
+	u8 *mac = &etha->mac_addr[0];
+
+        iowrite32((mac[0] << 8) | mac[1], etha->addr + MRMAC0);
+        iowrite32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5],
+                  etha->addr + MRMAC1);
 }
 
 static bool rswitch_etha_wait_link_verification(struct rswitch_etha *etha)
@@ -2067,7 +2077,8 @@ static void rswitch_etha_start(struct net_device *ndev)
 	struct rswitch_etha *etha = rdev->etha;
 	int err;
 
-	if (etha->speed != ndev->phydev->speed) {
+	if (etha->speed != ndev->phydev->speed ||
+	    etha->mac_addr_write_pending) {
 		if (etha->mode != EAMC_OPC_DISABLE) {
 			netdev_warn(ndev, "start: unexpected etha mode\n");
 			return;
@@ -2079,8 +2090,15 @@ static void rswitch_etha_start(struct net_device *ndev)
 			return;
 		}
 
-		etha->speed = ndev->phydev->speed;
-		rswitch_etha_pis_lsc_setting(etha);
+		if (etha->speed != ndev->phydev->speed) {
+			etha->speed = ndev->phydev->speed;
+			rswitch_etha_pis_lsc_setting(etha);	/* with updated etha->speed */
+		}
+
+		if (etha->mac_addr_write_pending) {
+			rswitch_etha_write_mac_address(etha);
+			etha->mac_addr_write_pending = false;
+		}
 
 		err = rswitch_etha_change_mode(etha, EAMC_OPC_DISABLE);
 		if (err) {
@@ -2502,6 +2520,23 @@ static int rswitch_get_phys_port_name(struct net_device *ndev,
 	return 0;
 }
 
+int rswitch_set_mac_address(struct net_device *ndev, void *p)
+{
+	struct rswitch_device *rdev = netdev_priv(ndev);
+	int ret;
+
+	ret = eth_mac_addr(ndev, p);
+
+	if (ret == 0 && rdev->etha) {
+		/* eth_mac_addr() will reject if netdev is up, thus deferring
+		 * write to hardware till next link up is ok */
+		ether_addr_copy(rdev->etha->mac_addr, ndev->dev_addr);
+		rdev->etha->mac_addr_write_pending = true;
+	}
+
+	return ret;
+}
+
 static const struct net_device_ops rswitch_netdev_ops = {
 	.ndo_open = rswitch_open,
 	.ndo_stop = rswitch_stop,
@@ -2511,7 +2546,7 @@ static const struct net_device_ops rswitch_netdev_ops = {
 	.ndo_get_port_parent_id = rswitch_get_port_parent_id,
 	.ndo_get_phys_port_name = rswitch_get_phys_port_name,
 	.ndo_validate_addr = eth_validate_addr,
-	.ndo_set_mac_address = eth_mac_addr,
+	.ndo_set_mac_address = rswitch_set_mac_address,
 };
 
 static bool rswitch_port_check(const struct net_device *ndev)
@@ -3100,7 +3135,7 @@ static void rswitch_rxdmac_free(struct net_device *ndev,
 	rswitch_gwca_put(priv, rdev->rx_chain);
 }
 
-static void rswitch_set_mac_address(struct rswitch_device *rdev)
+static void rswitch_init_mac_address(struct rswitch_device *rdev)
 {
 	struct net_device *ndev = rdev->ndev;
 	const u8 *mac;
@@ -3135,11 +3170,16 @@ static void rswitch_set_mac_address(struct rswitch_device *rdev)
 		}
 	}
 
-	if (!is_valid_ether_addr(ndev->dev_addr))
+	if (!is_valid_ether_addr(ndev->dev_addr) && rdev->etha)
 		ether_addr_copy(ndev->dev_addr, rdev->etha->mac_addr);
 
 	if (!is_valid_ether_addr(ndev->dev_addr))
 		eth_hw_addr_random(ndev);
+
+	if (rdev->etha) {
+		ether_addr_copy(rdev->etha->mac_addr, ndev->dev_addr);
+		rdev->etha->mac_addr_write_pending = true;
+	}
 }
 
 static int rswitch_ndev_create(struct rswitch_private *priv, int index)
@@ -3184,7 +3224,7 @@ static int rswitch_ndev_create(struct rswitch_private *priv, int index)
 
 	netif_napi_add(ndev, &rdev->napi, rswitch_poll, 64);
 
-	rswitch_set_mac_address(rdev);
+	rswitch_init_mac_address(rdev);
 
 	/* FIXME: it seems S4 VPF has FWPBFCSDC0/1 only so that we cannot set
 	 * CSD = 1 (rx_chain->index = 1) for FWPBFCS03. So, use index = 0
