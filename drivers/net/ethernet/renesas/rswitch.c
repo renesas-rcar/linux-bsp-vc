@@ -11,6 +11,7 @@
 #include <linux/ethtool.h>
 #include <linux/if_bridge.h>
 #include <linux/if_vlan.h>
+#include <linux/ip.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/module.h>
@@ -830,7 +831,6 @@ enum rswitch_gwca_mode {
 #define FWPC0_IP4TE	BIT(4)
 #define FWPC0_IP4OE	BIT(5)
 #define FWPC0_L2SE	BIT(9)
-#define FWPC0_IP4EA	BIT(10)
 #define FWPC0_IPDSA	BIT(12)
 #define FWPC0_IPHLA	BIT(18)
 #define FWPC0_MACSDA	BIT(20)
@@ -1176,6 +1176,8 @@ struct rswitch_device {
 	struct list_head ipv4_local_route_list;
 	struct list_head ipv4_bcast_route_list;
 	struct list_head ipv4_ucast_route_list;
+
+	unsigned int l3_offload_enabled : 1;
 };
 
 struct rswitch_mfwd_mac_table_entry {
@@ -1268,6 +1270,11 @@ struct rswitch_ipv4_dst_offload {
 	for_each_hw_rdev_from(_priv, _i, 0, _rdev)
 
 static void rswitch_update_l2_offload(struct rswitch_private *priv);
+static void rswitch_update_l3_offload(struct rswitch_private *priv);
+static void rswitch_handle_l3_learning(struct rswitch_device *rdev,
+		struct sk_buff *skb);
+static void rdev_cleanup_ipv4_offloads_all(struct rswitch_device *rdev);
+
 
 static int num_etha_ports = 3;
 module_param(num_etha_ports, int, 0644);
@@ -2402,6 +2409,8 @@ static int rswitch_open(struct net_device *ndev)
 
 	if (rdev->brdev)
 		rswitch_update_l2_offload(rdev->priv);
+	if (!netdev_has_any_upper_dev(ndev))
+		rswitch_update_l3_offload(rdev->priv);
 
 	return 0;
 };
@@ -2419,6 +2428,8 @@ static int rswitch_stop(struct net_device *ndev)
 	rdev->priv->chan_running &= ~BIT(rdev->port);
 	if (rdev->brdev)
 		rswitch_update_l2_offload(rdev->priv);
+	if (!netdev_has_any_upper_dev(ndev))
+		rswitch_update_l3_offload(rdev->priv);
 	if (!rdev->priv->chan_running)
 		iowrite32(GWCA_TS_IRQ_BIT, rdev->priv->addr + GWTSDID);
 
@@ -2445,6 +2456,9 @@ static int rswitch_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	int i, num_desc, pkt_len, size;
 
 	spin_lock_irqsave(&rdev->lock, flags);
+
+	if (rdev->l3_offload_enabled)
+		rswitch_handle_l3_learning(rdev, skb);
 
 	num_desc = skb->len % MAX_DESC_SZ ? skb->len / MAX_DESC_SZ + 1 : skb->len / MAX_DESC_SZ;
 
@@ -3820,6 +3834,12 @@ static bool rdev_for_l2_offload(struct rswitch_device *rdev)
 	       (rdev->priv->chan_running & BIT(rdev->port));
 }
 
+static bool rdev_for_l3_offload(struct rswitch_device *rdev)
+{
+	return (rdev->priv->chan_running & BIT(rdev->port)) &&
+	       !netdev_has_any_upper_dev(rdev->ndev);
+}
+
 static void rswitch_update_l2_offload(struct rswitch_private *priv)
 {
 	struct rswitch_device *rdev;
@@ -3934,6 +3954,59 @@ static void rswitch_update_offload_brdev(struct rswitch_private *priv)
 	rswitch_update_l2_offload(priv);
 }
 
+static void rswitch_update_l3_offload(struct rswitch_private *priv)
+{
+	struct rswitch_device *rdev;
+	unsigned int i, all_ports_mask, l3_ports_count, l3_ports_mask;
+
+	all_ports_mask = GENMASK(RSWITCH_NUM_HW - 1, 0);
+
+	l3_ports_count = 0;
+	l3_ports_mask = all_ports_mask;
+	for_each_hw_rdev(priv, i, rdev) {
+		if (rdev_for_l3_offload(rdev)) {
+			l3_ports_count++;
+			l3_ports_mask &= ~BIT(rdev->port);
+		}
+	}
+
+	for_each_hw_rdev(priv, i, rdev) {
+#define FWPC0_L3_MASK (FWPC0_LTHTA | \
+		       FWPC0_IP4UE | FWPC0_IP4TE | FWPC0_IP4OE)
+		if (rdev_for_l3_offload(rdev) && l3_ports_count >= 2) {
+			/* Update allowed offload destinations even for ports
+			 * with l3 offload enabled earlier.
+			 *
+			 * Allow offload routing to self for hw port. */
+			rswitch_modify(priv->addr, FWPC1(rdev->port),
+				FWCP1_LTHFW_MASK,
+				FIELD_PREP(FWCP1_LTHFW_MASK, l3_ports_mask));
+			if (!rdev->l3_offload_enabled) {
+				rswitch_modify(priv->addr, FWPC0(rdev->port),
+					0,
+					FWPC0_L3_MASK);
+				rdev->l3_offload_enabled = 1;
+				netdev_info(rdev->ndev, "starting l3 offload\n");
+			}
+		} else if (rdev->l3_offload_enabled) {
+			rswitch_modify(priv->addr, FWPC0(rdev->port),
+				FWPC0_L3_MASK,
+				0);
+			rswitch_modify(priv->addr, FWPC1(rdev->port),
+				FWCP1_LTHFW_MASK,
+				FIELD_PREP(FWCP1_LTHFW_MASK, all_ports_mask));
+
+			rdev->l3_offload_enabled = 0;
+
+			/* cleanup any offloads at disable */
+			rdev_cleanup_ipv4_offloads_all(rdev);
+
+			netdev_info(rdev->ndev, "stopping l3 offload\n");
+		}
+#undef FWPC0_L3_MASK
+	}
+}
+
 static void rdev_join_bridge(struct rswitch_device *rdev,
 			    struct net_device *brdev)
 {
@@ -3980,6 +4053,8 @@ static int rswitch_netdevice_event(struct notifier_block *nb,
 		rdev_join_bridge(rdev, info->upper_dev);
 	else
 		rdev_leave_bridge(rdev);
+
+	rswitch_update_l3_offload(rdev->priv);
 
 	return NOTIFY_OK;
 }
@@ -4303,6 +4378,226 @@ static void rswitch_put_l23update(struct rswitch_private *priv,
 	spin_unlock(&priv->l3_lock);
 }
 
+static inline bool addr4_in_range(__be32 addr,
+		__be32 range_addr, __be32 range_mask)
+{
+	return (addr & range_mask) == (range_addr & range_mask);
+}
+
+static inline bool addr4_ranges_intersect(__be32 addr1, __be32 mask1,
+		__be32 addr2, __be32 mask2)
+{
+	/* Two addr/mask ranges intersect when their addrs ANDed
+	 * with wider mask (=one with more zeroes) are the same */
+	__be32 wider_mask = mask1 & mask2;
+	return (addr1 & wider_mask) == (addr2 & wider_mask);
+}
+
+/* expected call under rswitch_device lock */
+static inline bool addr4_in_exception_list(__be32 addr, struct list_head *list)
+{
+	struct rswitch_ipv4_route_exception *entry;
+
+	list_for_each_entry(entry, list, list) {
+		if (entry->addr == addr)
+			return true;
+	}
+
+	return false;
+}
+
+/* called under rswitch_device lock */
+static struct rswitch_ipv4_route *rdev_lookup_ipv4_ucast_route(
+		struct rswitch_device *rdev, __be32 addr)
+{
+	struct rswitch_ipv4_route *route;
+
+	list_for_each_entry(route, &rdev->ipv4_ucast_route_list, list) {
+		if (addr4_in_range(addr, route->addr, route->mask))
+			return route;
+	}
+
+	return NULL;
+}
+
+/* called under rswitch_device lock */
+static struct rswitch_ipv4_dst_offload *rdev_lookup_ipv4_dst_offload(
+		struct rswitch_ipv4_route *route, __be32 addr)
+{
+	struct rswitch_ipv4_dst_offload *offload;
+
+	list_for_each_entry(offload, &route->offload_list, list) {
+		if (offload->addr == addr)
+			return offload;
+	}
+
+	return NULL;
+}
+
+/* called under rswitch_device lock */
+static struct rswitch_ipv4_dst_offload *rdev_add_ipv4_dst_offload(
+		struct rswitch_device *rdev,
+		struct rswitch_ipv4_route *route,
+		__be32 addr,
+		struct rswitch_l23update_spec *spec)
+{
+	struct rswitch_ipv4_dst_offload *offload;
+
+	offload = kzalloc(sizeof(*offload), GFP_ATOMIC);
+	if (!offload)
+		return NULL;
+
+	offload->update = rswitch_get_l23update(rdev->priv, spec);
+	if (!offload->update) {
+		kfree(offload);
+		return NULL;
+	}
+
+	offload->addr = addr;
+	list_add_tail(&offload->list, &route->offload_list);
+	return offload;
+}
+
+/* called under rswitch_device lock */
+static void rdev_remove_ipv4_dst_offload(struct rswitch_device *rdev,
+		struct rswitch_ipv4_route *route,
+		struct rswitch_ipv4_dst_offload *offload)
+{
+	unsigned long types_offloaded = offload->types_offloaded;
+	u8 frame_type;
+
+	for_each_set_bit(frame_type, &types_offloaded, BITS_PER_LONG) {
+		rswitch_ipv4_dst_offload_hw_op(rdev,
+				offload, frame_type, false);
+	}
+	if (offload->types_offloaded) {
+		/* FIXME: what to do if failed? rebuild l3 table? */
+		dev_err(&rdev->priv->pdev->dev,
+			"further operation unreliable\n");
+	}
+
+	list_del(&offload->list);
+	rswitch_put_l23update(rdev->priv, offload->update);
+	kfree(offload);
+}
+
+/* called under rswitch_device lock */
+static void rswitch_handle_l3_learning(struct rswitch_device *rdev,
+		struct sk_buff *skb)
+{
+	struct ethhdr *ethhdr = (struct ethhdr *)skb->data;
+	struct iphdr *iphdr;
+	__be32 src_addr, dst_addr;
+	struct rswitch_ipv4_route *route;
+	struct rswitch_ipv4_dst_offload *offload;
+	u8 frame_type;
+
+	if (ethhdr->h_proto != cpu_to_be16(ETH_P_IP))
+		return;
+	iphdr = (struct iphdr *)(ethhdr + 1);
+	src_addr = iphdr->saddr;
+	dst_addr = iphdr->daddr;
+
+	/* Packets from local address are not subject for learning */
+	if (addr4_in_exception_list(src_addr, &rdev->ipv4_local_route_list))
+		return;
+
+	/* Packet to local address? Why? */
+	if (addr4_in_exception_list(dst_addr, &rdev->ipv4_local_route_list))
+		return;
+
+	/* Packets to broadcast destination are not subject for learning */
+	if (addr4_in_exception_list(dst_addr, &rdev->ipv4_bcast_route_list))
+		return;
+
+	/* Lookup route to learn for */
+	route = rdev_lookup_ipv4_ucast_route(rdev, dst_addr);
+	if (!route)
+		return;
+
+	/* Packet is candidate for offload (and not offloaded yet) */
+
+	offload = rdev_lookup_ipv4_dst_offload(route, dst_addr);
+	if (offload) {
+		/* TODO: verify that ethhdr->h_dest matches offload's */
+	} else {
+		/* TODO: verify that ethhdr->h_dest matches neighbour table
+		 *       for route->gw_addr (if defined) or dst_addr */
+		struct rswitch_l23update_spec spec;
+
+		ether_addr_copy(spec.dst_mac, ethhdr->h_dest);
+		offload = rdev_add_ipv4_dst_offload(rdev,
+				route, dst_addr, &spec);
+		if (!offload)
+			return;
+	}
+
+	if (iphdr->protocol == IPPROTO_TCP)
+		frame_type = RSWITCH_FRAME_TYPE_IPV4_TCP;
+	else if (iphdr->protocol == IPPROTO_UDP)
+		frame_type = RSWITCH_FRAME_TYPE_IPV4_UDP;
+	else
+		frame_type = RSWITCH_FRAME_TYPE_IPV4_OTHER;
+
+	if (offload->types_offloaded & BIT(frame_type))
+		return;
+
+	if (!rswitch_ipv4_dst_offload_hw_op(rdev, offload, frame_type, true)) {
+		/* FIXME: what to do if failed? rebuild l3 table? */
+		dev_err(&rdev->priv->pdev->dev,
+			"further operation unreliable\n");
+	}
+}
+
+
+/* called under rswitch_device lock */
+static void rdev_cleanup_ipv4_route_offloads(struct rswitch_device *rdev,
+		struct rswitch_ipv4_route *route,
+		__be32 addr, __be32 mask)
+{
+	struct rswitch_ipv4_dst_offload *offload, *tmp;
+
+	list_for_each_entry_safe(offload, tmp, &route->offload_list, list) {
+		if (addr4_in_range(offload->addr, addr, mask))
+			rdev_remove_ipv4_dst_offload(rdev, route, offload);
+	}
+}
+
+/* called under rswitch_device lock */
+static void rdev_cleanup_ipv4_offloads_from(struct rswitch_device *rdev,
+		struct list_head *pos,
+		__be32 addr, __be32 mask)
+{
+	struct rswitch_ipv4_route *route;
+
+	while (pos != &rdev->ipv4_ucast_route_list) {
+		route = list_entry(pos, typeof(*route), list);
+		if (addr4_ranges_intersect(addr, mask,
+					route->addr, route->mask))
+			rdev_cleanup_ipv4_route_offloads(rdev, route,
+					addr, mask);
+		pos = pos->next;
+	}
+}
+
+/* called under rswitch_device lock */
+static void rdev_cleanup_ipv4_offloads_addr(struct rswitch_device *rdev,
+		__be32 addr)
+{
+	rdev_cleanup_ipv4_offloads_from(rdev,
+			rdev->ipv4_ucast_route_list.next, addr, 0xffffffff);
+}
+
+static void rdev_cleanup_ipv4_offloads_all(struct rswitch_device *rdev)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&rdev->lock, flags);
+	rdev_cleanup_ipv4_offloads_from(rdev,
+			rdev->ipv4_ucast_route_list.next, 0, 0);
+	spin_unlock_irqrestore(&rdev->lock, flags);
+}
+
 /* called under rswitch_device lock */
 static void rdev_ipv4_update_route(struct rswitch_device *rdev,
 		__be32 addr, __be32 mask, __be32 gw_addr, bool keep)
@@ -4327,7 +4622,10 @@ static void rdev_ipv4_update_route(struct rswitch_device *rdev,
 	if (!found && !keep)
 		return;
 
+	rdev_cleanup_ipv4_offloads_from(rdev, pos, addr, mask);
+
 	if (found && !keep) {
+		BUG_ON(!list_empty(&route->offload_list));
 		list_del(&route->list);
 		kfree(route);
 		return;
@@ -4362,6 +4660,7 @@ static void rdev_ipv4_update_route_exception(struct rswitch_device *rdev,
 				list_del(&entry->list);
 				kfree(entry);
 			}
+			/* there is/was entry => addr is not in any offloads */
 			return;
 		}
 	}
@@ -4377,6 +4676,9 @@ static void rdev_ipv4_update_route_exception(struct rswitch_device *rdev,
 
 		entry->addr = addr;
 		list_add_tail(&entry->list, list);
+
+		/* addr could be in existing offloads */
+		rdev_cleanup_ipv4_offloads_addr(rdev, addr);
 	}
 }
 
