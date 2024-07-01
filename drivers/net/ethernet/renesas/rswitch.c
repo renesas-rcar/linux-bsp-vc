@@ -45,12 +45,21 @@ static inline void rs_write32(u32 data, void *addr)
 #define RSWITCH_NUM_HW		5
 #define RSWITCH_MAX_NUM_ETHA	3
 #define RSWITCH_MAX_NUM_NDEV	8
-#define RSWITCH_MAX_NUM_CHAINS	128
+
+#define RSWITCH_AXI_CHAIN_W	7
+#define RSWITCH_MAX_NUM_CHAINS	(1 << RSWITCH_AXI_CHAIN_W)
 
 #define RSWITCH_MAC_ENTRY_W	10
 
+#define RSWITCH_LTH_STREAM_W	10
+
 #define RSWITCH_LTH_RRULE_W	8
 #define RSWITCH_MAX_NUM_RRULE	(1 << RSWITCH_LTH_RRULE_W)
+
+#define RSWITCH_PSFP_MSDU_W	4
+#define RSWITCH_PSFP_GATE_W	3
+#define RSWITCH_PSFP_MTR_W	5
+#define RSWITCH_FRER_RECE_W	7
 
 #define RSWITCH_SERDES_NUM	3
 
@@ -847,6 +856,63 @@ enum rswitch_gwca_mode {
 #define FWMACTIM_MACTIOG	BIT(0)
 #define FWMACTIM_MACTR		BIT(1)
 
+#define FWIP4SC_IDPTS		BIT(24)
+#define FWIP4SC_IIDS		BIT(23)
+#define FWIP4SC_IISS		BIT(22)
+#define FWIP4SC_ICDS		BIT(21)
+#define FWIP4SC_ICPS		BIT(20)
+#define FWIP4SC_ICVS		BIT(19)
+#define FWIP4SC_ISDS		BIT(18)
+#define FWIP4SC_ISPS		BIT(17)
+#define FWIP4SC_ISVS		BIT(16)
+#define FWIP4SC_IDPTH		BIT(8)
+#define FWIP4SC_IIDH		BIT(7)
+#define FWIP4SC_IISH		BIT(6)
+#define FWIP4SC_ICDH		BIT(5)
+#define FWIP4SC_ICPH		BIT(4)
+#define FWIP4SC_ICVH		BIT(3)
+#define FWIP4SC_ISDH		BIT(2)
+#define FWIP4SC_ISPH		BIT(1)
+#define FWIP4SC_ISVH		BIT(0)
+
+#define FWLTHHEC_HMUE		GENMASK(16 + RSWITCH_LTH_STREAM_W, 16)
+
+#define FWLTHTL0_ED		BIT(16)
+#define FWLTHTL0_SL		BIT(8)
+
+#define FWLTHTL5_MSDUV		BIT(31)
+#define FWLTHTL5_MSDUN		GENMASK(16 + RSWITCH_PSFP_MSDU_W - 1, 16)
+#define FWLTHTL5_GATEV		BIT(15)
+#define FWLTHTL5_GATEN		GENMASK(RSWITCH_PSFP_GATE_W - 1, 0)
+
+#define FWLTHTL6_MTRV		BIT(31)
+#define FWLTHTL6_MTRN		GENMASK(16 + RSWITCH_PSFP_MTR_W - 1, 16)
+#define FWLTHTL6_FRERV		BIT(15)
+#define FWLTHTL6_FRERN		GENMASK(RSWITCH_FRER_RECE_W - 1, 0)
+
+#define FWLTHTL7_SLV		GENMASK(16 + RSWITCH_NUM_HW - 1, 16)
+#define FWLTHTL7_RV		BIT(15)
+#define FWLTHTL7_RN		GENMASK(RSWITCH_LTH_RRULE_W - 1, 0)
+
+#define FWLTHTL8(i)		(FWLTHTL80 + (i) * 4)
+#define FWLTHTL8_CSD		GENMASK(RSWITCH_AXI_CHAIN_W - 1, 0)
+
+#define FWLTHTL9_CME		BIT(21)
+#define FWLTHTL9_EME		BIT(20)
+#define FWLTHTL9_IPU		BIT(19)
+#define FWLTHTL9_IPV		GENMASK(18, 16)
+#define FWLTHTL9_DV		GENMASK(RSWITCH_NUM_HW - 1, 0)
+
+#define FWLTHTLR_L		BIT(31)
+#define FWLTHTLR_LCN		GENMASK(16 + RSWITCH_LTH_STREAM_W - 1, 16)
+#define FWLTHTLR_LO		BIT(3)
+#define FWLTHTLR_LEF		BIT(2)
+#define FWLTHTLR_LSF		BIT(1)
+#define FWLTHTLR_LF		BIT(0)
+
+#define FWLTHTIM_TR		BIT(1)
+#define FWLTHTIM_TIOG		BIT(0)
+
 #define FWL23URL0_PV		GENMASK(16 + RSWITCH_NUM_HW - 1, 16)
 #define FWL23URL0_RN		GENMASK(7, 0)
 
@@ -1160,6 +1226,18 @@ struct rswitch_l23update {
 	unsigned int use_count;
 	unsigned int index;
 	struct rswitch_l23update_spec spec;
+};
+
+/* Hardware frame type identifieers (bits 130:128 of stream id) */
+#define RSWITCH_FRAME_TYPE_IPV4_TCP	3
+#define RSWITCH_FRAME_TYPE_IPV4_UDP	2
+#define RSWITCH_FRAME_TYPE_IPV4_OTHER	1
+
+struct rswitch_ipv4_dst_offload {
+	struct list_head list;
+	struct rswitch_l23update *update;
+	__be32 addr;
+	u8 types_offloaded;	/* bits for RSWITCH_FRAME_TYPE_* */
 };
 
 #define for_each_hw_rdev_from(_priv, _i, _from, _rdev) \
@@ -3528,6 +3606,20 @@ static int rswitch_fwd_init(struct rswitch_private *priv)
 
 	/* Initialize hardware L3 forwarding */
 
+	/* Allow entire stream table to be used for "unsecure" entries */
+	rswitch_modify(priv->addr, FWLTHHEC,
+			FWLTHHEC_HMUE,
+			FIELD_PREP(FWLTHHEC_HMUE, 1 << RSWITCH_LTH_STREAM_W));
+
+	/* Include only dst_ip (and frame type) in ipv4 stream id */
+	rs_write32(FWIP4SC_IIDS, priv->addr + FWIP4SC);
+
+	/* Initialize stream hash table */
+	rs_write32(FWLTHTIM_TIOG, priv->addr + FWLTHTIM);
+	ret = rswitch_reg_wait(priv->addr, FWLTHTIM, FWLTHTIM_TR, FWLTHTIM_TR);
+	if (ret)
+		return ret;
+
 	/* Allow access to frame update rules from "unsecure" APB */
 	rs_write32(0xffffffff, priv->addr + FWSCR34);
 #if RSWITCH_LTH_RRULE_W >= 6
@@ -4046,6 +4138,80 @@ static bool rswitch_l23update_hw_op(struct rswitch_private *priv,
 		return false;
 	}
 
+	return true;
+}
+
+static bool rswitch_ipv4_dst_offload_hw_op(struct rswitch_device *rdev,
+		struct rswitch_ipv4_dst_offload *offload,
+		u8 frame_type, bool install)
+{
+	struct rswitch_private *priv = rdev->priv;
+	u32 val, err_flags, collisions;
+	int ret;
+	const char *frame_type_name[] = {
+		[RSWITCH_FRAME_TYPE_IPV4_TCP] = "TCP",
+		[RSWITCH_FRAME_TYPE_IPV4_UDP] = "UDP",
+		[RSWITCH_FRAME_TYPE_IPV4_OTHER] = "OTHER",
+	};
+
+	spin_lock(&priv->l3_lock);
+
+	val = (install ? 0 : FWLTHTL0_ED) | frame_type;
+	rs_write32(val, priv->addr + FWLTHTL0);
+
+	rs_write32(0, priv->addr + FWLTHTL1);
+	rs_write32(0, priv->addr + FWLTHTL2);
+	rs_write32(0, priv->addr + FWLTHTL3);
+	rs_write32(be32_to_cpu(offload->addr), priv->addr + FWLTHTL4);
+
+	/* accept from all ports in the table entry
+	 * (non-particilating ports have l3 table disabled) */
+	val = FIELD_PREP(FWLTHTL7_SLV, GENMASK(RSWITCH_NUM_HW - 1, 0)) |
+	      FWLTHTL7_RV |
+	      FIELD_PREP(FWLTHTL7_RN, offload->update->index);
+	rs_write32(val, priv->addr + FWLTHTL7);
+
+	rs_write32(0, priv->addr + FWLTHTL8(0));
+	rs_write32(0, priv->addr + FWLTHTL8(1));
+
+	val = FIELD_PREP(FWLTHTL9_DV, BIT(rdev->etha->index));
+	rs_write32(val, priv->addr + FWLTHTL9);
+
+	/* ... table entry write starts after writing to FWLTHTL9 */
+
+	ret = rswitch_reg_wait(priv->addr, FWLTHTLR, FWLTHTLR_L, 0);
+	val = rs_read32(priv->addr + FWLTHTLR);
+	err_flags = val & (FWLTHTLR_LEF | FWLTHTLR_LSF | FWLTHTLR_LF);
+	collisions = FIELD_GET(FWLTHTLR_LCN, val);
+
+	spin_unlock(&priv->l3_lock);
+
+	if (ret) {
+		dev_err(&priv->pdev->dev,
+			"timeout writing l3 table entry\n");
+		return false;
+	}
+
+	if (err_flags) {
+		dev_err(&priv->pdev->dev,
+			"writing l3 table entry failed (flags %d)\n",
+			err_flags);
+		return false;
+	}
+
+	if (install)
+		offload->types_offloaded |= BIT(frame_type);
+	else
+		offload->types_offloaded &= ~BIT(frame_type);
+
+	dev_info(&priv->pdev->dev,
+		"%s IPv4/%s forwarding %pI4b -> tsn%u, mac %pM; table collisions: %u\n",
+		install ? "added" : "removed",
+		frame_type_name[frame_type],
+		&offload->addr,
+		rdev->etha->index,
+		offload->update->spec.dst_mac,
+		collisions);
 	return true;
 }
 
