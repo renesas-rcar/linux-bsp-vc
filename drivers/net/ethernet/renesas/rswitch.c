@@ -1172,6 +1172,10 @@ struct rswitch_device {
 	unsigned int learning_offloaded : 1;
 	unsigned int forwarding_requested : 1;
 	unsigned int forwarding_offloaded : 1;
+
+	struct list_head ipv4_local_route_list;
+	struct list_head ipv4_bcast_route_list;
+	struct list_head ipv4_ucast_route_list;
 };
 
 struct rswitch_mfwd_mac_table_entry {
@@ -1215,6 +1219,9 @@ struct rswitch_private {
 	spinlock_t l3_lock;
 	DECLARE_BITMAP(l23_update_bitmap, RSWITCH_MAX_NUM_RRULE);
 	struct list_head l23_update_list;
+
+	struct notifier_block fib_nb;
+	bool fib_nb_registered;
 };
 
 struct rswitch_l23update_spec {
@@ -1226,6 +1233,19 @@ struct rswitch_l23update {
 	unsigned int use_count;
 	unsigned int index;
 	struct rswitch_l23update_spec spec;
+};
+
+struct rswitch_ipv4_route {
+	struct list_head list;
+	__be32 addr;
+	__be32 mask;
+	__be32 gw_addr;
+	struct list_head offload_list;
+};
+
+struct rswitch_ipv4_route_exception {
+	struct list_head list;
+	__be32 addr;
 };
 
 /* Hardware frame type identifieers (bits 130:128 of stream id) */
@@ -3336,6 +3356,10 @@ static int rswitch_ndev_create(struct rswitch_private *priv, int index)
 
 	spin_lock_init(&rdev->lock);
 
+	INIT_LIST_HEAD(&rdev->ipv4_local_route_list);
+	INIT_LIST_HEAD(&rdev->ipv4_bcast_route_list);
+	INIT_LIST_HEAD(&rdev->ipv4_ucast_route_list);
+
 	ndev->features = NETIF_F_RXCSUM;
 	ndev->hw_features = NETIF_F_RXCSUM;
 	ndev->base_addr = (unsigned long)rdev->addr;
@@ -4279,6 +4303,162 @@ static void rswitch_put_l23update(struct rswitch_private *priv,
 	spin_unlock(&priv->l3_lock);
 }
 
+/* called under rswitch_device lock */
+static void rdev_ipv4_update_route(struct rswitch_device *rdev,
+		__be32 addr, __be32 mask, __be32 gw_addr, bool keep)
+{
+	struct rswitch_ipv4_route *route;
+	struct list_head *pos;
+	bool found = false;
+
+	/* Find the route in the list, and/or location for the route */
+	list_for_each(pos, &rdev->ipv4_ucast_route_list) {
+		route = list_entry(pos, typeof(*route), list);
+		if (route->addr == addr && route->mask == mask) {
+			found = true;
+			break;
+		}
+
+		/* stop if got more generic masks */
+		if (route->mask != mask && (route->mask & mask) == route->mask)
+			break;
+	}
+
+	if (!found && !keep)
+		return;
+
+	if (found && !keep) {
+		list_del(&route->list);
+		kfree(route);
+		return;
+	}
+
+	if (!found) {
+		route = kzalloc(sizeof(*route), GFP_ATOMIC);
+		if (!route) {
+			/* FIXME: what to do? disable l3 offload? */
+			dev_err(&rdev->priv->pdev->dev,
+				"allocation failure, further operation unreliable\n");
+			return;
+		}
+		INIT_LIST_HEAD(&route->offload_list);
+		list_add(&route->list, pos);
+	}
+
+	route->addr = addr;
+	route->mask = mask;
+	route->gw_addr = gw_addr;
+}
+
+/* called under rswitch_device lock */
+static void rdev_ipv4_update_route_exception(struct rswitch_device *rdev,
+		struct list_head *list, __be32 addr, bool keep)
+{
+	struct rswitch_ipv4_route_exception *entry;
+
+	list_for_each_entry(entry, list, list) {
+		if (entry->addr == addr) {
+			if (!keep) {
+				list_del(&entry->list);
+				kfree(entry);
+			}
+			return;
+		}
+	}
+
+	if (keep) {
+		entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
+		if (!entry) {
+			/* FIXME: what to do? disable l3 offload? */
+			dev_err(&rdev->priv->pdev->dev,
+				"allocation failure, further operation unreliable\n");
+			return;
+		}
+
+		entry->addr = addr;
+		list_add_tail(&entry->list, list);
+	}
+}
+
+static void rswitch_ipv4_fib_update(struct rswitch_private *priv,
+		struct fib_notifier_info *info, bool keep)
+{
+	struct fib_entry_notifier_info *feni =
+			container_of(info, typeof(*feni), info);
+	struct fib_info *fib = feni->fi;
+	struct fib_nh *fib_nh;
+	struct net_device *ndev;
+	struct rswitch_device *rdev = NULL;
+	unsigned long flags;
+
+	/* FIXME: what if multiple tables? */
+
+	if (fib->fib_nhs != 1 || fib->nh != NULL) {
+		/* FIXME: what to do? */
+		return;
+	}
+	fib_nh = &fib->fib_nh[0];
+	ndev = fib_nh->fib_nh_dev;
+
+	if (!rswitch_port_check(ndev)) {
+		/* not an rswitch port */
+		return;
+	}
+	rdev = netdev_priv(ndev);
+	if (rdev->priv != priv) {
+		/* not this rswitch instance */
+		return;
+	}
+
+	/* FIXME: the above is far incomplete against what is possible */
+
+	spin_lock_irqsave(&rdev->lock, flags);
+
+	if (fib->fib_type == RTN_UNICAST) {
+		__be32 addr = cpu_to_be32(feni->dst);
+		__be32 mask = cpu_to_be32(0xffffffff << (32 - feni->dst_len));
+		__be32 gw_addr = fib_nh->fib_nh_gw4;
+
+		netdev_info(ndev,
+			"%s ucast route info: addr %pI4b mask %pI4b gw %pI4b\n",
+			keep ? "set" : "unset", &addr, &mask, &gw_addr);
+		rdev_ipv4_update_route(rdev, addr, mask, gw_addr, keep);
+	} else if (fib->fib_type == RTN_LOCAL) {
+		__be32 addr = cpu_to_be32(feni->dst);
+
+		netdev_info(ndev, "%s local route info: addr %pI4b\n",
+				keep ? "set" : "unset", &addr);
+		rdev_ipv4_update_route_exception(rdev,
+				&rdev->ipv4_local_route_list, addr, keep);
+	} else if (fib->fib_type == RTN_BROADCAST) {
+		__be32 addr = cpu_to_be32(feni->dst);
+
+		netdev_info(ndev, "%s bcast route info: addr %pI4b\n",
+				keep ? "set" : "unset", &addr);
+		rdev_ipv4_update_route_exception(rdev,
+				&rdev->ipv4_bcast_route_list, addr, keep);
+	}
+
+	spin_unlock_irqrestore(&rdev->lock, flags);
+}
+
+static int rswitch_fib_event(struct notifier_block *nb,
+		unsigned long event, void *ptr)
+{
+	struct rswitch_private *priv = container_of(nb, typeof(*priv), fib_nb);
+	struct fib_notifier_info *info = ptr;
+
+	/* Handle only IPv4 for now */
+	if (info->family == AF_INET) {
+		if (event == FIB_EVENT_ENTRY_REPLACE)
+			rswitch_ipv4_fib_update(priv, info, true);
+		else if (event == FIB_EVENT_ENTRY_DEL)
+			rswitch_ipv4_fib_update(priv, info, false);
+	}
+
+	return NOTIFY_DONE;
+}
+
 
 static int renesas_eth_sw_probe(struct platform_device *pdev)
 {
@@ -4382,6 +4562,10 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 			rswitch_deinit(priv);
 			return ret;
 		}
+
+		priv->fib_nb.notifier_call = rswitch_fib_event;
+		ret = register_fib_notifier(&init_net, &priv->fib_nb, NULL, NULL);
+		priv->fib_nb_registered = (ret == 0);
 	}
 
 	device_set_wakeup_capable(&pdev->dev, 1);
@@ -4394,6 +4578,9 @@ static int renesas_eth_sw_remove(struct platform_device *pdev)
 	struct rswitch_private *priv = platform_get_drvdata(pdev);
 
 	if (!parallel_mode) {
+		if (priv->fib_nb_registered)
+			unregister_fib_notifier(&init_net, &priv->fib_nb);
+
 		rswitch_unregister_notifiers();
 
 		/* Disable R-Switch clock */
