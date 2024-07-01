@@ -49,6 +49,9 @@ static inline void rs_write32(u32 data, void *addr)
 
 #define RSWITCH_MAC_ENTRY_W	10
 
+#define RSWITCH_LTH_RRULE_W	8
+#define RSWITCH_MAX_NUM_RRULE	(1 << RSWITCH_LTH_RRULE_W)
+
 #define RSWITCH_SERDES_NUM	3
 
 #define RSWITCH_GWCA_IDX_TO_HW_NUM(i)	((i) + RSWITCH_MAX_NUM_ETHA)
@@ -844,6 +847,34 @@ enum rswitch_gwca_mode {
 #define FWMACTIM_MACTIOG	BIT(0)
 #define FWMACTIM_MACTR		BIT(1)
 
+#define FWL23URL0_PV		GENMASK(16 + RSWITCH_NUM_HW - 1, 16)
+#define FWL23URL0_RN		GENMASK(7, 0)
+
+#define FWL23URL1_RTU		GENMASK(26, 25)
+#define FWL23URL1_SDEIU		BIT(24)
+#define FWL23URL1_SPCPU		BIT(23)
+#define FWL23URL1_SVIDU		BIT(22)
+#define FWL23URL1_CDEIU 	BIT(21)
+#define FWL23URL1_CPCPU 	BIT(20)
+#define FWL23URL1_CVIDU 	BIT(19)
+#define FWL23URL1_MSAU		BIT(18)
+#define FWL23URL1_MDAU		BIT(17)
+#define FWL23URL1_TTLU		BIT(16)
+
+#define FWL23URL3_SDEI		BIT(31)
+#define FWL23URL3_SPCP		GENMASK(30, 28)
+#define FWL23URL3_SVID		GENMASK(27, 16)
+#define FWL23URL3_CDEI		BIT(15)
+#define FWL23URL3_CPCP		GENMASK(14, 12)
+#define FWL23URL3_CVID		GENMASK(11, 0)
+
+#define FWL23URLR_L		BIT(31)
+#define FWL23URLR_LSF		BIT(1)
+#define FWL23URLR_LF		BIT(0)
+
+#define FWL23UTIM_TR		BIT(1)
+#define FWL23UTIM_TIOG		BIT(0)
+
 #define RSWITCH_SERDES_LOCAL_OFFSET             0x2600
 #define RSWITCH_SERDES_OFFSET                   0x0400
 #define RSWITCH_SERDES_BANK_SELECT              0x03fc
@@ -1114,6 +1145,21 @@ struct rswitch_private {
 	struct clk *clk;
 
 	struct net_device *offload_brdev;
+
+	spinlock_t l3_lock;
+	DECLARE_BITMAP(l23_update_bitmap, RSWITCH_MAX_NUM_RRULE);
+	struct list_head l23_update_list;
+};
+
+struct rswitch_l23update_spec {
+	u8 dst_mac[ETH_ALEN];
+};
+
+struct rswitch_l23update {
+	struct list_head list;
+	unsigned int use_count;
+	unsigned int index;
+	struct rswitch_l23update_spec spec;
 };
 
 #define for_each_hw_rdev_from(_priv, _i, _from, _rdev) \
@@ -3480,6 +3526,30 @@ static int rswitch_fwd_init(struct rswitch_private *priv)
 	if (ret)
 		return ret;
 
+	/* Initialize hardware L3 forwarding */
+
+	/* Allow access to frame update rules from "unsecure" APB */
+	rs_write32(0xffffffff, priv->addr + FWSCR34);
+#if RSWITCH_LTH_RRULE_W >= 6
+	rs_write32(0xffffffff, priv->addr + FWSCR33);
+#endif
+#if RSWITCH_LTH_RRULE_W >= 7
+	rs_write32(0xffffffff, priv->addr + FWSCR32);
+	rs_write32(0xffffffff, priv->addr + FWSCR31);
+#endif
+#if RSWITCH_LTH_RRULE_W >= 8
+	rs_write32(0xffffffff, priv->addr + FWSCR30);
+	rs_write32(0xffffffff, priv->addr + FWSCR29);
+	rs_write32(0xffffffff, priv->addr + FWSCR28);
+	rs_write32(0xffffffff, priv->addr + FWSCR27);
+#endif
+
+	/* Initialize frame update rules table */
+	rs_write32(FWL23UTIM_TIOG, priv->addr + FWL23UTIM);
+	ret = rswitch_reg_wait(priv->addr, FWL23UTIM, FWL23UTIM_TR, FWL23UTIM_TR);
+	if (ret)
+		return ret;
+
 	/* TODO: add chrdev for fwd */
 	/* TODO: add proc for fwd */
 
@@ -3929,6 +3999,121 @@ static void rswitch_unregister_notifiers(void)
 	}
 }
 
+
+static bool rswitch_l23update_matches_spec(struct rswitch_l23update *update,
+		struct rswitch_l23update_spec *spec)
+{
+	return ether_addr_equal(update->spec.dst_mac, spec->dst_mac);
+}
+
+static bool rswitch_l23update_hw_op(struct rswitch_private *priv,
+		struct rswitch_l23update *update, bool install)
+{
+	u8 *dst_mac = update->spec.dst_mac;
+	u32 val;
+	int ret;
+
+	val = FIELD_PREP(FWL23URL0_RN, update->index) |
+	      FIELD_PREP(FWL23URL0_PV,
+			      install ? GENMASK(RSWITCH_NUM_HW - 1, 0) : 0);
+	rs_write32(val, priv->addr + FWL23URL0);
+
+	val = FWL23URL1_TTLU |
+	      FWL23URL1_MSAU |
+	      FWL23URL1_MDAU |
+	      (dst_mac[0] << 8) | (dst_mac[1] << 0);
+	rs_write32(val, priv->addr + FWL23URL1);
+
+	val = (dst_mac[2] << 24) | (dst_mac[3] << 16) |
+	      (dst_mac[4] << 8)  | (dst_mac[5] << 0);
+	rs_write32(val, priv->addr + FWL23URL2);
+
+	val = 0;
+	rs_write32(val, priv->addr + FWL23URL3);
+
+	/* ... rule write starts after writing to FWL23URL3 */
+
+	ret = rswitch_reg_wait(priv->addr, FWL23URLR, FWL23URLR_L, 0);
+	if (ret) {
+		dev_err(&priv->pdev->dev, "timeout writing l23_update\n");
+		return false;
+	}
+	val = rs_read32(priv->addr + FWL23URLR) &
+			(FWL23URLR_LSF | FWL23URLR_LF);
+	if (val) {
+		dev_err(&priv->pdev->dev,
+			"writing l23_update failed (err %d)\n", val);
+		return false;
+	}
+
+	return true;
+}
+
+static struct rswitch_l23update *rswitch_get_l23update(
+		struct rswitch_private *priv,
+		struct rswitch_l23update_spec *spec)
+{
+	struct rswitch_l23update *update;
+
+	spin_lock(&priv->l3_lock);
+
+	list_for_each_entry(update, &priv->l23_update_list, list) {
+		if (rswitch_l23update_matches_spec(update, spec)) {
+			update->use_count++;
+			goto out;
+		}
+	}
+
+	update = kzalloc(sizeof(*update), GFP_ATOMIC);
+	if (!update)
+		goto out;
+
+	update->use_count = 1;
+	update->spec = *spec;
+	update->index = find_first_zero_bit(priv->l23_update_bitmap,
+			RSWITCH_MAX_NUM_RRULE);
+	if (update->index == RSWITCH_MAX_NUM_RRULE) {
+		dev_err_ratelimited(&priv->pdev->dev,
+				"out of l23_update entries\n");
+		/* FIXME: trigger expire? */
+		goto no_free_bit;
+	}
+	set_bit(update->index, priv->l23_update_bitmap);
+
+	if (!rswitch_l23update_hw_op(priv, update, true))
+		goto hw_op_failed;
+
+	list_add(&update->list, &priv->l23_update_list);
+out:
+	spin_unlock(&priv->l3_lock);
+
+	return update;
+
+hw_op_failed:
+	clear_bit(update->index, priv->l23_update_bitmap);
+no_free_bit:
+	kfree(update);
+	update = NULL;
+	goto out;
+}
+
+static void rswitch_put_l23update(struct rswitch_private *priv,
+		struct rswitch_l23update *update)
+{
+	spin_lock(&priv->l3_lock);
+
+	update->use_count--;
+	if (update->use_count == 0) {
+		list_del(&update->list);
+		rswitch_l23update_hw_op(priv, update, false);
+		clear_bit(update->index, priv->l23_update_bitmap);
+		kfree(update);
+	}
+
+	spin_unlock(&priv->l3_lock);
+}
+
+
 static int renesas_eth_sw_probe(struct platform_device *pdev)
 {
 	struct rswitch_private *priv;
@@ -3947,6 +4132,9 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	spin_lock_init(&priv->lock);
+
+	spin_lock_init(&priv->l3_lock);
+	INIT_LIST_HEAD(&priv->l23_update_list);
 
 	priv->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(priv->clk))
