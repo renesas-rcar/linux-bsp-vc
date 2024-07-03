@@ -1158,7 +1158,6 @@ struct rswitch_device {
 	struct rswitch_private *priv;
 	struct net_device *ndev;
 	struct napi_struct napi;
-	void __iomem *addr;
 	struct rswitch_gwca_chain *tx_chain;
 	struct rswitch_gwca_chain *rx_chain;
 	spinlock_t lock;
@@ -2393,7 +2392,7 @@ static int rswitch_open(struct net_device *ndev)
 	netif_start_queue(ndev);
 
 	/* Enable RX */
-	rswitch_modify(rdev->addr, GWTRC0, 0, BIT(rdev->rx_chain->index));
+	rswitch_modify(rdev->priv->addr, GWTRC0, 0, BIT(rdev->rx_chain->index));
 
 	/* Enable interrupt */
 	pr_debug("%s: tx = %d, rx = %d\n", __func__, rdev->tx_chain->index, rdev->rx_chain->index);
@@ -2545,7 +2544,7 @@ static int rswitch_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	}
 
 	c->cur += num_desc;
-	rswitch_modify(rdev->addr, GWTRC0, 0, BIT(c->index));
+	rswitch_modify(rdev->priv->addr, GWTRC0, 0, BIT(c->index));
 
 out:
 	spin_unlock_irqrestore(&rdev->lock, flags);
@@ -3366,7 +3365,6 @@ static int rswitch_ndev_create(struct rswitch_private *priv, int index)
 		rdev->port = -1;
 		rdev->etha = NULL;
 	}
-	rdev->addr = priv->addr;
 
 	spin_lock_init(&rdev->lock);
 
@@ -3376,7 +3374,7 @@ static int rswitch_ndev_create(struct rswitch_private *priv, int index)
 
 	ndev->features = NETIF_F_RXCSUM;
 	ndev->hw_features = NETIF_F_RXCSUM;
-	ndev->base_addr = (unsigned long)rdev->addr;
+	ndev->base_addr = (unsigned long)rdev->priv->addr;
 	snprintf(ndev->name, IFNAMSIZ, "tsn%d", index);
 	ndev->netdev_ops = &rswitch_netdev_ops;
 	ndev->ethtool_ops = &rswitch_ethtool_ops;
