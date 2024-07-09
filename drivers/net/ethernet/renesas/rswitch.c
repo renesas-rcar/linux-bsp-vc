@@ -1087,8 +1087,6 @@ struct rswitch_etha {
 	void __iomem *serdes_addr;
 	enum rswitch_etha_mode mode;
 	u32 psmcs;
-	int link;
-	int speed;
 };
 
 struct rswitch_gwca_chain {
@@ -1148,6 +1146,8 @@ struct rswitch_device {
 	struct device_node *phy_dn;
 	bool phy_dn_is_fixed_link;
 	phy_interface_t phy_interface;
+	int link;
+	int speed;
 
 	struct mii_bus *mii;
 
@@ -1683,7 +1683,7 @@ static void rdev_pis_lsc_setting(struct rswitch_device *rdev)
 		break;
 	}
 
-	switch (etha->speed) {
+	switch (rdev->speed) {
 	case 100:
 		lsc = MPIC_LSC_100M;
 		break;
@@ -1988,7 +1988,7 @@ static int rdev_serdes_chan_init(struct rswitch_device *rdev, bool etha_stop_wor
 		speed = 2500;
 	} else {
 		phy_interface = rdev->phy_interface;
-		speed = etha->speed;
+		speed = rdev->speed;
 	}
 
 	/* Set channel settings*/
@@ -2052,7 +2052,7 @@ static void rdev_usgmii_serdes_check(struct work_struct *work)
 	u32 val;
 
 	/* Note on concurrency: other serdes access can only happen from
-	 * within rswitch_adjust_link, that explicitly cancels this work */
+	 * within rdev_adjust_link, that explicitly cancels this work */
 
 	/* Link status is latched, for current status read twice */
 	rswitch_serdes_read32(etha->serdes_addr, SR_XS_PCS_STS1, BANK_300);
@@ -2232,28 +2232,29 @@ static void rdev_mii_unregister(struct rswitch_device *rdev)
 	}
 }
 
-static void rswitch_etha_start(struct net_device *ndev)
+static void rdev_start(struct rswitch_device *rdev)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
 	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
+	struct phy_device *phydev = rdev->ndev->phydev;
 	int err;
 
-	if (etha->speed != ndev->phydev->speed ||
-	    rdev->mac_addr_write_pending) {
+	if (rdev->speed != phydev->speed || rdev->mac_addr_write_pending) {
 		if (etha->mode != EAMC_OPC_DISABLE) {
-			netdev_warn(ndev, "start: unexpected etha mode\n");
+			netdev_warn(rdev->ndev,
+				    "start: unexpected etha mode\n");
 			return;
 		}
 
 		err = rswitch_etha_change_mode(etha, EAMC_OPC_CONFIG);
 		if (err) {
-			netdev_warn(ndev, "failed to change etha mode to CONFIG\n");
+			netdev_warn(rdev->ndev,
+				    "failed to change etha mode to CONFIG\n");
 			return;
 		}
 
-		if (etha->speed != ndev->phydev->speed) {
-			etha->speed = ndev->phydev->speed;
-			rdev_pis_lsc_setting(rdev);	/* with updated etha->speed */
+		if (rdev->speed != phydev->speed) {
+			rdev->speed = phydev->speed;
+			rdev_pis_lsc_setting(rdev);	/* with updated rdev->speed */
 		}
 
 		if (rdev->mac_addr_write_pending) {
@@ -2263,7 +2264,8 @@ static void rswitch_etha_start(struct net_device *ndev)
 
 		err = rswitch_etha_change_mode(etha, EAMC_OPC_DISABLE);
 		if (err) {
-			netdev_warn(ndev, "failed to change etha mode to DISABLE\n");
+			netdev_warn(rdev->ndev,
+				    "failed to change etha mode to DISABLE\n");
 			return;
 		}
 	}
@@ -2271,20 +2273,22 @@ static void rswitch_etha_start(struct net_device *ndev)
 	if (etha->mode == EAMC_OPC_DISABLE) {
 		err = rswitch_etha_change_mode(etha, EAMC_OPC_OPERATION);
 		if (err) {
-			netdev_warn(ndev, "failed to change etha mode to OPERATION\n");
+			netdev_warn(rdev->ndev,
+				    "failed to change etha mode to OPERATION\n");
 			return;
 		}
 	}
 
 	if (etha->mode != EAMC_OPC_OPERATION) {
-		netdev_warn(ndev, "unexpected etha mode\n");
+		netdev_warn(rdev->ndev, "unexpected etha mode\n");
 		return;
 	}
 
 	if (!rdev->priv->serdes_common_init) {
 		err = rswitch_serdes_common_init(etha);
 		if (err) {
-			netdev_warn(ndev, "failed to initialize serdes\n");
+			netdev_warn(rdev->ndev,
+				    "failed to initialize serdes\n");
 			return;
 		}
 		rdev->priv->serdes_common_init = true;
@@ -2292,29 +2296,28 @@ static void rswitch_etha_start(struct net_device *ndev)
 
 	err = rdev_serdes_chan_init(rdev, false);
 	if (err < 0) {
-		netdev_warn(ndev, "failed to configure serdes\n");
+		netdev_warn(rdev->ndev, "failed to configure serdes\n");
 		return;
 	}
 
-	etha->link = 1;
+	rdev->link = 1;
 
 	err = rswitch_etha_wait_link_verification(etha);
 	if (err < 0)
-		netdev_warn(ndev, "link verification failed\n");
+		netdev_warn(rdev->ndev, "link verification failed\n");
 
 	if (rdev->needs_usgmii_serdes_check)
 		schedule_delayed_work(&rdev->usgmii_serdes_check_work,
 			msecs_to_jiffies(USGMII_SERDES_CHECK_FIRST_DELAY_MS));
 }
 
-static void rswitch_etha_stop(struct net_device *ndev)
+static void rdev_stop(struct rswitch_device *rdev)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
 	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	int err;
 
 	if (etha->mode != EAMC_OPC_OPERATION) {
-		netdev_warn(ndev, "unexpected etha mode\n");
+		netdev_warn(rdev->ndev, "unexpected etha mode\n");
 		return;
 	}
 
@@ -2327,36 +2330,37 @@ static void rswitch_etha_stop(struct net_device *ndev)
 		rs_write32(EAMC_OPC_DISABLE, etha->addr + EAMC);
 		err = rdev_serdes_chan_init(rdev, true);
 		if (err)
-			netdev_warn(ndev, "failed to apply etha stop workaround\n");
+			netdev_warn(rdev->ndev,
+				    "failed to apply etha stop workaround\n");
 	}
 
 	err = rswitch_etha_change_mode(etha, EAMC_OPC_DISABLE);
 	if (err != 0) {
-		netdev_warn(ndev, "failed to change etha mode to DISABLE\n");
+		netdev_warn(rdev->ndev,
+			    "failed to change etha mode to DISABLE\n");
 		return;
 	}
 
-	etha->link = 0;
+	rdev->link = 0;
 }
 
-static void rswitch_adjust_link(struct net_device *ndev)
+static void rdev_adjust_link(struct net_device *ndev)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	struct phy_device *phydev = ndev->phydev;
 
 	if (rdev->needs_usgmii_serdes_check)
 		cancel_delayed_work_sync(&rdev->usgmii_serdes_check_work);
 
-	if (phydev->link && etha->link && phydev->speed != etha->speed)
-		rswitch_etha_stop(ndev);
+	if (phydev->link && rdev->link && phydev->speed != rdev->speed)
+		rdev_stop(rdev);
 
-	if (phydev->link != etha->link) {
+	if (phydev->link != rdev->link) {
 		phy_print_status(phydev);
 		if (phydev->link)
-			rswitch_etha_start(ndev);
+			rdev_start(rdev);
 		else
-			rswitch_etha_stop(ndev);
+			rdev_stop(rdev);
 	}
 }
 
@@ -2364,8 +2368,7 @@ static int rswitch_phy_init(struct rswitch_device *rdev)
 {
 	struct phy_device *phydev;
 
-	phydev = of_phy_connect(rdev->ndev, rdev->phy_dn,
-				rswitch_adjust_link, 0,
+	phydev = of_phy_connect(rdev->ndev, rdev->phy_dn, rdev_adjust_link, 0,
 				rdev->phy_interface);
 	if (!phydev)
 		return -ENOENT;
