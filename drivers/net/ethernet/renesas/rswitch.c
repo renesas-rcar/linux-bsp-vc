@@ -61,8 +61,6 @@ static inline void rs_write32(u32 data, void *addr)
 #define RSWITCH_PSFP_MTR_W	5
 #define RSWITCH_FRER_RECE_W	7
 
-#define RSWITCH_SERDES_NUM	3
-
 #define RSWITCH_GWCA_IDX_TO_HW_NUM(i)	((i) + RSWITCH_MAX_NUM_ETHA)
 #define RSWITCH_HW_NUM_TO_GWCA_IDX(i)	((i) - RSWITCH_MAX_NUM_ETHA)
 
@@ -936,55 +934,55 @@ enum rswitch_gwca_mode {
 #define RSWITCH_SERDES_BANK_SELECT              0x03fc
 
 #define BANK_180                                0x0180
-#define VR_XS_PMA_MP_12G_16G_25G_SRAM           0x026c
-#define VR_XS_PMA_MP_12G_16G_25G_REF_CLK_CTRL   0x0244
-#define VR_XS_PMA_MP_10G_MPLLA_CTRL2            0x01cc
-#define VR_XS_PMA_MP_12G_16G_25G_MPLL_CMN_CTRL  0x01c0
-#define VR_XS_PMA_MP_12G_16G_MPLLA_CTRL0        0x01c4
-#define VR_XS_PMA_MP_12G_MPLLA_CTRL1            0x01c8
-#define VR_XS_PMA_MP_12G_MPLLA_CTRL3            0x01dc
-#define VR_XS_PMA_MP_12G_16G_25G_VCO_CAL_LD0    0x0248
-#define VR_XS_PMA_MP_12G_VCO_CAL_REF0           0x0258
-#define VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1    0x0144
-#define VR_XS_PMA_CONSUMER_10G_RX_GENCTRL4      0x01a0
-#define VR_XS_PMA_MP_12G_16G_25G_TX_RATE_CTRL   0x00d0
-#define VR_XS_PMA_MP_12G_16G_25G_RX_RATE_CTRL   0x0150
-#define VR_XS_PMA_MP_12G_16G_TX_GENCTRL2        0x00c8
-#define VR_XS_PMA_MP_12G_16G_RX_GENCTRL2        0x0148
-#define VR_XS_PMA_MP_12G_AFE_DFE_EN_CTRL        0x0174
-#define VR_XS_PMA_MP_12G_RX_EQ_CTRL0            0x0160
-#define VR_XS_PMA_MP_10G_RX_IQ_CTRL0            0x01ac
-#define VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1    0x00c4
-#define VR_XS_PMA_MP_12G_16G_TX_GENCTRL2        0x00c8
-#define VR_XS_PMA_MP_12G_16G_RX_GENCTRL2        0x0148
-#define VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1    0x00c4
-#define VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL0    0x00d8
-#define VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL1    0x00dc
-#define VR_XS_PMA_MP_12G_16G_MPLLB_CTRL0        0x01d0
-#define VR_XS_PMA_MP_12G_MPLLB_CTRL1            0x01d4
-#define VR_XS_PMA_MP_12G_16G_MPLLB_CTRL2        0x01d8
-#define VR_XS_PMA_MP_12G_MPLLB_CTRL3            0x01e0
-#define VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0    0x00c0
-#define VR_XS_PMA_MP_12G_16G_25G_TX_STS         0x0100
-#define VR_XS_PMA_MP_12G_16G_25G_RX_STS         0x0180
+#define VR_XS_PMA_MP_12G_16G_25G_SRAM           BANK_180, 0x026c
+#define VR_XS_PMA_MP_12G_16G_25G_REF_CLK_CTRL   BANK_180, 0x0244
+#define VR_XS_PMA_MP_10G_MPLLA_CTRL2            BANK_180, 0x01cc
+#define VR_XS_PMA_MP_12G_16G_25G_MPLL_CMN_CTRL  BANK_180, 0x01c0
+#define VR_XS_PMA_MP_12G_16G_MPLLA_CTRL0        BANK_180, 0x01c4
+#define VR_XS_PMA_MP_12G_MPLLA_CTRL1            BANK_180, 0x01c8
+#define VR_XS_PMA_MP_12G_MPLLA_CTRL3            BANK_180, 0x01dc
+#define VR_XS_PMA_MP_12G_16G_25G_VCO_CAL_LD0    BANK_180, 0x0248
+#define VR_XS_PMA_MP_12G_VCO_CAL_REF0           BANK_180, 0x0258
+#define VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1    BANK_180, 0x0144
+#define VR_XS_PMA_CONSUMER_10G_RX_GENCTRL4      BANK_180, 0x01a0
+#define VR_XS_PMA_MP_12G_16G_25G_TX_RATE_CTRL   BANK_180, 0x00d0
+#define VR_XS_PMA_MP_12G_16G_25G_RX_RATE_CTRL   BANK_180, 0x0150
+#define VR_XS_PMA_MP_12G_16G_TX_GENCTRL2        BANK_180, 0x00c8
+#define VR_XS_PMA_MP_12G_16G_RX_GENCTRL2        BANK_180, 0x0148
+#define VR_XS_PMA_MP_12G_AFE_DFE_EN_CTRL        BANK_180, 0x0174
+#define VR_XS_PMA_MP_12G_RX_EQ_CTRL0            BANK_180, 0x0160
+#define VR_XS_PMA_MP_10G_RX_IQ_CTRL0            BANK_180, 0x01ac
+#define VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1    BANK_180, 0x00c4
+#define VR_XS_PMA_MP_12G_16G_TX_GENCTRL2        BANK_180, 0x00c8
+#define VR_XS_PMA_MP_12G_16G_RX_GENCTRL2        BANK_180, 0x0148
+#define VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1    BANK_180, 0x00c4
+#define VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL0    BANK_180, 0x00d8
+#define VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL1    BANK_180, 0x00dc
+#define VR_XS_PMA_MP_12G_16G_MPLLB_CTRL0        BANK_180, 0x01d0
+#define VR_XS_PMA_MP_12G_MPLLB_CTRL1            BANK_180, 0x01d4
+#define VR_XS_PMA_MP_12G_16G_MPLLB_CTRL2        BANK_180, 0x01d8
+#define VR_XS_PMA_MP_12G_MPLLB_CTRL3            BANK_180, 0x01e0
+#define VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0    BANK_180, 0x00c0
+#define VR_XS_PMA_MP_12G_16G_25G_TX_STS         BANK_180, 0x0100
+#define VR_XS_PMA_MP_12G_16G_25G_RX_STS         BANK_180, 0x0180
 
 #define BANK_300                                0x0300
-#define SR_XS_PCS_CTRL1                         0x0000
-#define SR_XS_PCS_STS1                          0x0004
-#define SR_XS_PCS_CTRL2                         0x001c
+#define SR_XS_PCS_CTRL1                         BANK_300, 0x0000
+#define SR_XS_PCS_STS1                          BANK_300, 0x0004
+#define SR_XS_PCS_CTRL2                         BANK_300, 0x001c
 
 #define BANK_380                                0x0380
-#define VR_XS_PCS_DIG_CTRL1                     0x0000
-#define VR_XS_PCS_DEBUG_CTRL                    0x0014
-#define VR_XS_PCS_KR_CTRL                       0x001c
-#define VR_XS_PCS_SFTY_UE_INTRO                 0x03c0
-#define VR_XS_PCS_SFTY_DISABLE                  0x03d0
+#define VR_XS_PCS_DIG_CTRL1                     BANK_380, 0x0000
+#define VR_XS_PCS_DEBUG_CTRL                    BANK_380, 0x0014
+#define VR_XS_PCS_KR_CTRL                       BANK_380, 0x001c
+#define VR_XS_PCS_SFTY_UE_INTRO                 BANK_380, 0x03c0
+#define VR_XS_PCS_SFTY_DISABLE                  BANK_380, 0x03d0
 
 #define BANK_1F00                               0x1f00
-#define SR_MII_CTRL                             0x0000
+#define SR_MII_CTRL                             BANK_1F00, 0x0000
 
 #define BANK_1F80                               0x1f80
-#define VR_MII_AN_CTRL                          0x0004
+#define VR_MII_AN_CTRL                          BANK_1F80, 0x0004
 
 /* Descriptors */
 enum RX_DS_CC_BIT {
@@ -1071,11 +1069,6 @@ struct rswitch_ext_ts_desc {
 #define INFO1_TSUN(val)		((u64)(val) << 8ULL)
 #define INFO1_IPV(prio)		((u64)(prio) << 28ULL)
 #define INFO1_DV(port_vector)	((u64)(port_vector) << 48ULL)
-
-struct rswitch_etha {
-	int index;
-	void __iomem *serdes_addr;
-};
 
 struct rswitch_gwca_chain {
 	union {
@@ -1195,7 +1188,6 @@ struct rswitch_private {
 	struct list_head port_list;
 
 	struct rswitch_gwca gwca;
-	struct rswitch_etha etha[RSWITCH_MAX_NUM_ETHA];
 	struct rswitch_mfwd mfwd;
 
 	struct clk *rsw_clk;
@@ -1330,6 +1322,86 @@ static int rdev_etha_poll(struct rswitch_device *rdev,
 		enum rswitch_reg etha_reg, u32 mask, u32 expected)
 {
 	return rswitch_poll_timeout(rdev_etha_reg_addr(rdev, etha_reg),
+			mask, expected);
+}
+
+
+static inline void __iomem *rswitch_serdes_reg_addr(
+		struct rswitch_private *priv, u32 reg_offset)
+{
+	return priv->serdes_addr + reg_offset;
+}
+
+static inline void __iomem *rdev_serdes_reg_addr(struct rswitch_device *rdev,
+		u32 reg_offset)
+{
+	return rdev->priv->serdes_addr + rdev->port * RSWITCH_SERDES_OFFSET +
+	       reg_offset;
+}
+
+static inline void __iomem *rswitch_serdes_bank_reg_addr(
+		struct rswitch_private *priv)
+{
+	return rswitch_serdes_reg_addr(priv, RSWITCH_SERDES_BANK_SELECT);
+}
+
+static inline void __iomem *rdev_serdes_bank_reg_addr(
+		struct rswitch_device *rdev)
+{
+	return rdev_serdes_reg_addr(rdev, RSWITCH_SERDES_BANK_SELECT);
+}
+
+static inline u32 rswitch_serdes_read(struct rswitch_private *priv,
+		u32 bank, u32 reg_offset)
+{
+	writel(bank, rswitch_serdes_bank_reg_addr(priv));
+	return readl(rswitch_serdes_reg_addr(priv, reg_offset));
+}
+
+static inline u32 rdev_serdes_read(struct rswitch_device *rdev,
+		u32 bank, u32 reg_offset)
+{
+	writel(bank, rdev_serdes_bank_reg_addr(rdev));
+	return readl(rdev_serdes_reg_addr(rdev, reg_offset));
+}
+
+static inline void rswitch_serdes_write(struct rswitch_private *priv,
+		u32 bank, u32 reg_offset, u32 data)
+{
+	writel(bank, rswitch_serdes_bank_reg_addr(priv));
+	writel(data, rswitch_serdes_reg_addr(priv, reg_offset));
+}
+
+static inline void rswitch_serdes_write_direct(struct rswitch_private *priv,
+		u32 reg_offset, u32 data)
+{
+	writel(data, rswitch_serdes_reg_addr(priv, reg_offset));
+}
+
+static inline void rdev_serdes_write(struct rswitch_device *rdev,
+		u32 bank, u32 reg_offset, u32 data)
+{
+	writel(bank, rdev_serdes_bank_reg_addr(rdev));
+	writel(data, rdev_serdes_reg_addr(rdev, reg_offset));
+}
+
+static int rswitch_serdes_poll(struct rswitch_private *priv,
+		u32 bank, u32 reg_offset, u32 mask, u32 expected)
+{
+	writel(bank, rswitch_serdes_bank_reg_addr(priv));
+	mdelay(1);
+
+	return rswitch_poll_timeout(rswitch_serdes_reg_addr(priv, reg_offset),
+			mask, expected);
+}
+
+static int rdev_serdes_poll(struct rswitch_device *rdev,
+		u32 bank, u32 reg_offset, u32 mask, u32 expected)
+{
+	writel(bank, rdev_serdes_bank_reg_addr(rdev));
+	mdelay(1);
+
+	return rswitch_poll_timeout(rdev_serdes_reg_addr(rdev, reg_offset),
 			mask, expected);
 }
 
@@ -1741,147 +1813,108 @@ static int rswitch_etha_hw_init(struct rswitch_device *rdev)
 	return rdev_set_etha_mode(rdev, EAMC_OPC_DISABLE);
 }
 
-void rswitch_serdes_write32(void __iomem *addr, u32 offs,  u32 bank, u32 data)
+static int rswitch_serdes_common_init_ram(struct rswitch_private *priv)
 {
-	iowrite32(bank, addr + RSWITCH_SERDES_BANK_SELECT);
-	iowrite32(data, addr + offs);
-}
+	struct rswitch_device *rdev;
+	int ret;
 
-u32 rswitch_serdes_read32(void __iomem *addr, u32 offs,  u32 bank)
-{
-	iowrite32(bank, addr + RSWITCH_SERDES_BANK_SELECT);
-	return ioread32(addr + offs);
-}
-
-static int rswitch_serdes_reg_wait(void __iomem *addr, u32 offs, u32 bank, u32 mask, u32 expected)
-{
-	int i;
-
-	iowrite32(bank, addr + RSWITCH_SERDES_BANK_SELECT);
-	mdelay(1);
-
-	for (i = 0; i < RSWITCH_TIMEOUT_MS; i++) {
-		if ((ioread32(addr + offs) & mask) == expected)
-			return 0;
-		mdelay(1);
-	}
-
-	return -ETIMEDOUT;
-}
-
-static int rswitch_serdes_common_init_ram(void __iomem *common_addr)
-{
-	int ret, i;
-
-	for (i = 0; i < RSWITCH_SERDES_NUM; i++) {
-		ret = rswitch_serdes_reg_wait(common_addr + i * RSWITCH_SERDES_OFFSET,
-					      VR_XS_PMA_MP_12G_16G_25G_SRAM, BANK_180,
-					      BIT(0), 0x01);
+	rswitch_for_all_ports(priv, rdev) {
+		ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_25G_SRAM, BIT(0), 0x01);
 		if (ret)
 			return ret;
 	}
 
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_16G_25G_SRAM, BANK_180, 0x03);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_16G_25G_SRAM, 0x03);
 
 	return 0;
 }
 
-static void rswitch_serdes_common_setting(void __iomem *common_addr)
+static void rswitch_serdes_common_setting(struct rswitch_private *priv)
 {
 	/* Set combination mode */
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_16G_25G_REF_CLK_CTRL, BANK_180, 0xd7);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_10G_MPLLA_CTRL2, BANK_180, 0xc200);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_16G_MPLLA_CTRL0, BANK_180, 0x42);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_MPLLA_CTRL1, BANK_180, 0);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_MPLLA_CTRL3, BANK_180, 0x2f);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_16G_MPLLB_CTRL0, BANK_180, 0x60);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_16G_MPLLB_CTRL2, BANK_180, 0x2200);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_MPLLB_CTRL1, BANK_180, 0);
-	rswitch_serdes_write32(common_addr, VR_XS_PMA_MP_12G_MPLLB_CTRL3, BANK_180, 0x3d);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_16G_25G_REF_CLK_CTRL, 0xd7);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_10G_MPLLA_CTRL2, 0xc200);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_16G_MPLLA_CTRL0, 0x42);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_MPLLA_CTRL1, 0);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_MPLLA_CTRL3, 0x2f);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_16G_MPLLB_CTRL0, 0x60);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_16G_MPLLB_CTRL2, 0x2200);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_MPLLB_CTRL1, 0);
+	rswitch_serdes_write(priv, VR_XS_PMA_MP_12G_MPLLB_CTRL3, 0x3d);
 }
 
-static int rswitch_serdes_chan_setting(void __iomem *addr, phy_interface_t phy_interface)
+static int rdev_serdes_chan_setting(struct rswitch_device *rdev, phy_interface_t phy_interface)
 {
 	int ret;
 
 	switch (phy_interface) {
 	case PHY_INTERFACE_MODE_SGMII:
-		rswitch_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2000);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_MPLL_CMN_CTRL,
-				       BANK_180, 0x11);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_VCO_CAL_LD0, BANK_180, 0x540);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_VCO_CAL_REF0, BANK_180, 0x15);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, BANK_180, 0x100);
-		rswitch_serdes_write32(addr, VR_XS_PMA_CONSUMER_10G_RX_GENCTRL4, BANK_180, 0);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_RATE_CTRL, BANK_180, 0x02);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_RX_RATE_CTRL, BANK_180, 0x03);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BANK_180, 0x100);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BANK_180, 0x100);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_AFE_DFE_EN_CTRL, BANK_180, 0);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_RX_EQ_CTRL0, BANK_180, 0x07);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_10G_RX_IQ_CTRL0, BANK_180, 0);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1, BANK_180, 0x310);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BANK_180, 0x101);
-		ret = rswitch_serdes_reg_wait(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2,
-					      BANK_180, BIT(0), 0);
+		rdev_serdes_write(rdev, VR_XS_PCS_DIG_CTRL1, 0x2000);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_MPLL_CMN_CTRL, 0x11);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_VCO_CAL_LD0, 0x540);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_VCO_CAL_REF0, 0x15);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, 0x100);
+		rdev_serdes_write(rdev, VR_XS_PMA_CONSUMER_10G_RX_GENCTRL4, 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_RATE_CTRL, 0x02);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_RATE_CTRL, 0x03);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, 0x100);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, 0x100);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_AFE_DFE_EN_CTRL, 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_RX_EQ_CTRL0, 0x07);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_10G_RX_IQ_CTRL0, 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1, 0x310);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, 0x101);
+		ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BIT(0), 0);
 		if (ret)
 			return ret;
 
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BANK_180, 0x101);
-		ret = rswitch_serdes_reg_wait(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2,
-					      BANK_180, BIT(0), 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, 0x101);
+		ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BIT(0), 0);
 		if (ret)
 			return ret;
 
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1,
-				       BANK_180, 0x1310);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL0,
-				       BANK_180, 0x1800);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL1, BANK_180, 0);
-		rswitch_serdes_write32(addr, SR_XS_PCS_CTRL2, BANK_300, 0x01);
-		rswitch_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2100);
-		ret = rswitch_serdes_reg_wait(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(8), 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1, 0x1310);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL0, 0x1800);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL1, 0);
+		rdev_serdes_write(rdev, SR_XS_PCS_CTRL2, 0x01);
+		rdev_serdes_write(rdev, VR_XS_PCS_DIG_CTRL1, 0x2100);
+		ret = rdev_serdes_poll(rdev, VR_XS_PCS_DIG_CTRL1, BIT(8), 0);
 		if (ret)
 			return ret;
 
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
 	case PHY_INTERFACE_MODE_5GBASER:
-		rswitch_serdes_write32(addr, SR_XS_PCS_CTRL2, BANK_300, 0x0);
-		rswitch_serdes_write32(addr, VR_XS_PCS_DEBUG_CTRL, BANK_380, 0x50);
-		rswitch_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2200);
-		rswitch_serdes_write32(addr, VR_XS_PCS_KR_CTRL, BANK_380, 0x400);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_MPLL_CMN_CTRL, BANK_180, 0x1);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_VCO_CAL_LD0, BANK_180, 0x56a);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_VCO_CAL_REF0, BANK_180, 0x15);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1,
-				       BANK_180, 0x1100);
-		rswitch_serdes_write32(addr, VR_XS_PMA_CONSUMER_10G_RX_GENCTRL4, BANK_180, 1);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_RATE_CTRL, BANK_180, 0x01);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_RX_RATE_CTRL, BANK_180, 0x01);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BANK_180, 0x300);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BANK_180, 0x300);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_AFE_DFE_EN_CTRL, BANK_180, 0);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_RX_EQ_CTRL0, BANK_180, 0x4);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_10G_RX_IQ_CTRL0, BANK_180, 0);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1, BANK_180, 0x310);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BANK_180, 0x0301);
-		ret = rswitch_serdes_reg_wait(addr, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2,
-					      BANK_180, BIT(0), 0);
+		rdev_serdes_write(rdev, SR_XS_PCS_CTRL2, 0x0);
+		rdev_serdes_write(rdev, VR_XS_PCS_DEBUG_CTRL, 0x50);
+		rdev_serdes_write(rdev, VR_XS_PCS_DIG_CTRL1, 0x2200);
+		rdev_serdes_write(rdev, VR_XS_PCS_KR_CTRL, 0x400);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_MPLL_CMN_CTRL, 0x1);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_VCO_CAL_LD0, 0x56a);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_VCO_CAL_REF0, 0x15);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, 0x1100);
+		rdev_serdes_write(rdev, VR_XS_PMA_CONSUMER_10G_RX_GENCTRL4, 1);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_RATE_CTRL, 0x01);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_RATE_CTRL, 0x01);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, 0x300);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, 0x300);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_AFE_DFE_EN_CTRL, 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_RX_EQ_CTRL0, 0x4);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_10G_RX_IQ_CTRL0, 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1, 0x310);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, 0x0301);
+		ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_TX_GENCTRL2, BIT(0), 0);
 		if (ret)
 			return ret;
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BANK_180, 0x301);
-		ret = rswitch_serdes_reg_wait(addr, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2,
-					      BANK_180, BIT(0), 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, 0x301);
+		ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_RX_GENCTRL2, BIT(0), 0);
 		if (ret)
 			return ret;
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1,
-				       BANK_180, 0x1310);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL0,
-				       BANK_180, 0x1800);
-		rswitch_serdes_write32(addr, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL1, BANK_180, 0);
-		rswitch_serdes_write32(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x2300);
-		ret = rswitch_serdes_reg_wait(addr, VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(8), 0);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL1, 0x1310);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL0, 0x1800);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_EQ_CTRL1, 0);
+		rdev_serdes_write(rdev, VR_XS_PCS_DIG_CTRL1, 0x2300);
+		ret = rdev_serdes_poll(rdev, VR_XS_PCS_DIG_CTRL1, BIT(8), 0);
 		if (ret)
 			return ret;
 		break;
@@ -1892,23 +1925,23 @@ static int rswitch_serdes_chan_setting(void __iomem *addr, phy_interface_t phy_i
 	return 0;
 }
 
-static int rswitch_serdes_set_chan_speed(void __iomem *addr, phy_interface_t phy_interface, int speed)
+static int rdev_serdes_set_chan_speed(struct rswitch_device *rdev, phy_interface_t phy_interface, int speed)
 {
 	switch (phy_interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 		if (speed == 1000)
-			rswitch_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x140);
+			rdev_serdes_write(rdev, SR_MII_CTRL, 0x140);
 		else if (speed == 100)
-			rswitch_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x2100);
+			rdev_serdes_write(rdev, SR_MII_CTRL, 0x2100);
 
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
 		/* USXGMII - 2.5Gbps */
-		rswitch_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x120);
+		rdev_serdes_write(rdev, SR_MII_CTRL, 0x120);
 
 		break;
 	case PHY_INTERFACE_MODE_5GBASER:
-		rswitch_serdes_write32(addr, SR_MII_CTRL, BANK_1F00, 0x2120);
+		rdev_serdes_write(rdev, SR_MII_CTRL, 0x2120);
 
 		break;
 	default:
@@ -1918,29 +1951,23 @@ static int rswitch_serdes_set_chan_speed(void __iomem *addr, phy_interface_t phy
 	return 0;
 }
 
-static int rswitch_serdes_monitor_linkup(struct rswitch_etha *etha)
+static int rdev_serdes_monitor_linkup(struct rswitch_device *rdev)
 {
 	int ret, retry = 5;
 	u32 val;
 
 retry:
-	ret = rswitch_serdes_reg_wait(etha->serdes_addr,
-				      SR_XS_PCS_STS1, BANK_300, BIT(2), BIT(2));
+	ret = rdev_serdes_poll(rdev, SR_XS_PCS_STS1, BIT(2), BIT(2));
 	if (ret) {
-		pr_debug("\n%s: SerDes Link up failed, restart linkup\n", __func__);
-
 		if (retry < 0)
 			return -ETIMEDOUT;
 
 		retry--;
 
-		val = rswitch_serdes_read32(etha->serdes_addr,
-					    VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, BANK_180);
-		rswitch_serdes_write32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1,
-				       BANK_180, val | BIT(4));
+		val = rdev_serdes_read(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1);
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, val | BIT(4));
 		udelay(20);
-		rswitch_serdes_write32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1,
-				       BANK_180, val & (~BIT(4)));
+		rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, val & (~BIT(4)));
 
 		goto retry;
 	}
@@ -1948,48 +1975,44 @@ retry:
 	return 0;
 }
 
-static int rswitch_serdes_common_init(struct rswitch_etha *etha)
+static int rswitch_serdes_common_init(struct rswitch_private *priv)
 {
-	void __iomem *common_addr = etha->serdes_addr - etha->index * RSWITCH_SERDES_OFFSET;
-	int ret, i;
+	struct rswitch_device *rdev;
+	int ret;
 
 	/* Initialize SRAM */
-	ret = rswitch_serdes_common_init_ram(common_addr);
+	ret = rswitch_serdes_common_init_ram(priv);
 	if (ret)
 		return ret;
 
-	for (i = 0; i < RSWITCH_SERDES_NUM; i++) {
-		ret = rswitch_serdes_reg_wait(common_addr + i * RSWITCH_SERDES_OFFSET,
-					      SR_XS_PCS_CTRL1, BANK_300, BIT(15), 0);
+	rswitch_for_all_ports(priv, rdev) {
+		ret = rdev_serdes_poll(rdev, SR_XS_PCS_CTRL1, BIT(15), 0);
 		if (ret)
 			return ret;
 	}
 
-	for (i = 0; i < RSWITCH_SERDES_NUM; i++)
-		rswitch_serdes_write32(common_addr + i * RSWITCH_SERDES_OFFSET,
-				       0x03d4, BANK_380, 0x443);
+	rswitch_for_all_ports(priv, rdev)
+		rdev_serdes_write(rdev, BANK_380, 0x03d4, 0x443);
 
 	/* Set common setting */
-	rswitch_serdes_common_setting(common_addr);
+	rswitch_serdes_common_setting(priv);
 
-	for (i = 0; i < RSWITCH_SERDES_NUM; i++)
-		rswitch_serdes_write32(common_addr + i * RSWITCH_SERDES_OFFSET,
-				       VR_XS_PCS_SFTY_DISABLE, BANK_380, 0x01);
+	rswitch_for_all_ports(priv, rdev)
+		rdev_serdes_write(rdev, VR_XS_PCS_SFTY_DISABLE, 0x01);
 
 	/* Assert softreset for PHY */
-	rswitch_serdes_write32(common_addr, VR_XS_PCS_DIG_CTRL1, BANK_380, 0x8000);
+	rswitch_serdes_write(priv, VR_XS_PCS_DIG_CTRL1, 0x8000);
 
 	/* Initialize SRAM */
-	ret = rswitch_serdes_common_init_ram(common_addr);
+	ret = rswitch_serdes_common_init_ram(priv);
 	if (ret)
 		return ret;
 
-	return rswitch_serdes_reg_wait(common_addr, VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(15), 0);
+	return rswitch_serdes_poll(priv, VR_XS_PCS_DIG_CTRL1, BIT(15), 0);
 }
 
 static int rdev_serdes_chan_init(struct rswitch_device *rdev, bool etha_stop_workaround)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	phy_interface_t phy_interface;
 	int speed;
 	int ret;
@@ -2004,71 +2027,60 @@ static int rdev_serdes_chan_init(struct rswitch_device *rdev, bool etha_stop_wor
 	}
 
 	/* Set channel settings*/
-	ret = rswitch_serdes_chan_setting(etha->serdes_addr, phy_interface);
+	ret = rdev_serdes_chan_setting(rdev, phy_interface);
 	if (ret)
 		return ret;
 
 	/* Set speed (bps) */
-	ret = rswitch_serdes_set_chan_speed(etha->serdes_addr, phy_interface, speed);
+	ret = rdev_serdes_set_chan_speed(rdev, phy_interface, speed);
 	if (ret)
 		return ret;
 
-	rswitch_serdes_write32(etha->serdes_addr, VR_XS_PCS_SFTY_UE_INTRO, BANK_380, 0);
-	rswitch_serdes_write32(etha->serdes_addr, VR_XS_PCS_SFTY_DISABLE, BANK_380, 0);
+	rdev_serdes_write(rdev, VR_XS_PCS_SFTY_UE_INTRO, 0);
+	rdev_serdes_write(rdev, VR_XS_PCS_SFTY_DISABLE, 0);
 
-	val = rswitch_serdes_read32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0,
-				    BANK_180);
-	rswitch_serdes_write32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0,
-			       BANK_180, val | BIT(8));
+	val = rdev_serdes_read(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0);
+	rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0, val | BIT(8));
 
-	ret = rswitch_serdes_reg_wait(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_TX_STS,
-				      BANK_180, BIT(0), 1);
+	ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_STS, BIT(0), 1);
 	if (ret)
 		return ret;
 
-	rswitch_serdes_write32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0,
-			       BANK_180, val &= ~BIT(8));
+	rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_GENCTRL0, val &= ~BIT(8));
 
-	ret = rswitch_serdes_reg_wait(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_TX_STS,
-				      BANK_180, BIT(0), 0);
+	ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_25G_TX_STS, BIT(0), 0);
 	if (ret)
 		return ret;
 
-	val = rswitch_serdes_read32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1,
-				    BANK_180);
-	rswitch_serdes_write32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1,
-			       BANK_180, val | BIT(4));
+	val = rdev_serdes_read(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1);
+	rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, val | BIT(4));
 
-	ret = rswitch_serdes_reg_wait(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_RX_STS,
-				      BANK_180, BIT(0), 1);
+	ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_STS, BIT(0), 1);
 	if (ret)
 		return ret;
 
-	rswitch_serdes_write32(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1,
-			       BANK_180, val &= ~BIT(4));
+	rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, val &= ~BIT(4));
 
-	ret = rswitch_serdes_reg_wait(etha->serdes_addr, VR_XS_PMA_MP_12G_16G_25G_RX_STS,
-				      BANK_180, BIT(0), 0);
+	ret = rdev_serdes_poll(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_STS, BIT(0), 0);
 	if (ret)
 		return ret;
 
 	/* Check Link up restart */
-	return etha_stop_workaround ? 0 : rswitch_serdes_monitor_linkup(etha);
+	return etha_stop_workaround ? 0 : rdev_serdes_monitor_linkup(rdev);
 }
 
 static void rdev_usgmii_serdes_check(struct work_struct *work)
 {
 	struct rswitch_device *rdev = container_of(to_delayed_work(work),
 			typeof(*rdev), usgmii_serdes_check_work);
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	u32 val;
 
 	/* Note on concurrency: other serdes access can only happen from
 	 * within rdev_adjust_link, that explicitly cancels this work */
 
 	/* Link status is latched, for current status read twice */
-	rswitch_serdes_read32(etha->serdes_addr, SR_XS_PCS_STS1, BANK_300);
-	val = rswitch_serdes_read32(etha->serdes_addr, SR_XS_PCS_STS1, BANK_300);
+	rdev_serdes_read(rdev, SR_XS_PCS_STS1);
+	val = rdev_serdes_read(rdev, SR_XS_PCS_STS1);
 	if (val & 0x4) {
 		if (rdev->usgmii_serdes_check_retries > 0)
 			netdev_info(rdev->ndev, "USGMII serdes ok\n");
@@ -2083,13 +2095,10 @@ static void rdev_usgmii_serdes_check(struct work_struct *work)
 
 	netdev_err(rdev->ndev, "USGMII serdes not ok, retrying\n");
 
-	val = rswitch_serdes_read32(etha->serdes_addr,
-		VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, BANK_180);
-	rswitch_serdes_write32(etha->serdes_addr,
-		VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, BANK_180, val | 0x10);
+	val = rdev_serdes_read(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1);
+	rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, val | 0x10);
 	udelay(10);
-	rswitch_serdes_write32(etha->serdes_addr,
-		VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, BANK_180, val);
+	rdev_serdes_write(rdev, VR_XS_PMA_MP_12G_16G_25G_RX_GENCTRL1, val);
 
 	rdev->usgmii_serdes_check_retries++;
 	schedule_delayed_work(&rdev->usgmii_serdes_check_work,
@@ -2239,7 +2248,6 @@ static void rdev_mii_unregister(struct rswitch_device *rdev)
 
 static void rdev_start(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	struct phy_device *phydev = rdev->ndev->phydev;
 	int err;
 
@@ -2290,7 +2298,7 @@ static void rdev_start(struct rswitch_device *rdev)
 	}
 
 	if (!rdev->priv->serdes_common_init) {
-		err = rswitch_serdes_common_init(etha);
+		err = rswitch_serdes_common_init(rdev->priv);
 		if (err) {
 			netdev_warn(rdev->ndev,
 				    "failed to initialize serdes\n");
@@ -2768,7 +2776,7 @@ static void rswitch_reset(struct rswitch_private *priv)
 		 * condition of initialization, especially for R-Car S4 v1.1.
 		 */
 		mdelay(1);
-		rs_write32(0, priv->serdes_addr + RSWITCH_SERDES_LOCAL_OFFSET);
+		rswitch_serdes_write_direct(priv, RSWITCH_SERDES_LOCAL_OFFSET, 0);
 	} else {
 		int gwca_idx;
 		u32 gwro_offset;
@@ -2797,18 +2805,6 @@ static void rswitch_reset(struct rswitch_private *priv)
 			mdelay(10);
 		} while (1);
 	}
-}
-
-static void rswitch_etha_init(struct rswitch_device *rdev)
-{
-	struct rswitch_private *priv = rdev->priv;
-	struct rswitch_etha *etha = &priv->etha[rdev->port];
-
-	memset(etha, 0, sizeof(*etha));
-
-	etha->index = rdev->port;
-
-	etha->serdes_addr = priv->serdes_addr + etha->index * RSWITCH_SERDES_OFFSET;
 }
 
 static int rswitch_gwca_change_mode(struct rswitch_private *priv,
@@ -4729,9 +4725,6 @@ static void rswitch_device_create(struct rswitch_private *priv,
 		INIT_DELAYED_WORK(&rdev->usgmii_serdes_check_work,
 				rdev_usgmii_serdes_check);
 	}
-
-	/* FIXME: to remove */
-	rswitch_etha_init(rdev);
 
 	list_add_tail(&rdev->list, &priv->port_list);
 	return;
