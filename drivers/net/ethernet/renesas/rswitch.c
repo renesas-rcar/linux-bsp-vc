@@ -1086,7 +1086,6 @@ struct rswitch_etha {
 	void __iomem *addr;
 	void __iomem *serdes_addr;
 	struct mii_bus *mii;
-	phy_interface_t phy_interface;
 	bool needs_stop_workaround;
 	enum rswitch_etha_mode mode;
 	u32 psmcs;
@@ -1158,6 +1157,7 @@ struct rswitch_device {
 
 	struct device_node *phy_dn;
 	bool phy_dn_is_fixed_link;
+	phy_interface_t phy_interface;
 
 	struct net_device *ndev;
 	struct napi_struct napi;
@@ -1659,11 +1659,12 @@ static bool rswitch_etha_wait_link_verification(struct rswitch_etha *etha)
 	return rswitch_reg_wait(etha->addr, MLVC, MLVC_PLV, 0);
 }
 
-static void rswitch_etha_pis_lsc_setting(struct rswitch_etha *etha)
+static void rdev_pis_lsc_setting(struct rswitch_device *rdev)
 {
+	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	u32 pis, lsc;
 
-	switch (etha->phy_interface) {
+	switch (rdev->phy_interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 		pis = MPIC_PIS_GMII;
 		break;
@@ -1968,8 +1969,9 @@ static int rswitch_serdes_common_init(struct rswitch_etha *etha)
 	return rswitch_serdes_reg_wait(common_addr, VR_XS_PCS_DIG_CTRL1, BANK_380, BIT(15), 0);
 }
 
-static int rswitch_serdes_chan_init(struct rswitch_etha *etha, bool etha_stop_workaround)
+static int rdev_serdes_chan_init(struct rswitch_device *rdev, bool etha_stop_workaround)
 {
+	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	phy_interface_t phy_interface;
 	int speed;
 	int ret;
@@ -1979,7 +1981,7 @@ static int rswitch_serdes_chan_init(struct rswitch_etha *etha, bool etha_stop_wo
 		phy_interface = PHY_INTERFACE_MODE_USXGMII;
 		speed = 2500;
 	} else {
-		phy_interface = etha->phy_interface;
+		phy_interface = rdev->phy_interface;
 		speed = etha->speed;
 	}
 
@@ -2246,7 +2248,7 @@ static void rswitch_etha_start(struct net_device *ndev)
 
 		if (etha->speed != ndev->phydev->speed) {
 			etha->speed = ndev->phydev->speed;
-			rswitch_etha_pis_lsc_setting(etha);	/* with updated etha->speed */
+			rdev_pis_lsc_setting(rdev);	/* with updated etha->speed */
 		}
 
 		if (etha->mac_addr_write_pending) {
@@ -2283,7 +2285,7 @@ static void rswitch_etha_start(struct net_device *ndev)
 		rdev->priv->serdes_common_init = true;
 	}
 
-	err = rswitch_serdes_chan_init(etha, false);
+	err = rdev_serdes_chan_init(rdev, false);
 	if (err < 0) {
 		netdev_warn(ndev, "failed to configure serdes\n");
 		return;
@@ -2318,7 +2320,7 @@ static void rswitch_etha_stop(struct net_device *ndev)
 		 *   (2) run serdes configuration for USGMII mode
 		 */
 		rs_write32(EAMC_OPC_DISABLE, etha->addr + EAMC);
-		err = rswitch_serdes_chan_init(etha, true);
+		err = rdev_serdes_chan_init(rdev, true);
 		if (err)
 			netdev_warn(ndev, "failed to apply etha stop workaround\n");
 	}
@@ -2355,16 +2357,15 @@ static void rswitch_adjust_link(struct net_device *ndev)
 
 static int rswitch_phy_init(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	struct phy_device *phydev;
 
 	phydev = of_phy_connect(rdev->ndev, rdev->phy_dn,
 				rswitch_adjust_link, 0,
-				etha->phy_interface);
+				rdev->phy_interface);
 	if (!phydev)
 		return -ENOENT;
 
-	if (etha->phy_interface == PHY_INTERFACE_MODE_SGMII)
+	if (rdev->phy_interface == PHY_INTERFACE_MODE_SGMII)
 		phy_set_max_speed(phydev, 1000);
 	else
 		phy_set_max_speed(phydev, 2500);
@@ -2801,7 +2802,6 @@ static void rswitch_etha_init(struct rswitch_device *rdev)
 {
 	struct rswitch_private *priv = rdev->priv;
 	struct rswitch_etha *etha = &priv->etha[rdev->port];
-	int err;
 
 	memset(etha, 0, sizeof(*etha));
 
@@ -2810,17 +2810,11 @@ static void rswitch_etha_init(struct rswitch_device *rdev)
 	etha->addr = priv->addr + rswitch_etha_offs(etha->index);
 	etha->serdes_addr = priv->serdes_addr + etha->index * RSWITCH_SERDES_OFFSET;
 
-	err = of_get_phy_mode(rdev->port_dn, &etha->phy_interface);
-	if (err < 0) {
-		/* The default is SGMII interface */
-		etha->phy_interface = PHY_INTERFACE_MODE_SGMII;
-	}
-
-	if (etha->phy_interface == PHY_INTERFACE_MODE_SGMII &&
+	if (rdev->phy_interface == PHY_INTERFACE_MODE_SGMII &&
 	    soc_device_match(rswitch_soc_needs_etha_stop_wa))
 		etha->needs_stop_workaround = true;
 
-	if (etha->phy_interface == PHY_INTERFACE_MODE_USXGMII &&
+	if (rdev->phy_interface == PHY_INTERFACE_MODE_USXGMII &&
 	    soc_device_match(rswitch_soc_needs_usgmii_serdes_check)) {
 		etha->needs_usgmii_serdes_check = true;
 		INIT_DELAYED_WORK(&etha->usgmii_serdes_check_work,
@@ -4709,6 +4703,12 @@ static void rswitch_device_create(struct rswitch_private *priv,
 	INIT_LIST_HEAD(&rdev->ipv4_local_route_list);
 	INIT_LIST_HEAD(&rdev->ipv4_bcast_route_list);
 	INIT_LIST_HEAD(&rdev->ipv4_ucast_route_list);
+
+	ret = of_get_phy_mode(rdev->port_dn, &rdev->phy_interface);
+	if (ret < 0) {
+		/* The default is SGMII interface */
+		rdev->phy_interface = PHY_INTERFACE_MODE_SGMII;
+	}
 
 	rdev->phy_dn = of_parse_phandle(port_dn, "phy-handle", 0);
 	if (!rdev->phy_dn && of_phy_is_fixed_link(port_dn)) {
