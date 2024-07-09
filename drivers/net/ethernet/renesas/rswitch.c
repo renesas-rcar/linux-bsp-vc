@@ -1085,7 +1085,6 @@ struct rswitch_etha {
 	int index;
 	void __iomem *addr;
 	void __iomem *serdes_addr;
-	enum rswitch_etha_mode mode;
 	u32 psmcs;
 };
 
@@ -1146,6 +1145,8 @@ struct rswitch_device {
 	struct device_node *phy_dn;
 	bool phy_dn_is_fixed_link;
 	phy_interface_t phy_interface;
+
+	enum rswitch_etha_mode etha_mode;
 	int link;
 	int speed;
 
@@ -1609,23 +1610,22 @@ static void rswitch_agent_clock_ctrl(void __iomem *base_addr, int port, int enab
 	}
 }
 
-static int rswitch_etha_change_mode(struct rswitch_etha *etha,
-				    enum rswitch_etha_mode mode)
+static int rdev_set_etha_mode(struct rswitch_device *rdev,
+			      enum rswitch_etha_mode mode)
 {
-	void __iomem *base_addr;
+	struct rswitch_private *priv = rdev->priv;
+	struct rswitch_etha *etha = &priv->etha[rdev->port];
 	int ret;
 
-	base_addr = etha->addr - rswitch_etha_offs(etha->index);
-
 	/* Enable clock */
-	if (!rswitch_agent_clock_is_enabled(base_addr, etha->index))
-		rswitch_agent_clock_ctrl(base_addr, etha->index, 1);
+	if (!rswitch_agent_clock_is_enabled(priv->addr, rdev->port))
+		rswitch_agent_clock_ctrl(priv->addr, rdev->port, 1);
 
 	rs_write32(mode, etha->addr + EAMC);
 
 	ret = rswitch_reg_wait(etha->addr, EAMS, EAMS_OPS_MASK, mode);
 	if (ret == 0)
-		etha->mode = mode;
+		rdev->etha_mode = mode;
 
 	/* Do not disable clock when entering DISABLED mode, otherwise
 	 * MII stops working */
@@ -1716,17 +1716,17 @@ static int rswitch_etha_hw_init(struct rswitch_device *rdev)
 	int err;
 
 	/* Change to CONFIG Mode */
-	err = rswitch_etha_change_mode(etha, EAMC_OPC_DISABLE);
+	err = rdev_set_etha_mode(rdev, EAMC_OPC_DISABLE);
 	if (err < 0)
 		return err;
-	err = rswitch_etha_change_mode(etha, EAMC_OPC_CONFIG);
+	err = rdev_set_etha_mode(rdev, EAMC_OPC_CONFIG);
 	if (err < 0)
 		return err;
 
 	rs_write32(EAVCC_VEM_SC_TAG, etha->addr + EAVCC);
 	rswitch_etha_enable_mii(etha);
 
-	return rswitch_etha_change_mode(etha, EAMC_OPC_DISABLE);
+	return rdev_set_etha_mode(rdev, EAMC_OPC_DISABLE);
 }
 
 void rswitch_serdes_write32(void __iomem *addr, u32 offs,  u32 bank, u32 data)
@@ -2239,13 +2239,13 @@ static void rdev_start(struct rswitch_device *rdev)
 	int err;
 
 	if (rdev->speed != phydev->speed || rdev->mac_addr_write_pending) {
-		if (etha->mode != EAMC_OPC_DISABLE) {
+		if (rdev->etha_mode != EAMC_OPC_DISABLE) {
 			netdev_warn(rdev->ndev,
 				    "start: unexpected etha mode\n");
 			return;
 		}
 
-		err = rswitch_etha_change_mode(etha, EAMC_OPC_CONFIG);
+		err = rdev_set_etha_mode(rdev, EAMC_OPC_CONFIG);
 		if (err) {
 			netdev_warn(rdev->ndev,
 				    "failed to change etha mode to CONFIG\n");
@@ -2262,7 +2262,7 @@ static void rdev_start(struct rswitch_device *rdev)
 			rdev->mac_addr_write_pending = false;
 		}
 
-		err = rswitch_etha_change_mode(etha, EAMC_OPC_DISABLE);
+		err = rdev_set_etha_mode(rdev, EAMC_OPC_DISABLE);
 		if (err) {
 			netdev_warn(rdev->ndev,
 				    "failed to change etha mode to DISABLE\n");
@@ -2270,8 +2270,8 @@ static void rdev_start(struct rswitch_device *rdev)
 		}
 	}
 
-	if (etha->mode == EAMC_OPC_DISABLE) {
-		err = rswitch_etha_change_mode(etha, EAMC_OPC_OPERATION);
+	if (rdev->etha_mode == EAMC_OPC_DISABLE) {
+		err = rdev_set_etha_mode(rdev, EAMC_OPC_OPERATION);
 		if (err) {
 			netdev_warn(rdev->ndev,
 				    "failed to change etha mode to OPERATION\n");
@@ -2279,7 +2279,7 @@ static void rdev_start(struct rswitch_device *rdev)
 		}
 	}
 
-	if (etha->mode != EAMC_OPC_OPERATION) {
+	if (rdev->etha_mode != EAMC_OPC_OPERATION) {
 		netdev_warn(rdev->ndev, "unexpected etha mode\n");
 		return;
 	}
@@ -2316,7 +2316,7 @@ static void rdev_stop(struct rswitch_device *rdev)
 	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	int err;
 
-	if (etha->mode != EAMC_OPC_OPERATION) {
+	if (rdev->etha_mode != EAMC_OPC_OPERATION) {
 		netdev_warn(rdev->ndev, "unexpected etha mode\n");
 		return;
 	}
@@ -2334,7 +2334,7 @@ static void rdev_stop(struct rswitch_device *rdev)
 				    "failed to apply etha stop workaround\n");
 	}
 
-	err = rswitch_etha_change_mode(etha, EAMC_OPC_DISABLE);
+	err = rdev_set_etha_mode(rdev, EAMC_OPC_DISABLE);
 	if (err != 0) {
 		netdev_warn(rdev->ndev,
 			    "failed to change etha mode to DISABLE\n");
