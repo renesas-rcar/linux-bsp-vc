@@ -5055,10 +5055,6 @@ static int rswitch_resume_chan(struct net_device *ndev)
 	struct rswitch_device *rdev = netdev_priv(ndev);
 	int ret;
 
-	ret = rswitch_etha_hw_init(rdev);
-	if (ret)
-		return ret;
-
 	ret = rswitch_rxdmac_init(ndev, rdev->priv);
 	if (ret)
 		goto out_dmac;
