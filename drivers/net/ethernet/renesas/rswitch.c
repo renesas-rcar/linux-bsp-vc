@@ -1085,7 +1085,6 @@ struct rswitch_etha {
 	int index;
 	void __iomem *addr;
 	void __iomem *serdes_addr;
-	struct mii_bus *mii;
 	enum rswitch_etha_mode mode;
 	u32 psmcs;
 	u8 mac_addr[MAX_ADDR_LEN];
@@ -1151,6 +1150,8 @@ struct rswitch_device {
 	struct device_node *phy_dn;
 	bool phy_dn_is_fixed_link;
 	phy_interface_t phy_interface;
+
+	struct mii_bus *mii;
 
 	struct net_device *ndev;
 	struct napi_struct napi;
@@ -2080,9 +2081,10 @@ static void rdev_usgmii_serdes_check(struct work_struct *work)
 			msecs_to_jiffies(USGMII_SERDES_CHECK_NEXT_DELAY_MS));
 }
 
-static int rswitch_etha_set_access_c45(struct rswitch_etha *etha, bool read,
-				      int phyad, int devad, int regad, int data)
+static int rdev_set_access_c45(struct rswitch_device *rdev, bool read,
+			       int phyad, int devad, int regad, int data)
 {
+	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	int pop = read ? MDIO_READ_C45 : MDIO_WRITE_C45;
 	u32 val;
 	int ret;
@@ -2128,9 +2130,10 @@ static int rswitch_etha_set_access_c45(struct rswitch_etha *etha, bool read,
 	return ret;
 }
 
-static int rswitch_etha_set_access_c22(struct rswitch_etha *etha, bool read,
-				       int phyad, int regad, int data)
+static int rdev_set_access_c22(struct rswitch_device *rdev, bool read,
+			       int phyad, int regad, int data)
 {
+	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	int pop = read ? MDIO_READ_C22 : MDIO_WRITE_C22;
 	int ret;
 	u32 val;
@@ -2149,49 +2152,48 @@ static int rswitch_etha_set_access_c22(struct rswitch_etha *etha, bool read,
 	return read ? MPSM_PRD_READ(rswitch_etha_read(etha, MPSM)) : 0;
 }
 
-static int rswitch_etha_mii_read(struct mii_bus *bus, int addr, int regnum)
+static int rdev_mii_read(struct mii_bus *bus, int addr, int regnum)
 {
-	struct rswitch_etha *etha = bus->priv;
+	struct rswitch_device *rdev = bus->priv;
 	int mode, devad, regad;
 
 	mode = regnum & MII_ADDR_C45;
 
 	/* Clause 22 */
 	if (!mode)
-		return rswitch_etha_set_access_c22(etha, true, addr, regnum, 0);
+		return rdev_set_access_c22(rdev, true, addr, regnum, 0);
 
 	devad = (regnum >> MII_DEVADDR_C45_SHIFT) & 0x1f;
 	regad = regnum & MII_REGADDR_C45_MASK;
 
-	return rswitch_etha_set_access_c45(etha, true, addr, devad, regad, 0);
+	return rdev_set_access_c45(rdev, true, addr, devad, regad, 0);
 }
 
-static int rswitch_etha_mii_write(struct mii_bus *bus, int addr, int regnum, u16 val)
+static int rdev_mii_write(struct mii_bus *bus, int addr, int regnum, u16 val)
 {
-	struct rswitch_etha *etha = bus->priv;
+	struct rswitch_device *rdev = bus->priv;
 	int mode, devad, regad;
 
 	mode = regnum & MII_ADDR_C45;
 
 	/* Clause 22 */
 	if (!mode)
-		return rswitch_etha_set_access_c22(etha, false, addr, regnum, val);
+		return rdev_set_access_c22(rdev, false, addr, regnum, val);
 
 	devad = (regnum >> MII_DEVADDR_C45_SHIFT) & 0x1f;
 	regad = regnum & MII_REGADDR_C45_MASK;
 
-	return rswitch_etha_set_access_c45(etha, false, addr, devad, regad, val);
+	return rdev_set_access_c45(rdev, false, addr, devad, regad, val);
 }
 
-static int rswitch_etha_mii_reset(struct mii_bus *bus)
+static int rdev_mii_reset(struct mii_bus *bus)
 {
 	/* TODO */
 	return 0;
 }
 
-static int rswitch_mii_register(struct rswitch_device *rdev)
+static int rdev_mii_register(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	struct mii_bus *mii_bus;
 	int err;
 
@@ -2201,10 +2203,10 @@ static int rswitch_mii_register(struct rswitch_device *rdev)
 
 	mii_bus->name = "rswitch_mii";
 	sprintf(mii_bus->id, "etha%d", rdev->port);
-	mii_bus->priv = etha;
-	mii_bus->read = rswitch_etha_mii_read;
-	mii_bus->write = rswitch_etha_mii_write;
-	mii_bus->reset = rswitch_etha_mii_reset;
+	mii_bus->priv = rdev;
+	mii_bus->read = rdev_mii_read;
+	mii_bus->write = rdev_mii_write;
+	mii_bus->reset = rdev_mii_reset;
 	/* Use rswitch dev here, because rdev->ndev is not yet registered */
 	mii_bus->parent = &rdev->priv->pdev->dev;
 
@@ -2214,18 +2216,16 @@ static int rswitch_mii_register(struct rswitch_device *rdev)
 		return err;
 	}
 
-	etha->mii = mii_bus;
+	rdev->mii = mii_bus;
 	return 0;
 }
 
-static void rswitch_mii_unregister(struct rswitch_device *rdev)
+static void rdev_mii_unregister(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
-
-	if (etha->mii) {
-		mdiobus_unregister(etha->mii);
-		mdiobus_free(etha->mii);
-		etha->mii = NULL;
+	if (rdev->mii) {
+		mdiobus_unregister(rdev->mii);
+		mdiobus_free(rdev->mii);
+		rdev->mii = NULL;
 	}
 }
 
@@ -3631,7 +3631,7 @@ static int rswitch_init(struct rswitch_private *priv)
 		 * not yes complete, which leads to crash inside phy subsystem.
 		 */
 		if (!parallel_mode) {
-			err = rswitch_mii_register(rdev);
+			err = rdev_mii_register(rdev);
 			if (err)
 				goto err_mii_register;
 		}
@@ -3647,7 +3647,7 @@ static int rswitch_init(struct rswitch_private *priv)
 				unregister_netdev(rdev->ndev);
 				rswitch_phy_deinit(rdev);
 		err_phy_init:
-				rswitch_mii_unregister(rdev);
+				rdev_mii_unregister(rdev);
 			}
 			goto err_register_loop;
 		}
@@ -3681,7 +3681,7 @@ static void rswitch_deinit(struct rswitch_private *priv)
 	rswitch_for_all_ports(priv, rdev) {
 		unregister_netdev(rdev->ndev);
 		rswitch_phy_deinit(rdev);
-		rswitch_mii_unregister(rdev);
+		rdev_mii_unregister(rdev);
 		rswitch_ndev_deinit(rdev);
 	}
 
