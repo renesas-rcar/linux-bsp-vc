@@ -32,8 +32,6 @@
 
 #include "rtsn_ptp.h"
 
-static void *debug_addr;
-
 #define RSWITCH_NUM_HW		5
 #define RSWITCH_MAX_NUM_ETHA	3
 
@@ -67,8 +65,6 @@ static void *debug_addr;
 				 + MAX_DESC_SZ \
 				 + SKB_DATA_ALIGN(sizeof(struct skb_shared_info)) \
 				 + RSWITCH_ALIGN)
-
-#define RSWITCH_MAX_CTAG_PCP	7
 
 #define GWCA_TS_IRQ_RESOURCE_NAME	"gwca1_rxts0"
 #define GWCA_TS_IRQ_NAME		"rswitch: gwca1_rxts0"
@@ -733,7 +729,6 @@ enum rswitch_etha_mode {
 #define EAVCC_VEM_SC_TAG	(0x3 << 16)
 
 #define MPIC_PIS_MASK		GENMASK(2, 0)
-#define MPIC_PIS_MII		0x00
 #define MPIC_PIS_GMII		0x02
 #define MPIC_PIS_XGMII		0x04
 #define MPIC_LSC_MASK		GENMASK(5, 3)
@@ -747,10 +742,6 @@ enum rswitch_etha_mode {
 #define MDIO_WRITE_C45		0x01
 #define MDIO_READ_C22		0x02
 #define MDIO_WRITE_C22		0x01
-
-#define REG_MASK		0xffff
-#define DEV_MASK		GENMASK(24, 16)
-#define ACCESS_MODE		BIT(30)
 
 #define MPSM_PSME		BIT(0)
 #define MPSM_MFF_C45		BIT(2)
@@ -794,6 +785,7 @@ enum rswitch_gwca_mode {
 #define GWMDNC_TXDMN(val)	((val & 0x1f) << 8)
 
 #define GWTPC_PPPL(ipv)		BIT(ipv)
+
 #define GWDCC(chain)		(GWDCC0 + (chain) * 4)
 
 #define GWDIS(i)	GWDIS0 + (i) * 0x10
@@ -932,6 +924,7 @@ enum rswitch_gwca_mode {
 #define FWL23UTIM_TR		BIT(1)
 #define FWL23UTIM_TIOG		BIT(0)
 
+/* Serdes */
 #define RSWITCH_SERDES_LOCAL_OFFSET             0x2600
 #define RSWITCH_SERDES_OFFSET                   0x0400
 #define RSWITCH_SERDES_BANK_SELECT              0x03fc
@@ -1169,16 +1162,6 @@ struct rswitch_device {
 	unsigned int l3_offload_enabled : 1;
 };
 
-struct rswitch_mfwd_mac_table_entry {
-	int chain_index;
-	unsigned char addr[MAX_ADDR_LEN];
-};
-
-struct rswitch_mfwd {
-	struct rswitch_mac_table_entry *mac_table_entries;
-	int num_mac_table_entries;
-};
-
 struct rswitch_private {
 	struct platform_device *pdev;
 	void __iomem *addr;
@@ -1191,7 +1174,6 @@ struct rswitch_private {
 	struct list_head port_list;
 
 	struct rswitch_gwca gwca;
-	struct rswitch_mfwd mfwd;
 
 	struct clk *rsw_clk;
 	struct clk *phy_clk;
@@ -4919,7 +4901,6 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->serdes_addr))
 		return PTR_ERR(priv->serdes_addr);
 
-	debug_addr = priv->addr;
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(40));
 	if (ret < 0) {
 		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
