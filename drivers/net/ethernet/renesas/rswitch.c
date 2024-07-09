@@ -803,8 +803,12 @@ enum rswitch_gwca_mode {
 /* COMA */
 #define RRC_RR		BIT(0)
 #define RRC_RR_CLR	(0)
+
 #define RCEC_RCE	BIT(16)
+#define RCEC_ACE	GENMASK(RSWITCH_NUM_HW - 1, 0)
+
 #define RCDC_RCD	BIT(16)
+#define RCDC_ACD	GENMASK(RSWITCH_NUM_HW - 1, 0)
 
 #define CABPIRM_BPIOG	BIT(0)
 #define CABPIRM_BPR	BIT(1)
@@ -1199,6 +1203,8 @@ struct rswitch_private {
 
 	spinlock_t lock;	/* lock interrupt registers' control */
 	struct clk *clk;
+
+	u32 parallel_mode_saved_clocks;
 
 	struct net_device *offload_brdev;
 
@@ -1716,41 +1722,16 @@ out:
 	return budget - quota;
 }
 
-static bool rswitch_agent_clock_is_enabled(struct rswitch_private *priv, int port)
-{
-	u32 val = rswitch_read(priv, RCEC);
-
-	if (val & RCEC_RCE)
-		return (val & BIT(port)) ? true : false;
-	else
-		return false;
-}
-
-static void rswitch_agent_clock_ctrl(struct rswitch_private *priv, int port, int enable)
-{
-	if (enable)
-		rswitch_modify(priv, RCEC, 0, RCEC_RCE | BIT(port));
-	else
-		rswitch_modify(priv, RCDC, 0, BIT(port));
-}
-
 static int rdev_set_etha_mode(struct rswitch_device *rdev,
 			      enum rswitch_etha_mode mode)
 {
 	int ret;
-
-	/* Enable clock */
-	if (!rswitch_agent_clock_is_enabled(rdev->priv, rdev->port))
-		rswitch_agent_clock_ctrl(rdev->priv, rdev->port, 1);
 
 	rdev_etha_write(rdev, EAMC, mode);
 
 	ret = rdev_etha_poll(rdev, EAMS, EAMS_OPS_MASK, mode);
 	if (ret == 0)
 		rdev->etha_mode = mode;
-
-	/* Do not disable clock when entering DISABLED mode, otherwise
-	 * MII stops working */
 
 	return ret;
 }
@@ -2801,7 +2782,50 @@ MODULE_DEVICE_TABLE(of, renesas_eth_sw_of_table);
 
 static void rswitch_clock_enable(struct rswitch_private *priv)
 {
-	rswitch_write(priv, RCEC, GENMASK(RSWITCH_NUM_HW - 1, 0) | RCEC_RCE);
+	struct rswitch_device *rdev;
+	u32 val = 0;
+
+	/* Enable clock for rswitch */
+	val |= RCEC_RCE;
+
+	/* Enable clock for the used GWCA */
+	val |= FIELD_PREP(RCEC_ACE, BIT(priv->gwca.index));
+
+	/* Enable clock for used ports.
+	 *
+	 * Even if the port is currently not opened, clock is still needed
+	 * because it is required for mii bus.
+	 *
+	 * TODO: check if tighter clock management is possible and worths.
+	 *
+	 * TODO: check if runtime power management is feasible.
+	 */
+	rswitch_for_all_ports(priv, rdev)
+		val |= FIELD_PREP(RCEC_ACE, BIT(rdev->port));
+
+	if (parallel_mode)
+		val &= ~(priv->parallel_mode_saved_clocks);
+	if (val)
+		rswitch_write(priv, RCEC, val);
+}
+
+static void rswitch_clock_disable(struct rswitch_private *priv)
+{
+	struct rswitch_device *rdev;
+	u32 val = 0;
+
+	if (!parallel_mode)
+		val |= RCDC_RCD;
+
+	val |= FIELD_PREP(RCDC_ACD, BIT(priv->gwca.index));
+
+	rswitch_for_all_ports(priv, rdev)
+		val |= FIELD_PREP(RCDC_ACD, BIT(rdev->port));
+
+	if (parallel_mode)
+		val &= ~(priv->parallel_mode_saved_clocks);
+	if (val)
+		rswitch_write(priv, RCDC, val);
 }
 
 static void rswitch_reset(struct rswitch_private *priv)
@@ -2852,21 +2876,8 @@ static void rswitch_reset(struct rswitch_private *priv)
 static int rswitch_gwca_change_mode(struct rswitch_private *priv,
 				    enum rswitch_gwca_mode mode)
 {
-	int ret;
-
-	/* Enable clock */
-	if (!rswitch_agent_clock_is_enabled(priv, priv->gwca.index))
-		rswitch_agent_clock_ctrl(priv, priv->gwca.index, 1);
-
 	rswitch_gwca_write(priv, GWMC, mode);
-
-	ret = rswitch_gwca_poll(priv, GWMS, GWMS_OPS_MASK, mode);
-
-	/* Disable clock */
-	if (mode == GWMC_OPC_DISABLE)
-		rswitch_agent_clock_ctrl(priv, priv->gwca.index, 0);
-
-	return ret;
+	return rswitch_gwca_poll(priv, GWMS, GWMS_OPS_MASK, mode);
 }
 
 static int rswitch_gwca_mcast_table_reset(struct rswitch_private *priv)
@@ -3619,14 +3630,17 @@ static int rswitch_init(struct rswitch_private *priv)
 	rswitch_gwca_ts_queue_fill(priv, 0, TS_RING_SIZE);
 	INIT_LIST_HEAD(&priv->gwca.ts_info_list);
 
-	if (!parallel_mode)
-		rswitch_clock_enable(priv);
+	if (parallel_mode)
+		priv->parallel_mode_saved_clocks = rswitch_read(priv, RCEC);
 
-	rswitch_for_all_ports(priv, rdev) {
+	rswitch_clock_enable(priv);
+	rswitch_for_all_ports(priv, rdev)
 		rdev_read_mac_address(rdev);
-	}
+	rswitch_clock_disable(priv);
 
 	rswitch_reset(priv);
+
+	rswitch_clock_enable(priv);
 
 	err = rswitch_gwca_hw_init(priv);
 	if (err < 0)
@@ -3739,8 +3753,7 @@ static void rswitch_deinit(struct rswitch_private *priv)
 
 	rtsn_ptp_unregister(priv->ptp_priv);
 
-	/* Disable R-Switch clock */
-	rswitch_write(priv, RCDC, RCDC_RCD);
+	rswitch_clock_disable(priv);
 }
 
 static bool rdev_for_l2_offload(struct rswitch_device *rdev)
@@ -5032,6 +5045,8 @@ static int __maybe_unused rswitch_suspend(struct device *dev)
 	rswitch_gwca_ts_queue_free(priv);
 	rswitch_desc_free(priv);
 
+	rswitch_clock_disable(priv);
+
 	return 0;
 }
 
@@ -5096,8 +5111,7 @@ static int __maybe_unused rswitch_resume(struct device *dev)
 	rswitch_gwca_ts_queue_fill(priv, 0, TS_RING_SIZE);
 	INIT_LIST_HEAD(&priv->gwca.ts_info_list);
 
-	if (!parallel_mode)
-		rswitch_clock_enable(priv);
+	rswitch_clock_enable(priv);
 
 	ret = rswitch_gwca_hw_init(priv);
 	if (ret)
