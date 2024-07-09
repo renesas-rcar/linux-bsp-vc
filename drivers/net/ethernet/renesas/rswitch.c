@@ -762,19 +762,10 @@ enum rswitch_etha_mode {
 
 #define MPSM_PSME		BIT(0)
 #define MPSM_MFF_C45		BIT(2)
-#define MPSM_PDA_SHIFT		3
-#define MPSM_PDA_MASK		GENMASK(7, MPSM_PDA_SHIFT)
-#define MPSM_PDA(val)		((val) << MPSM_PDA_SHIFT)
-#define MPSM_PRA_SHIFT		8
-#define MPSM_PRA_MASK		GENMASK(12, MPSM_PRA_SHIFT)
-#define MPSM_PRA(val)		((val) << MPSM_PRA_SHIFT)
-#define MPSM_POP_SHIFT		13
-#define MPSM_POP_MASK		GENMASK(14, MPSM_POP_SHIFT)
-#define MPSM_POP(val)		((val) << MPSM_POP_SHIFT)
-#define MPSM_PRD_SHIFT		16
-#define MPSM_PRD_MASK		GENMASK(31, MPSM_PRD_SHIFT)
-#define MPSM_PRD_WRITE(val)	((val) << MPSM_PRD_SHIFT)
-#define MPSM_PRD_READ(val)	(((val) & MPSM_PRD_MASK) >> MPSM_PRD_SHIFT)
+#define MPSM_PDA		GENMASK(7, 3)
+#define MPSM_PRA		GENMASK(12, 8)
+#define MPSM_POP		GENMASK(14, 13)
+#define MPSM_PRD		GENMASK(31, 16)
 
 /* Completion flags */
 #define MMIS1_PAACS             BIT(2) /* Address */
@@ -1083,9 +1074,7 @@ struct rswitch_ext_ts_desc {
 
 struct rswitch_etha {
 	int index;
-	void __iomem *addr;
 	void __iomem *serdes_addr;
-	u32 psmcs;
 };
 
 struct rswitch_gwca_chain {
@@ -1288,6 +1277,14 @@ module_param(parallel_mode, bool, 0644);
 MODULE_PARM_DESC(parallel_mode, "Operate simultaneously with Realtime core");
 
 #define RSWITCH_TIMEOUT_MS	1000
+
+#define rswitch_poll_timeout(addr, mask, expected) ({ \
+	u32 val; \
+	\
+	readl_poll_timeout(addr, val, (val & mask) == expected, \
+			USEC_PER_MSEC, RSWITCH_TIMEOUT_MS * USEC_PER_MSEC); \
+})
+
 static int rswitch_reg_wait(void __iomem *addr, u32 offs, u32 mask, u32 expected)
 {
 	int i;
@@ -1302,26 +1299,40 @@ static int rswitch_reg_wait(void __iomem *addr, u32 offs, u32 mask, u32 expected
 	return -ETIMEDOUT;
 }
 
-static u32 rswitch_etha_offs(int index)
+static inline void __iomem *rdev_etha_reg_addr(struct rswitch_device *rdev,
+		enum rswitch_reg etha_reg)
 {
-	return RSWITCH_ETHA_OFFSET + index * RSWITCH_ETHA_SIZE;
+	return rdev->priv->addr + RSWITCH_ETHA_OFFSET +
+	       rdev->port * RSWITCH_ETHA_SIZE + etha_reg;
 }
 
-static u32 rswitch_etha_read(struct rswitch_etha *etha, enum rswitch_reg reg)
+static inline u32 rdev_etha_read(struct rswitch_device *rdev,
+		enum rswitch_reg etha_reg)
 {
-	return rs_read32(etha->addr + reg);
+	return readl(rdev_etha_reg_addr(rdev, etha_reg));
 }
 
-static void rswitch_etha_write(struct rswitch_etha *etha, u32 data, enum rswitch_reg reg)
+static inline void rdev_etha_write(struct rswitch_device *rdev,
+		enum rswitch_reg etha_reg, u32 data)
 {
-	rs_write32(data, etha->addr + reg);
+	writel(data, rdev_etha_reg_addr(rdev, etha_reg));
 }
 
-static void rswitch_etha_modify(struct rswitch_etha *etha, enum rswitch_reg reg,
-				u32 clear, u32 set)
+static inline void rdev_etha_modify(struct rswitch_device *rdev,
+		enum rswitch_reg etha_reg, u32 clear, u32 set)
 {
-	rswitch_etha_write(etha, (rswitch_etha_read(etha, reg) & ~clear) | set, reg);
+	void __iomem *reg_addr = rdev_etha_reg_addr(rdev, etha_reg);
+
+	writel((readl(reg_addr) & ~clear) | set, reg_addr);
 }
+
+static int rdev_etha_poll(struct rswitch_device *rdev,
+		enum rswitch_reg etha_reg, u32 mask, u32 expected)
+{
+	return rswitch_poll_timeout(rdev_etha_reg_addr(rdev, etha_reg),
+			mask, expected);
+}
+
 
 static void rswitch_modify(void __iomem *addr, enum rswitch_reg reg, u32 clear, u32 set)
 {
@@ -1613,17 +1624,15 @@ static void rswitch_agent_clock_ctrl(void __iomem *base_addr, int port, int enab
 static int rdev_set_etha_mode(struct rswitch_device *rdev,
 			      enum rswitch_etha_mode mode)
 {
-	struct rswitch_private *priv = rdev->priv;
-	struct rswitch_etha *etha = &priv->etha[rdev->port];
 	int ret;
 
 	/* Enable clock */
-	if (!rswitch_agent_clock_is_enabled(priv->addr, rdev->port))
-		rswitch_agent_clock_ctrl(priv->addr, rdev->port, 1);
+	if (!rswitch_agent_clock_is_enabled(rdev->priv->addr, rdev->port))
+		rswitch_agent_clock_ctrl(rdev->priv->addr, rdev->port, 1);
 
-	rs_write32(mode, etha->addr + EAMC);
+	rdev_etha_write(rdev, EAMC, mode);
 
-	ret = rswitch_reg_wait(etha->addr, EAMS, EAMS_OPS_MASK, mode);
+	ret = rdev_etha_poll(rdev, EAMS, EAMS_OPS_MASK, mode);
 	if (ret == 0)
 		rdev->etha_mode = mode;
 
@@ -1635,10 +1644,9 @@ static int rdev_set_etha_mode(struct rswitch_device *rdev,
 
 static void rdev_read_mac_address(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	u8 *mac = &rdev->mac_addr[0];
-	u32 mrmac0 = rswitch_etha_read(etha, MRMAC0);
-	u32 mrmac1 = rswitch_etha_read(etha, MRMAC1);
+	u32 mrmac0 = rdev_etha_read(rdev, MRMAC0);
+	u32 mrmac1 = rdev_etha_read(rdev, MRMAC1);
 
 	mac[0] = (mrmac0 >>  8) & 0xFF;
 	mac[1] = (mrmac0 >>  0) & 0xFF;
@@ -1650,24 +1658,23 @@ static void rdev_read_mac_address(struct rswitch_device *rdev)
 
 static void rdev_write_mac_address(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	u8 *mac = &rdev->mac_addr[0];
+	u32 mrmac0 = (mac[0] << 8) | mac[1];
+	u32 mrmac1 = (mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5];
 
-        iowrite32((mac[0] << 8) | mac[1], etha->addr + MRMAC0);
-        iowrite32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5],
-                  etha->addr + MRMAC1);
+	rdev_etha_write(rdev, MRMAC0, mrmac0);
+	rdev_etha_write(rdev, MRMAC1, mrmac1);
 }
 
-static bool rswitch_etha_wait_link_verification(struct rswitch_etha *etha)
+static bool rdev_wait_link_verification(struct rswitch_device *rdev)
 {
 	/* Request Link Verification */
-	rswitch_etha_write(etha, MLVC_PLV, MLVC);
-	return rswitch_reg_wait(etha->addr, MLVC, MLVC_PLV, 0);
+	rdev_etha_write(rdev, MLVC, MLVC_PLV);
+	return rdev_etha_poll(rdev, MLVC, MLVC_PLV, 0);
 }
 
 static void rdev_pis_lsc_setting(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	u32 pis, lsc;
 
 	switch (rdev->phy_interface) {
@@ -1679,7 +1686,7 @@ static void rdev_pis_lsc_setting(struct rswitch_device *rdev)
 		pis = MPIC_PIS_XGMII;
 		break;
 	default:
-		pis = FIELD_GET(MPIC_PIS_MASK, rswitch_etha_read(etha, MPIC));
+		pis = FIELD_GET(MPIC_PIS_MASK, rdev_etha_read(rdev, MPIC));
 		break;
 	}
 
@@ -1694,25 +1701,30 @@ static void rdev_pis_lsc_setting(struct rswitch_device *rdev)
 		lsc = MPIC_LSC_2_5G;
 		break;
 	default:
-		lsc = FIELD_GET(MPIC_LSC_MASK, rswitch_etha_read(etha, MPIC));
+		lsc = FIELD_GET(MPIC_LSC_MASK, rdev_etha_read(rdev, MPIC));
 		break;
 	}
 
-	rswitch_etha_modify(etha, MPIC, MPIC_PIS_MASK | MPIC_LSC_MASK,
-			    FIELD_PREP(MPIC_PIS_MASK, pis) |
-			    FIELD_PREP(MPIC_LSC_MASK, lsc));
+	rdev_etha_modify(rdev, MPIC, MPIC_PIS_MASK | MPIC_LSC_MASK,
+			 FIELD_PREP(MPIC_PIS_MASK, pis) |
+			 FIELD_PREP(MPIC_LSC_MASK, lsc));
 }
 
-static void rswitch_etha_enable_mii(struct rswitch_etha *etha)
+static void rdev_enable_mii(struct rswitch_device *rdev)
 {
-	rswitch_etha_modify(etha, MPIC, MPIC_PSMCS_MASK | MPIC_PSMHT_MASK,
-			    FIELD_PREP(MPIC_PSMCS_MASK, etha->psmcs) |
-			    FIELD_PREP(MPIC_PSMHT_MASK, 0x06));
+	/* MPIC.PSMCS = (clk [MHz] / (MDC frequency [MHz] * 2) - 1.
+	 * Calculating PSMCS value as MDC frequency = 2.5MHz. So, multiply
+	 * both the numerator and the denominator by 10.
+	 */
+	u32 psmcs = clk_get_rate(rdev->priv->clk) / 100000 / (25 * 2) - 1;
+
+	rdev_etha_modify(rdev, MPIC, MPIC_PSMCS_MASK | MPIC_PSMHT_MASK,
+			 FIELD_PREP(MPIC_PSMCS_MASK, psmcs) |
+			 FIELD_PREP(MPIC_PSMHT_MASK, 0x06));
 }
 
 static int rswitch_etha_hw_init(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	int err;
 
 	/* Change to CONFIG Mode */
@@ -1723,8 +1735,8 @@ static int rswitch_etha_hw_init(struct rswitch_device *rdev)
 	if (err < 0)
 		return err;
 
-	rs_write32(EAVCC_VEM_SC_TAG, etha->addr + EAVCC);
-	rswitch_etha_enable_mii(etha);
+	rdev_etha_write(rdev, EAVCC, EAVCC_VEM_SC_TAG);
+	rdev_enable_mii(rdev);
 
 	return rdev_set_etha_mode(rdev, EAMC_OPC_DISABLE);
 }
@@ -2084,11 +2096,11 @@ static void rdev_usgmii_serdes_check(struct work_struct *work)
 			msecs_to_jiffies(USGMII_SERDES_CHECK_NEXT_DELAY_MS));
 }
 
-static int rdev_set_access_c45(struct rswitch_device *rdev, bool read,
-			       int phyad, int devad, int regad, int data)
+static int rdev_mii_access_c45(struct rswitch_device *rdev, bool read,
+			       int phyad, int regnum, int data)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
-	int pop = read ? MDIO_READ_C45 : MDIO_WRITE_C45;
+	int devad = (regnum >> MII_DEVADDR_C45_SHIFT) & 0x1f;
+	int regad = regnum & MII_REGADDR_C45_MASK;
 	u32 val;
 	int ret;
 
@@ -2097,96 +2109,89 @@ static int rdev_set_access_c45(struct rswitch_device *rdev, bool read,
 		return 0;
 
 	/* Clear completion flags */
-	writel(MMIS1_CLEAR_FLAGS, etha->addr + MMIS1);
+	rdev_etha_write(rdev, MMIS1, MMIS1_CLEAR_FLAGS);
 
-	/* Submit address to PHY (MDIO_ADDR_C45 << 13) */
-	val = MPSM_PSME | MPSM_MFF_C45;
-	rs_write32((regad << 16) | (devad << 8) | (phyad << 3) | val, etha->addr + MPSM);
+	/* Submit register address to PHY */
+	val = FIELD_PREP(MPSM_PDA, phyad) |
+	      FIELD_PREP(MPSM_PRA, devad) |
+	      MPSM_PSME | MPSM_MFF_C45;
+	rdev_etha_write(rdev, MPSM, val | FIELD_PREP(MPSM_PRD, regad));
 
-	ret = rswitch_reg_wait(etha->addr, MMIS1, MMIS1_PAACS, MMIS1_PAACS);
+	ret = rdev_etha_poll(rdev, MMIS1, MMIS1_PAACS, MMIS1_PAACS);
 	if (ret)
 		return ret;
 
 	/* Clear address completion flag */
-	rswitch_etha_modify(etha, MMIS1, MMIS1_PAACS, MMIS1_PAACS);
+	rdev_etha_modify(rdev, MMIS1, MMIS1_PAACS, MMIS1_PAACS);
 
 	/* Read/Write PHY register */
 	if (read) {
-		writel((pop << 13) | (devad << 8) | (phyad << 3) | val, etha->addr + MPSM);
+		rdev_etha_write(rdev, MPSM,
+				val | FIELD_PREP(MPSM_POP, MDIO_READ_C45));
 
-		ret = rswitch_reg_wait(etha->addr, MMIS1, MMIS1_PRACS, MMIS1_PRACS);
+		ret = rdev_etha_poll(rdev, MMIS1, MMIS1_PRACS, MMIS1_PRACS);
 		if (ret)
 			return ret;
 
 		/* Read data */
-		ret = (rs_read32(etha->addr + MPSM) & MPSM_PRD_MASK) >> 16;
+		ret = FIELD_GET(MPSM_PRD, rdev_etha_read(rdev, MPSM));
 
 		/* Clear read completion flag */
-		rswitch_etha_modify(etha, MMIS1, MMIS1_PRACS, MMIS1_PRACS);
+		rdev_etha_modify(rdev, MMIS1, MMIS1_PRACS, MMIS1_PRACS);
 	} else {
-		rs_write32((data << 16) | (pop << 13) | (devad << 8) | (phyad << 3) | val,
-			   etha->addr + MPSM);
+		rdev_etha_write(rdev, MPSM,
+				val | FIELD_PREP(MPSM_POP, MDIO_WRITE_C45) |
+				      FIELD_PREP(MPSM_PRD, data));
 
-		ret = rswitch_reg_wait(etha->addr, MMIS1, MMIS1_PWACS, MMIS1_PWACS);
+		ret = rdev_etha_poll(rdev, MMIS1, MMIS1_PWACS, MMIS1_PWACS);
 	}
 
 	return ret;
 }
 
-static int rdev_set_access_c22(struct rswitch_device *rdev, bool read,
+static int rdev_mii_access_c22(struct rswitch_device *rdev, bool read,
 			       int phyad, int regad, int data)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
-	int pop = read ? MDIO_READ_C22 : MDIO_WRITE_C22;
 	int ret;
 	u32 val;
 
-	val = MPSM_POP(pop) | MPSM_PDA(phyad) | MPSM_PRA(regad) | MPSM_PSME;
+	val = FIELD_PREP(MPSM_PDA, phyad) |
+	      FIELD_PREP(MPSM_PRA, regad) |
+	      MPSM_PSME;
 
-	if (!read)
-		val |= MPSM_PRD_WRITE(data);
+	if (read)
+		val |= FIELD_PREP(MPSM_POP, MDIO_READ_C22);
+	else
+		val |= FIELD_PREP(MPSM_POP, MDIO_WRITE_C22) |
+		       FIELD_PREP(MPSM_PRD, data);
 
-	rs_write32(val, etha->addr + MPSM);
+	rdev_etha_write(rdev, MPSM, val);
 
-	ret = rswitch_reg_wait(etha->addr, MPSM, MPSM_PSME, 0);
+	ret = rdev_etha_poll(rdev, MPSM, MPSM_PSME, 0);
 	if (ret)
 		return ret;
 
-	return read ? MPSM_PRD_READ(rswitch_etha_read(etha, MPSM)) : 0;
+	return read ? FIELD_GET(MPSM_PRD, rdev_etha_read(rdev, MPSM)) : 0;
 }
 
-static int rdev_mii_read(struct mii_bus *bus, int addr, int regnum)
+static int rdev_mii_read(struct mii_bus *bus, int phyad, int regnum)
 {
 	struct rswitch_device *rdev = bus->priv;
-	int mode, devad, regad;
 
-	mode = regnum & MII_ADDR_C45;
-
-	/* Clause 22 */
-	if (!mode)
-		return rdev_set_access_c22(rdev, true, addr, regnum, 0);
-
-	devad = (regnum >> MII_DEVADDR_C45_SHIFT) & 0x1f;
-	regad = regnum & MII_REGADDR_C45_MASK;
-
-	return rdev_set_access_c45(rdev, true, addr, devad, regad, 0);
+	if (regnum & MII_ADDR_C45)
+		return rdev_mii_access_c45(rdev, true, phyad, regnum, 0);
+	else
+		return rdev_mii_access_c22(rdev, true, phyad, regnum, 0);
 }
 
-static int rdev_mii_write(struct mii_bus *bus, int addr, int regnum, u16 val)
+static int rdev_mii_write(struct mii_bus *bus, int phyad, int regnum, u16 val)
 {
 	struct rswitch_device *rdev = bus->priv;
-	int mode, devad, regad;
 
-	mode = regnum & MII_ADDR_C45;
-
-	/* Clause 22 */
-	if (!mode)
-		return rdev_set_access_c22(rdev, false, addr, regnum, val);
-
-	devad = (regnum >> MII_DEVADDR_C45_SHIFT) & 0x1f;
-	regad = regnum & MII_REGADDR_C45_MASK;
-
-	return rdev_set_access_c45(rdev, false, addr, devad, regad, val);
+	if (regnum & MII_ADDR_C45)
+		return rdev_mii_access_c45(rdev, false, phyad, regnum, val);
+	else
+		return rdev_mii_access_c22(rdev, false, phyad, regnum, val);
 }
 
 static int rdev_mii_reset(struct mii_bus *bus)
@@ -2302,7 +2307,7 @@ static void rdev_start(struct rswitch_device *rdev)
 
 	rdev->link = 1;
 
-	err = rswitch_etha_wait_link_verification(etha);
+	err = rdev_wait_link_verification(rdev);
 	if (err < 0)
 		netdev_warn(rdev->ndev, "link verification failed\n");
 
@@ -2313,7 +2318,6 @@ static void rdev_start(struct rswitch_device *rdev)
 
 static void rdev_stop(struct rswitch_device *rdev)
 {
-	struct rswitch_etha *etha = &rdev->priv->etha[rdev->port];
 	int err;
 
 	if (rdev->etha_mode != EAMC_OPC_OPERATION) {
@@ -2327,7 +2331,7 @@ static void rdev_stop(struct rswitch_device *rdev)
 		 *   (1) write EAMC_OPC_DISABLE to EAMC,
 		 *   (2) run serdes configuration for USGMII mode
 		 */
-		rs_write32(EAMC_OPC_DISABLE, etha->addr + EAMC);
+		rdev_etha_write(rdev, EAMC, EAMC_OPC_DISABLE);
 		err = rdev_serdes_chan_init(rdev, true);
 		if (err)
 			netdev_warn(rdev->ndev,
@@ -2804,14 +2808,7 @@ static void rswitch_etha_init(struct rswitch_device *rdev)
 
 	etha->index = rdev->port;
 
-	etha->addr = priv->addr + rswitch_etha_offs(etha->index);
 	etha->serdes_addr = priv->serdes_addr + etha->index * RSWITCH_SERDES_OFFSET;
-
-	/* MPIC.PSMCS = (clk [MHz] / (MDC frequency [MHz] * 2) - 1.
-	 * Calculating PSMCS value as MDC frequency = 2.5MHz. So, multiply
-	 * both the numerator and the denominator by 10.
-	 */
-	etha->psmcs = clk_get_rate(priv->clk) / 100000 / (25 * 2) - 1;
 }
 
 static int rswitch_gwca_change_mode(struct rswitch_private *priv,
