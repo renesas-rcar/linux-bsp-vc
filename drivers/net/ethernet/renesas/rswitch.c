@@ -33,15 +33,6 @@
 #include "rtsn_ptp.h"
 
 static void *debug_addr;
-static inline u32 rs_read32(void *addr)
-{
-	return ioread32(addr);
-}
-
-static inline void rs_write32(u32 data, void *addr)
-{
-	iowrite32(data, addr);
-}
 
 #define RSWITCH_NUM_HW		5
 #define RSWITCH_MAX_NUM_ETHA	3
@@ -1285,19 +1276,39 @@ MODULE_PARM_DESC(parallel_mode, "Operate simultaneously with Realtime core");
 			USEC_PER_MSEC, RSWITCH_TIMEOUT_MS * USEC_PER_MSEC); \
 })
 
-static int rswitch_reg_wait(void __iomem *addr, u32 offs, u32 mask, u32 expected)
+static inline void __iomem *rswitch_reg_addr(struct rswitch_private *priv,
+		enum rswitch_reg reg)
 {
-	int i;
-
-	for (i = 0; i < RSWITCH_TIMEOUT_MS; i++) {
-		if ((rs_read32(addr + offs) & mask) == expected)
-			return 0;
-
-		mdelay(1);
-	}
-
-	return -ETIMEDOUT;
+	return priv->addr + reg;
 }
+
+static inline u32 rswitch_read(struct rswitch_private *priv,
+		enum rswitch_reg reg)
+{
+	return readl(rswitch_reg_addr(priv, reg));
+}
+
+static inline void rswitch_write(struct rswitch_private *priv,
+		enum rswitch_reg reg, u32 data)
+{
+	writel(data, rswitch_reg_addr(priv, reg));
+}
+
+static inline void rswitch_modify(struct rswitch_private *priv,
+		enum rswitch_reg reg, u32 clear, u32 set)
+{
+	void __iomem *reg_addr = rswitch_reg_addr(priv, reg);
+
+	writel((readl(reg_addr) & ~clear) | set, reg_addr);
+}
+
+static int rswitch_poll(struct rswitch_private *priv,
+		enum rswitch_reg reg, u32 mask, u32 expected)
+{
+	return rswitch_poll_timeout(rswitch_reg_addr(priv, reg),
+			mask, expected);
+}
+
 
 static inline void __iomem *rdev_etha_reg_addr(struct rswitch_device *rdev,
 		enum rswitch_etha_reg etha_reg)
@@ -1449,11 +1460,6 @@ static int rdev_serdes_poll(struct rswitch_device *rdev,
 			mask, expected);
 }
 
-
-static void rswitch_modify(void __iomem *addr, enum rswitch_reg reg, u32 clear, u32 set)
-{
-	rs_write32((rs_read32(addr + reg) & ~clear) | set, addr + reg);
-}
 
 static bool __maybe_unused rswitch_is_any_data_irq(struct rswitch_private *priv, u32 *dis, bool tx)
 {
@@ -1678,7 +1684,7 @@ static int rswitch_tx_free(struct net_device *ndev, bool free_txed_only)
 	return free_num;
 }
 
-static int rswitch_poll(struct napi_struct *napi, int budget)
+static int rdev_napi_poll(struct napi_struct *napi, int budget)
 {
 	struct net_device *ndev = napi->dev;
 	struct rswitch_device *rdev = netdev_priv(ndev);
@@ -1710,9 +1716,9 @@ out:
 	return budget - quota;
 }
 
-static bool rswitch_agent_clock_is_enabled(void __iomem *base_addr, int port)
+static bool rswitch_agent_clock_is_enabled(struct rswitch_private *priv, int port)
 {
-	u32 val = rs_read32(base_addr + RCEC);
+	u32 val = rswitch_read(priv, RCEC);
 
 	if (val & RCEC_RCE)
 		return (val & BIT(port)) ? true : false;
@@ -1720,17 +1726,12 @@ static bool rswitch_agent_clock_is_enabled(void __iomem *base_addr, int port)
 		return false;
 }
 
-static void rswitch_agent_clock_ctrl(void __iomem *base_addr, int port, int enable)
+static void rswitch_agent_clock_ctrl(struct rswitch_private *priv, int port, int enable)
 {
-	u32 val;
-
-	if (enable) {
-		val = rs_read32(base_addr + RCEC);
-		rs_write32(val | RCEC_RCE | BIT(port), base_addr + RCEC);
-	} else {
-		val = rs_read32(base_addr + RCDC);
-		rs_write32(val | BIT(port), base_addr + RCDC);
-	}
+	if (enable)
+		rswitch_modify(priv, RCEC, 0, RCEC_RCE | BIT(port));
+	else
+		rswitch_modify(priv, RCDC, 0, BIT(port));
 }
 
 static int rdev_set_etha_mode(struct rswitch_device *rdev,
@@ -1739,8 +1740,8 @@ static int rdev_set_etha_mode(struct rswitch_device *rdev,
 	int ret;
 
 	/* Enable clock */
-	if (!rswitch_agent_clock_is_enabled(rdev->priv->addr, rdev->port))
-		rswitch_agent_clock_ctrl(rdev->priv->addr, rdev->port, 1);
+	if (!rswitch_agent_clock_is_enabled(rdev->priv, rdev->port))
+		rswitch_agent_clock_ctrl(rdev->priv, rdev->port, 1);
 
 	rdev_etha_write(rdev, EAMC, mode);
 
@@ -2800,14 +2801,14 @@ MODULE_DEVICE_TABLE(of, renesas_eth_sw_of_table);
 
 static void rswitch_clock_enable(struct rswitch_private *priv)
 {
-	rs_write32(GENMASK(RSWITCH_NUM_HW - 1, 0) | RCEC_RCE, priv->addr + RCEC);
+	rswitch_write(priv, RCEC, GENMASK(RSWITCH_NUM_HW - 1, 0) | RCEC_RCE);
 }
 
 static void rswitch_reset(struct rswitch_private *priv)
 {
 	if (!parallel_mode) {
-		rs_write32(RRC_RR, priv->addr + RRC);
-		rs_write32(RRC_RR_CLR, priv->addr + RRC);
+		rswitch_write(priv, RRC, RRC_RR);
+		rswitch_write(priv, RRC, RRC_RR_CLR);
 
 		reset_control_assert(priv->sd_rst);
 		mdelay(1);
@@ -2854,8 +2855,8 @@ static int rswitch_gwca_change_mode(struct rswitch_private *priv,
 	int ret;
 
 	/* Enable clock */
-	if (!rswitch_agent_clock_is_enabled(priv->addr, priv->gwca.index))
-		rswitch_agent_clock_ctrl(priv->addr, priv->gwca.index, 1);
+	if (!rswitch_agent_clock_is_enabled(priv, priv->gwca.index))
+		rswitch_agent_clock_ctrl(priv, priv->gwca.index, 1);
 
 	rswitch_gwca_write(priv, GWMC, mode);
 
@@ -2863,7 +2864,7 @@ static int rswitch_gwca_change_mode(struct rswitch_private *priv,
 
 	/* Disable clock */
 	if (mode == GWMC_OPC_DISABLE)
-		rswitch_agent_clock_ctrl(priv->addr, priv->gwca.index, 0);
+		rswitch_agent_clock_ctrl(priv, priv->gwca.index, 0);
 
 	return ret;
 }
@@ -3297,7 +3298,7 @@ static int rswitch_ndev_init(struct rswitch_device *rdev)
 	struct net_device *ndev = rdev->ndev;
 	int err;
 
-	netif_napi_add(ndev, &rdev->napi, rswitch_poll, 64);
+	netif_napi_add(ndev, &rdev->napi, rdev_napi_poll, 64);
 
 	rswitch_init_mac_address(rdev);
 
@@ -3341,17 +3342,20 @@ static int rswitch_bpool_config(struct rswitch_private *priv)
 {
 	u32 val;
 
-	val = rs_read32(priv->addr + CABPIRM);
+	val = rswitch_read(priv, CABPIRM);
 	if (val & CABPIRM_BPR)
 		return 0;
 
-	rs_write32(CABPIRM_BPIOG, priv->addr + CABPIRM);
-	return rswitch_reg_wait(priv->addr, CABPIRM, CABPIRM_BPR, CABPIRM_BPR);
+	rswitch_write(priv, CABPIRM, CABPIRM_BPIOG);
+	return rswitch_poll(priv, CABPIRM, CABPIRM_BPR, CABPIRM_BPR);
 }
 
 static void rswitch_coma_init(struct rswitch_private *priv)
 {
-	iowrite32(CABPPFLC_INIT_VALUE, priv->addr + CABPPFLC0);
+	/* FIXME: why only one of two CABPPFLC registers is initialized?
+	 *        what about other COMA registers?
+	 */
+	rswitch_write(priv, CABPPFLC0, CABPPFLC_INIT_VALUE);
 }
 
 static void rswitch_queue_interrupt(struct net_device *ndev)
@@ -3508,23 +3512,25 @@ static int rswitch_gwca_ts_request_irqs(struct rswitch_private *priv)
 static int rswitch_fwd_init(struct rswitch_private *priv)
 {
 	int port, ret;
-	int gwca_hw_port = RSWITCH_HW_NUM_TO_GWCA_IDX(priv->gwca.index);
 	u32 all_ports = GENMASK(RSWITCH_NUM_HW - 1, 0);
 	struct rswitch_device *rdev;
+	/* FIXME */
+	int gwca_index = RSWITCH_HW_NUM_TO_GWCA_IDX(priv->gwca.index);
+	int gwca_port = priv->gwca.index;
 
 	/* Start with empty configuration, with all features disabled and
 	 * all forwarding disallowed */
 	for (port = 0; port < RSWITCH_NUM_HW; port++) {
 		/* No features */
-		rs_write32(0, priv->addr + FWPC0(port));
+		rswitch_write(priv, FWPC0(port), 0);
 		/* All L3 forwarding disallowed, direct descriptor disabled */
-		rs_write32(FIELD_PREP(FWCP1_LTHFW_MASK, all_ports),
-				priv->addr + FWPC1(port));
+		rswitch_write(priv, FWPC1(port),
+				FIELD_PREP(FWCP1_LTHFW_MASK, all_ports));
 		/* All L2 forwarding disallowed */
-		rs_write32(FIELD_PREP(FWCP2_LTWFW_MASK, all_ports),
-				priv->addr + FWPC2(port));
+		rswitch_write(priv, FWPC2(port),
+				FIELD_PREP(FWCP2_LTWFW_MASK, all_ports));
 		/* Port based forwarding disallowed */
-		rs_write32(0, priv->addr + FWPBFC(port));
+		rswitch_write(priv, FWPBFC(port), 0);
 	}
 
 	/* For enabled ETHA ports, set port based forwarding to per-port
@@ -3532,62 +3538,62 @@ static int rswitch_fwd_init(struct rswitch_private *priv)
 	rswitch_for_all_ports(priv, rdev) {
 		port = rdev->port;
 		/* Port-based forwarding to GWCA port */
-		rs_write32(FIELD_PREP(FWPBFC_PBDV_MASK, BIT(priv->gwca.index)),
-				priv->addr + FWPBFC(port));
+		rswitch_write(priv, FWPBFC(port),
+				FIELD_PREP(FWPBFC_PBDV_MASK, BIT(gwca_port)));
 		/* Subdestination within GWCA port */
-		rs_write32(rdev->rx_chain->index,
-				priv->addr + FWPBFCSDC(gwca_hw_port, port));
+		rswitch_write(priv, FWPBFCSDC(gwca_index, port),
+				rdev->rx_chain->index);
 	}
 
 	/* For GWCA port, allow direct descriptors */
-	rswitch_modify(priv->addr, FWPC1(priv->gwca.index), 0, FWPC1_DDE);
+	rswitch_modify(priv, FWPC1(gwca_port), 0, FWPC1_DDE);
 
 	/* Initialize hardware L2 forwarding table */
 
 	/* Allow entire table to be used for "unsecure" entries */
-	rswitch_modify(priv->addr, FWMACHEC, 0, FWMACHEC_MACHMUE_MASK);
+	rswitch_modify(priv, FWMACHEC, 0, FWMACHEC_MACHMUE_MASK);
 
 	/* Initialize MAC hash table */
-	rs_write32(FWMACTIM_MACTIOG, priv->addr + FWMACTIM);
-	ret = rswitch_reg_wait(priv->addr, FWMACTIM, FWMACTIM_MACTIOG, 0);
+	rswitch_write(priv, FWMACTIM, FWMACTIM_MACTIOG);
+	ret = rswitch_poll(priv, FWMACTIM, FWMACTIM_MACTIOG, 0);
 	if (ret)
 		return ret;
 
 	/* Initialize hardware L3 forwarding */
 
 	/* Allow entire stream table to be used for "unsecure" entries */
-	rswitch_modify(priv->addr, FWLTHHEC,
+	rswitch_modify(priv, FWLTHHEC,
 			FWLTHHEC_HMUE,
 			FIELD_PREP(FWLTHHEC_HMUE, 1 << RSWITCH_LTH_STREAM_W));
 
 	/* Include only dst_ip (and frame type) in ipv4 stream id */
-	rs_write32(FWIP4SC_IIDS, priv->addr + FWIP4SC);
+	rswitch_write(priv, FWIP4SC, FWIP4SC_IIDS);
 
 	/* Initialize stream hash table */
-	rs_write32(FWLTHTIM_TIOG, priv->addr + FWLTHTIM);
-	ret = rswitch_reg_wait(priv->addr, FWLTHTIM, FWLTHTIM_TR, FWLTHTIM_TR);
+	rswitch_write(priv, FWLTHTIM, FWLTHTIM_TIOG);
+	ret = rswitch_poll(priv, FWLTHTIM, FWLTHTIM_TR, FWLTHTIM_TR);
 	if (ret)
 		return ret;
 
 	/* Allow access to frame update rules from "unsecure" APB */
-	rs_write32(0xffffffff, priv->addr + FWSCR34);
+	rswitch_write(priv, FWSCR34, 0xffffffff);
 #if RSWITCH_LTH_RRULE_W >= 6
-	rs_write32(0xffffffff, priv->addr + FWSCR33);
+	rswitch_write(priv, FWSCR33, 0xffffffff);
 #endif
 #if RSWITCH_LTH_RRULE_W >= 7
-	rs_write32(0xffffffff, priv->addr + FWSCR32);
-	rs_write32(0xffffffff, priv->addr + FWSCR31);
+	rswitch_write(priv, FWSCR32, 0xffffffff);
+	rswitch_write(priv, FWSCR31, 0xffffffff);
 #endif
 #if RSWITCH_LTH_RRULE_W >= 8
-	rs_write32(0xffffffff, priv->addr + FWSCR30);
-	rs_write32(0xffffffff, priv->addr + FWSCR29);
-	rs_write32(0xffffffff, priv->addr + FWSCR28);
-	rs_write32(0xffffffff, priv->addr + FWSCR27);
+	rswitch_write(priv, FWSCR30, 0xffffffff);
+	rswitch_write(priv, FWSCR29, 0xffffffff);
+	rswitch_write(priv, FWSCR28, 0xffffffff);
+	rswitch_write(priv, FWSCR27, 0xffffffff);
 #endif
 
 	/* Initialize frame update rules table */
-	rs_write32(FWL23UTIM_TIOG, priv->addr + FWL23UTIM);
-	ret = rswitch_reg_wait(priv->addr, FWL23UTIM, FWL23UTIM_TR, FWL23UTIM_TR);
+	rswitch_write(priv, FWL23UTIM, FWL23UTIM_TIOG);
+	ret = rswitch_poll(priv, FWL23UTIM, FWL23UTIM_TR, FWL23UTIM_TR);
 	if (ret)
 		return ret;
 
@@ -3734,7 +3740,7 @@ static void rswitch_deinit(struct rswitch_private *priv)
 	rtsn_ptp_unregister(priv->ptp_priv);
 
 	/* Disable R-Switch clock */
-	rs_write32(RCDC_RCD, priv->addr + RCDC);
+	rswitch_write(priv, RCDC, RCDC_RCD);
 }
 
 static bool rdev_for_l2_offload(struct rswitch_device *rdev)
@@ -3775,7 +3781,7 @@ static void rswitch_update_l2_offload(struct rswitch_private *priv)
 		}
 
 		if (!rdev->learning_offloaded && learning_needed) {
-			rswitch_modify(priv->addr, FWPC0(rdev->port),
+			rswitch_modify(priv, FWPC0(rdev->port),
 				0,
 				FWPC0_MACSSA | FWPC0_MACHLA | FWPC0_MACHMA);
 
@@ -3783,7 +3789,7 @@ static void rswitch_update_l2_offload(struct rswitch_private *priv)
 			netdev_info(rdev->ndev, "starting hw learning\n");
 		}
 		if (rdev->learning_offloaded && !learning_needed) {
-			rswitch_modify(priv->addr, FWPC0(rdev->port),
+			rswitch_modify(priv, FWPC0(rdev->port),
 				FWPC0_MACSSA | FWPC0_MACHLA | FWPC0_MACHMA,
 				0);
 
@@ -3796,12 +3802,12 @@ static void rswitch_update_l2_offload(struct rswitch_private *priv)
 			 * with l2 offload enabled earlier.
 			 *
 			 * Do not allow L2 forwarding to self for hw port. */
-			rs_write32(FIELD_PREP(FWCP2_LTWFW_MASK,
-					      fwd_mask | BIT(rdev->port)),
-					priv->addr + FWPC2(rdev->port));
+			rswitch_write(priv, FWPC2(rdev->port),
+				FIELD_PREP(FWCP2_LTWFW_MASK,
+					      fwd_mask | BIT(rdev->port)));
 
 			if (!rdev->forwarding_offloaded) {
-				rswitch_modify(priv->addr, FWPC0(rdev->port),
+				rswitch_modify(priv, FWPC0(rdev->port),
 					0,
 					FWPC0_MACSDA);
 
@@ -3810,10 +3816,10 @@ static void rswitch_update_l2_offload(struct rswitch_private *priv)
 						"starting hw forwarding\n");
 			}
 		} else if (rdev->forwarding_offloaded) {
-			rs_write32(FIELD_PREP(FWCP2_LTWFW_MASK, all_ports_mask),
-					priv->addr + FWPC2(rdev->port));
+			rswitch_write(priv, FWPC2(rdev->port),
+				FIELD_PREP(FWCP2_LTWFW_MASK, all_ports_mask));
 
-			rswitch_modify(priv->addr, FWPC0(rdev->port),
+			rswitch_modify(priv, FWPC0(rdev->port),
 				FWPC0_MACSDA,
 				0);
 
@@ -3889,21 +3895,21 @@ static void rswitch_update_l3_offload(struct rswitch_private *priv)
 			 * with l3 offload enabled earlier.
 			 *
 			 * Allow offload routing to self for hw port. */
-			rswitch_modify(priv->addr, FWPC1(rdev->port),
+			rswitch_modify(priv, FWPC1(rdev->port),
 				FWCP1_LTHFW_MASK,
 				FIELD_PREP(FWCP1_LTHFW_MASK, l3_ports_mask));
 			if (!rdev->l3_offload_enabled) {
-				rswitch_modify(priv->addr, FWPC0(rdev->port),
+				rswitch_modify(priv, FWPC0(rdev->port),
 					0,
 					FWPC0_L3_MASK);
 				rdev->l3_offload_enabled = 1;
 				netdev_info(rdev->ndev, "starting l3 offload\n");
 			}
 		} else if (rdev->l3_offload_enabled) {
-			rswitch_modify(priv->addr, FWPC0(rdev->port),
+			rswitch_modify(priv, FWPC0(rdev->port),
 				FWPC0_L3_MASK,
 				0);
-			rswitch_modify(priv->addr, FWPC1(rdev->port),
+			rswitch_modify(priv, FWPC1(rdev->port),
 				FWCP1_LTHFW_MASK,
 				FIELD_PREP(FWCP1_LTHFW_MASK, all_ports_mask));
 
@@ -4118,30 +4124,29 @@ static bool rswitch_l23update_hw_op(struct rswitch_private *priv,
 	val = FIELD_PREP(FWL23URL0_RN, update->index) |
 	      FIELD_PREP(FWL23URL0_PV,
 			      install ? GENMASK(RSWITCH_NUM_HW - 1, 0) : 0);
-	rs_write32(val, priv->addr + FWL23URL0);
+	rswitch_write(priv, FWL23URL0, val);
 
 	val = FWL23URL1_TTLU |
 	      FWL23URL1_MSAU |
 	      FWL23URL1_MDAU |
 	      (dst_mac[0] << 8) | (dst_mac[1] << 0);
-	rs_write32(val, priv->addr + FWL23URL1);
+	rswitch_write(priv, FWL23URL1, val);
 
 	val = (dst_mac[2] << 24) | (dst_mac[3] << 16) |
 	      (dst_mac[4] << 8)  | (dst_mac[5] << 0);
-	rs_write32(val, priv->addr + FWL23URL2);
+	rswitch_write(priv, FWL23URL2, val);
 
 	val = 0;
-	rs_write32(val, priv->addr + FWL23URL3);
+	rswitch_write(priv, FWL23URL3, val);
 
 	/* ... rule write starts after writing to FWL23URL3 */
 
-	ret = rswitch_reg_wait(priv->addr, FWL23URLR, FWL23URLR_L, 0);
+	ret = rswitch_poll(priv, FWL23URLR, FWL23URLR_L, 0);
 	if (ret) {
 		dev_err(&priv->pdev->dev, "timeout writing l23_update\n");
 		return false;
 	}
-	val = rs_read32(priv->addr + FWL23URLR) &
-			(FWL23URLR_LSF | FWL23URLR_LF);
+	val = rswitch_read(priv, FWL23URLR) & (FWL23URLR_LSF | FWL23URLR_LF);
 	if (val) {
 		dev_err(&priv->pdev->dev,
 			"writing l23_update failed (err %d)\n", val);
@@ -4167,30 +4172,30 @@ static bool rswitch_ipv4_dst_offload_hw_op(struct rswitch_device *rdev,
 	spin_lock(&priv->l3_lock);
 
 	val = (install ? 0 : FWLTHTL0_ED) | frame_type;
-	rs_write32(val, priv->addr + FWLTHTL0);
+	rswitch_write(priv, FWLTHTL0, val);
 
-	rs_write32(0, priv->addr + FWLTHTL1);
-	rs_write32(0, priv->addr + FWLTHTL2);
-	rs_write32(0, priv->addr + FWLTHTL3);
-	rs_write32(be32_to_cpu(offload->addr), priv->addr + FWLTHTL4);
+	rswitch_write(priv, FWLTHTL1, 0);
+	rswitch_write(priv, FWLTHTL2, 0);
+	rswitch_write(priv, FWLTHTL3, 0);
+	rswitch_write(priv, FWLTHTL4, be32_to_cpu(offload->addr));
 
 	/* accept from all ports in the table entry
 	 * (non-particilating ports have l3 table disabled) */
 	val = FIELD_PREP(FWLTHTL7_SLV, GENMASK(RSWITCH_NUM_HW - 1, 0)) |
 	      FWLTHTL7_RV |
 	      FIELD_PREP(FWLTHTL7_RN, offload->update->index);
-	rs_write32(val, priv->addr + FWLTHTL7);
+	rswitch_write(priv, FWLTHTL7, val);
 
-	rs_write32(0, priv->addr + FWLTHTL8(0));
-	rs_write32(0, priv->addr + FWLTHTL8(1));
+	rswitch_write(priv, FWLTHTL8(0), 0);
+	rswitch_write(priv, FWLTHTL8(1), 0);
 
 	val = FIELD_PREP(FWLTHTL9_DV, BIT(rdev->port));
-	rs_write32(val, priv->addr + FWLTHTL9);
+	rswitch_write(priv, FWLTHTL9, val);
 
 	/* ... table entry write starts after writing to FWLTHTL9 */
 
-	ret = rswitch_reg_wait(priv->addr, FWLTHTLR, FWLTHTLR_L, 0);
-	val = rs_read32(priv->addr + FWLTHTLR);
+	ret = rswitch_poll(priv, FWLTHTLR, FWLTHTLR_L, 0);
+	val = rswitch_read(priv, FWLTHTLR);
 	err_flags = val & (FWLTHTLR_LEF | FWLTHTLR_LSF | FWLTHTLR_LF);
 	collisions = FIELD_GET(FWLTHTLR_LCN, val);
 
