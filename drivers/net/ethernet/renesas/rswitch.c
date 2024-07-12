@@ -2756,11 +2756,6 @@ static const struct ethtool_ops rswitch_ethtool_ops = {
 	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
-static const struct of_device_id renesas_eth_sw_of_table[] = {
-	{ .compatible = "renesas,etherswitch", },
-	{ }
-};
-MODULE_DEVICE_TABLE(of, renesas_eth_sw_of_table);
 
 static void rswitch_clock_enable(struct rswitch_private *priv)
 {
@@ -5144,6 +5139,12 @@ static const struct dev_pm_ops rswitch_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(rswitch_suspend, rswitch_resume)
 	SET_RUNTIME_PM_OPS(rswitch_runtime_nop, rswitch_runtime_nop, NULL)
 };
+
+static const struct of_device_id renesas_eth_sw_of_table[] = {
+	{ .compatible = "renesas,etherswitch", },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, renesas_eth_sw_of_table);
 
 static struct platform_driver renesas_eth_sw_driver_platform = {
 	.probe = renesas_eth_sw_probe,
