@@ -648,7 +648,9 @@ enum rswitch_reg {
 	MTMFC		= RMRO + 0x0514,
 	MTUFC		= RMRO + 0x0518,
 	MTEFC		= RMRO + 0x051C,
+};
 
+enum rswitch_gwca_reg {
 	GWMC		= GWRO + 0x0000,
 	GWMS		= GWRO + 0x0004,
 	GWIRC		= GWRO + 0x0010,
@@ -800,7 +802,12 @@ enum rswitch_gwca_mode {
 #define GWMDNC_TXDMN(val)	((val & 0x1f) << 8)
 
 #define GWTPC_PPPL(ipv)		BIT(ipv)
-#define GWDCC_OFFS(chain)	(GWDCC0 + (chain) * 4)
+#define GWDCC(chain)		(GWDCC0 + (chain) * 4)
+
+#define GWDIS(i)	GWDIS0 + (i) * 0x10
+#define GWDIE(i)	GWDIE0 + (i) * 0x10
+#define GWDID(i)	GWDID0 + (i) * 0x10
+
 /* COMA */
 #define RRC_RR		BIT(0)
 #define RRC_RR_CLR	(0)
@@ -1326,6 +1333,42 @@ static int rdev_etha_poll(struct rswitch_device *rdev,
 }
 
 
+static inline void __iomem *rswitch_gwca_reg_addr(struct rswitch_private *priv,
+		enum rswitch_gwca_reg gwca_reg)
+{
+	/* TODO: support any of GWCAs */
+
+	return priv->addr + gwca_reg;
+}
+
+static inline u32 rswitch_gwca_read(struct rswitch_private *priv,
+		enum rswitch_gwca_reg gwca_reg)
+{
+	return readl(rswitch_gwca_reg_addr(priv, gwca_reg));
+}
+
+static inline void rswitch_gwca_write(struct rswitch_private *priv,
+		enum rswitch_gwca_reg gwca_reg, u32 data)
+{
+	writel(data, rswitch_gwca_reg_addr(priv, gwca_reg));
+}
+
+static inline void rswitch_gwca_modify(struct rswitch_private *priv,
+		enum rswitch_gwca_reg gwca_reg, u32 clear, u32 set)
+{
+	void __iomem *reg_addr = rswitch_gwca_reg_addr(priv, gwca_reg);
+
+	writel((readl(reg_addr) & ~clear) | set, reg_addr);
+}
+
+static int rswitch_gwca_poll(struct rswitch_private *priv,
+		enum rswitch_gwca_reg gwca_reg, u32 mask, u32 expected)
+{
+	return rswitch_poll_timeout(rswitch_gwca_reg_addr(priv, gwca_reg),
+			mask, expected);
+}
+
+
 static inline void __iomem *rswitch_serdes_reg_addr(
 		struct rswitch_private *priv, u32 reg_offset)
 {
@@ -1429,26 +1472,22 @@ static void rswitch_get_data_irq_status(struct rswitch_private *priv, u32 *dis)
 	int i;
 
 	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
-		dis[i] = rs_read32(priv->addr + GWDIS0 + i * 0x10);
+		dis[i] = rswitch_gwca_read(priv, GWDIS(i));
 }
 
 static void rswitch_enadis_data_irq(struct rswitch_private *priv, int index, bool enable)
 {
-	u32 offs = (enable ? GWDIE0 : GWDID0) + (index / 32) * 0x10;
-	u32 tmp = 0;
-
-	/* For VPF? */
-	if (enable)
-		tmp = rs_read32(priv->addr + offs);
-
-	rs_write32(BIT(index % 32) | tmp, priv->addr + offs);
+	if (enable) {
+		/* read part - for VPF? */
+		rswitch_gwca_modify(priv, GWDIE(index / 32), 0, BIT(index % 32));
+	} else {
+		rswitch_gwca_write(priv, GWDID(index / 32), BIT(index % 32));
+	}
 }
 
 static void rswitch_ack_data_irq(struct rswitch_private *priv, int index)
 {
-	u32 offs = GWDIS0 + (index / 32) * 0x10;
-
-	rs_write32(BIT(index % 32), priv->addr + offs);
+	rswitch_gwca_write(priv, GWDIS(index / 32), BIT(index % 32));
 }
 
 static bool rswitch_is_chain_rxed(struct rswitch_gwca_chain *c, u8 unexpected)
@@ -2406,6 +2445,7 @@ static void rswitch_phy_deinit(struct rswitch_device *rdev)
 static int rswitch_open(struct net_device *ndev)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
+	struct rswitch_private *priv = rdev->priv;
 	unsigned long flags;
 
 	napi_enable(&rdev->napi);
@@ -2415,15 +2455,15 @@ static int rswitch_open(struct net_device *ndev)
 	netif_start_queue(ndev);
 
 	/* Enable RX */
-	rswitch_modify(rdev->priv->addr, GWTRC0, 0, BIT(rdev->rx_chain->index));
+	rswitch_gwca_modify(priv, GWTRC0, 0, BIT(rdev->rx_chain->index));
 
 	/* Enable interrupt */
-	spin_lock_irqsave(&rdev->priv->lock, flags);
-	rswitch_enadis_data_irq(rdev->priv, rdev->tx_chain->index, true);
-	rswitch_enadis_data_irq(rdev->priv, rdev->rx_chain->index, true);
-	spin_unlock_irqrestore(&rdev->priv->lock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
+	rswitch_enadis_data_irq(priv, rdev->tx_chain->index, true);
+	rswitch_enadis_data_irq(priv, rdev->rx_chain->index, true);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
-	iowrite32(GWCA_TS_IRQ_BIT, rdev->priv->addr + GWTSDIE);
+	rswitch_gwca_write(priv, GWTSDIE, GWCA_TS_IRQ_BIT);
 
 	rdev->priv->chan_running |= BIT(rdev->port);
 
@@ -2438,6 +2478,7 @@ static int rswitch_open(struct net_device *ndev)
 static int rswitch_stop(struct net_device *ndev)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
+	struct rswitch_private *priv = rdev->priv;
 	struct rswitch_gwca_ts_info *ts_info, *ts_info2;
 
 	napi_disable(&rdev->napi);
@@ -2446,15 +2487,15 @@ static int rswitch_stop(struct net_device *ndev)
 
 	netif_stop_queue(ndev);
 
-	rdev->priv->chan_running &= ~BIT(rdev->port);
+	priv->chan_running &= ~BIT(rdev->port);
 	if (rdev->brdev)
-		rswitch_update_l2_offload(rdev->priv);
+		rswitch_update_l2_offload(priv);
 	if (!netdev_has_any_upper_dev(ndev))
-		rswitch_update_l3_offload(rdev->priv);
-	if (!rdev->priv->chan_running)
-		iowrite32(GWCA_TS_IRQ_BIT, rdev->priv->addr + GWTSDID);
+		rswitch_update_l3_offload(priv);
+	if (!priv->chan_running)
+		rswitch_gwca_write(priv, GWTSDID, GWCA_TS_IRQ_BIT);
 
-	list_for_each_entry_safe(ts_info, ts_info2, &rdev->priv->gwca.ts_info_list, list) {
+	list_for_each_entry_safe(ts_info, ts_info2, &priv->gwca.ts_info_list, list) {
 		if (ts_info->port != rdev->port)
 			continue;
 		dev_kfree_skb_irq(ts_info->skb);
@@ -2566,7 +2607,7 @@ static int rswitch_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	}
 
 	c->cur += num_desc;
-	rswitch_modify(rdev->priv->addr, GWTRC0, 0, BIT(c->index));
+	rswitch_gwca_modify(rdev->priv, GWTRC0, 0, BIT(c->index));
 
 out:
 	spin_unlock_irqrestore(&rdev->lock, flags);
@@ -2779,21 +2820,20 @@ static void rswitch_reset(struct rswitch_private *priv)
 		rswitch_serdes_write_direct(priv, RSWITCH_SERDES_LOCAL_OFFSET, 0);
 	} else {
 		int gwca_idx;
-		u32 gwro_offset;
 		int mode;
 		int count;
 
+		/* FIXME: explicit access to registers of two GWCAs removed from
+		 *	  here, to be added ar gwca register accessors level */
 		if (priv->gwca.index == RSWITCH_GWCA_IDX_TO_HW_NUM(0)) {
 			gwca_idx = 1;
-			gwro_offset = RSWITCH_GWCA1_OFFSET;
 		} else {
 			gwca_idx = 0;
-			gwro_offset = RSWITCH_GWCA0_OFFSET;
 		}
 
 		count = 0;
 		do {
-			mode = rs_read32(priv->addr + gwro_offset + 0x0004) & GWMS_OPS_MASK;
+			mode = rswitch_gwca_read(priv, GWMS) & GWMS_OPS_MASK;
 			if (mode == GWMC_OPC_OPERATION)
 				break;
 
@@ -2816,9 +2856,9 @@ static int rswitch_gwca_change_mode(struct rswitch_private *priv,
 	if (!rswitch_agent_clock_is_enabled(priv->addr, priv->gwca.index))
 		rswitch_agent_clock_ctrl(priv->addr, priv->gwca.index, 1);
 
-	rs_write32(mode, priv->addr + GWMC);
+	rswitch_gwca_write(priv, GWMC, mode);
 
-	ret = rswitch_reg_wait(priv->addr, GWMS, GWMS_OPS_MASK, mode);
+	ret = rswitch_gwca_poll(priv, GWMS, GWMS_OPS_MASK, mode);
 
 	/* Disable clock */
 	if (mode == GWMC_OPC_DISABLE)
@@ -2829,14 +2869,14 @@ static int rswitch_gwca_change_mode(struct rswitch_private *priv,
 
 static int rswitch_gwca_mcast_table_reset(struct rswitch_private *priv)
 {
-	rs_write32(GWMTIRM_MTIOG, priv->addr + GWMTIRM);
-	return rswitch_reg_wait(priv->addr, GWMTIRM, GWMTIRM_MTR, GWMTIRM_MTR);
+	rswitch_gwca_write(priv, GWMTIRM, GWMTIRM_MTIOG);
+	return rswitch_gwca_poll(priv, GWMTIRM, GWMTIRM_MTR, GWMTIRM_MTR);
 }
 
 static int rswitch_gwca_axi_ram_reset(struct rswitch_private *priv)
 {
-	rs_write32(GWARIRM_ARIOG, priv->addr + GWARIRM);
-	return rswitch_reg_wait(priv->addr, GWARIRM, GWARIRM_ARR, GWARIRM_ARR);
+	rswitch_gwca_write(priv, GWARIRM, GWARIRM_ARIOG);
+	return rswitch_gwca_poll(priv, GWARIRM, GWARIRM_ARR, GWARIRM_ARR);
 }
 
 static int rswitch_gwca_hw_init(struct rswitch_private *priv)
@@ -2857,16 +2897,16 @@ static int rswitch_gwca_hw_init(struct rswitch_private *priv)
 		return err;
 
 	/* Full setting flow */
-	rs_write32(GWVCC_VEM_SC_TAG, priv->addr + GWVCC);
-	rs_write32(0, priv->addr + GWTTFC);
-	rs_write32(lower_32_bits(priv->desc_bat_dma), priv->addr + GWDCBAC1);
-	rs_write32(upper_32_bits(priv->desc_bat_dma), priv->addr + GWDCBAC0);
-	iowrite32(lower_32_bits(priv->gwca.ts_queue.ring_dma), priv->addr + GWTDCAC10);
-	iowrite32(upper_32_bits(priv->gwca.ts_queue.ring_dma), priv->addr + GWTDCAC00);
-	iowrite32(GWCA_TS_IRQ_BIT, priv->addr + GWTSDCC0);
+	rswitch_gwca_write(priv, GWVCC, GWVCC_VEM_SC_TAG);
+	rswitch_gwca_write(priv, GWTTFC, 0);
+	rswitch_gwca_write(priv, GWDCBAC1, lower_32_bits(priv->desc_bat_dma));
+	rswitch_gwca_write(priv, GWDCBAC0, upper_32_bits(priv->desc_bat_dma));
+	rswitch_gwca_write(priv, GWTDCAC10, lower_32_bits(priv->gwca.ts_queue.ring_dma));
+	rswitch_gwca_write(priv, GWTDCAC00, upper_32_bits(priv->gwca.ts_queue.ring_dma));
+	rswitch_gwca_write(priv, GWTSDCC0, GWCA_TS_IRQ_BIT);
 
-	iowrite32((0xff << 8) | 0xff, priv->addr + GWMDNC);
-	iowrite32(GWTPC_PPPL(GWCA_IPV_NUM), priv->addr + GWTPC0);
+	rswitch_gwca_write(priv, GWMDNC, (0xff << 8) | 0xff);
+	rswitch_gwca_write(priv, GWTPC0, GWTPC_PPPL(GWCA_IPV_NUM));
 
 	err = rswitch_gwca_change_mode(priv, GWMC_OPC_DISABLE);
 	if (err < 0)
@@ -3018,8 +3058,10 @@ static int rswitch_gwca_chain_format(struct net_device *ndev,
 	desc->dptrl = cpu_to_le32(lower_32_bits(c->ring_dma));
 	desc->dptrh = cpu_to_le32(upper_32_bits(c->ring_dma));
 
-	iowrite32(GWDCC_BALR | (c->dir_tx ? GWDCC_DCP(GWCA_IPV_NUM) | GWDCC_DQT : 0) | GWDCC_EDE,
-		  priv->addr + GWDCC_OFFS(c->index));
+	rswitch_gwca_write(priv, GWDCC(c->index),
+			GWDCC_BALR |
+			(c->dir_tx ? GWDCC_DCP(GWCA_IPV_NUM) | GWDCC_DQT : 0) |
+			GWDCC_EDE);
 
 	return 0;
 }
@@ -3078,9 +3120,11 @@ static int rswitch_gwca_chain_ext_ts_format(struct net_device *ndev,
 	desc->dptrl = cpu_to_le32(lower_32_bits(c->ring_dma));
 	desc->dptrh = cpu_to_le32(upper_32_bits(c->ring_dma));
 
-	iowrite32(GWDCC_BALR | (c->dir_tx ? GWDCC_DCP(GWCA_IPV_NUM) | GWDCC_DQT : 0) |
-		  GWDCC_ETS | GWDCC_EDE,
-		  priv->addr + GWDCC_OFFS(c->index));
+	rswitch_gwca_write(priv, GWDCC(c->index),
+			GWDCC_BALR |
+			(c->dir_tx ? GWDCC_DCP(GWCA_IPV_NUM) | GWDCC_DQT : 0) |
+			GWDCC_ETS |
+			GWDCC_EDE);
 
 	return 0;
 }
@@ -3438,8 +3482,8 @@ static irqreturn_t rswitch_gwca_ts_irq(int irq, void *dev_id)
 {
 	struct rswitch_private *priv = dev_id;
 
-	if (ioread32(priv->addr + GWTSDIS) & GWCA_TS_IRQ_BIT) {
-		iowrite32(GWCA_TS_IRQ_BIT, priv->addr + GWTSDIS);
+	if (rswitch_gwca_read(priv, GWTSDIS) & GWCA_TS_IRQ_BIT) {
+		rswitch_gwca_write(priv, GWTSDIS, GWCA_TS_IRQ_BIT);
 		rswitch_ts(priv);
 
 		return IRQ_HANDLED;
