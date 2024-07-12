@@ -497,8 +497,9 @@ enum rswitch_reg {
 	CAMIE1		= CARO + 0x0354,
 	CAMID1		= CARO + 0x0358,
 	CASCR		= CARO + 0x0380,
+};
 
-	/* Ethernet Agent Address space Empty in spec */
+enum rswitch_etha_reg {
 	EAMC		= TARO + 0x0000,
 	EAMS		= TARO + 0x0004,
 	EAIRC		= TARO + 0x0010,
@@ -1299,26 +1300,26 @@ static int rswitch_reg_wait(void __iomem *addr, u32 offs, u32 mask, u32 expected
 }
 
 static inline void __iomem *rdev_etha_reg_addr(struct rswitch_device *rdev,
-		enum rswitch_reg etha_reg)
+		enum rswitch_etha_reg etha_reg)
 {
 	return rdev->priv->addr + RSWITCH_ETHA_OFFSET +
 	       rdev->port * RSWITCH_ETHA_SIZE + etha_reg;
 }
 
 static inline u32 rdev_etha_read(struct rswitch_device *rdev,
-		enum rswitch_reg etha_reg)
+		enum rswitch_etha_reg etha_reg)
 {
 	return readl(rdev_etha_reg_addr(rdev, etha_reg));
 }
 
 static inline void rdev_etha_write(struct rswitch_device *rdev,
-		enum rswitch_reg etha_reg, u32 data)
+		enum rswitch_etha_reg etha_reg, u32 data)
 {
 	writel(data, rdev_etha_reg_addr(rdev, etha_reg));
 }
 
 static inline void rdev_etha_modify(struct rswitch_device *rdev,
-		enum rswitch_reg etha_reg, u32 clear, u32 set)
+		enum rswitch_etha_reg etha_reg, u32 clear, u32 set)
 {
 	void __iomem *reg_addr = rdev_etha_reg_addr(rdev, etha_reg);
 
@@ -1326,7 +1327,7 @@ static inline void rdev_etha_modify(struct rswitch_device *rdev,
 }
 
 static int rdev_etha_poll(struct rswitch_device *rdev,
-		enum rswitch_reg etha_reg, u32 mask, u32 expected)
+		enum rswitch_etha_reg etha_reg, u32 mask, u32 expected)
 {
 	return rswitch_poll_timeout(rdev_etha_reg_addr(rdev, etha_reg),
 			mask, expected);
