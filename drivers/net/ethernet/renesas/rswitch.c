@@ -1242,7 +1242,7 @@ struct rswitch_ipv4_dst_offload {
 
 static void rswitch_update_l2_offload(struct rswitch_private *priv);
 static void rswitch_update_l3_offload(struct rswitch_private *priv);
-static void rswitch_handle_l3_learning(struct rswitch_device *rdev,
+static void rdev_handle_l3_learning(struct rswitch_device *rdev,
 		struct sk_buff *skb);
 static void rdev_cleanup_ipv4_offloads_all(struct rswitch_device *rdev);
 
@@ -1500,9 +1500,9 @@ static bool rswitch_is_chain_rxed(struct rswitch_gwca_chain *c, u8 unexpected)
 }
 
 
-static bool rswitch_rx(struct net_device *ndev, int *quota)
+static bool rdev_rx(struct rswitch_device *rdev, int *quota)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
+	struct net_device *ndev = rdev->ndev;
 	struct rswitch_gwca_chain *c = rdev->rx_chain;
 	int boguscnt = c->dirty + c->num_ring - c->cur;
 	int entry = c->cur % c->num_ring;
@@ -1597,8 +1597,8 @@ static bool rswitch_rx(struct net_device *ndev, int *quota)
 		}
 		skb->protocol = eth_type_trans(skb, ndev);
 		napi_gro_receive(&rdev->napi, skb);
-		rdev->ndev->stats.rx_packets++;
-		rdev->ndev->stats.rx_bytes += pkt_len;
+		ndev->stats.rx_packets++;
+		ndev->stats.rx_bytes += pkt_len;
 
 next:
 		c->rx_bufs[entry] = NULL;
@@ -1636,9 +1636,9 @@ next:
 	return boguscnt <= 0;
 }
 
-static int rswitch_tx_free(struct net_device *ndev, bool free_txed_only)
+static int rdev_tx_free(struct rswitch_device *rdev, bool free_txed_only)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
+	struct net_device *ndev = rdev->ndev;
 	struct rswitch_ext_desc *desc;
 	int free_num = 0;
 	int entry, size;
@@ -1662,11 +1662,11 @@ static int rswitch_tx_free(struct net_device *ndev, bool free_txed_only)
 					size, DMA_TO_DEVICE);
 			dev_kfree_skb_any(c->skb[entry]);
 			c->skb[entry] = NULL;
-			rdev->ndev->stats.tx_packets++;
+			ndev->stats.tx_packets++;
 			free_num++;
 		}
 		desc->die_dt = DT_EEMPTY;
-		rdev->ndev->stats.tx_bytes += size;
+		ndev->stats.tx_bytes += size;
 	}
 
 	return free_num;
@@ -1681,9 +1681,9 @@ static int rdev_napi_poll(struct napi_struct *napi, int budget)
 	int quota = budget;
 
 retry:
-	rswitch_tx_free(ndev, true);
+	rdev_tx_free(rdev, true);
 
-	if (rswitch_rx(ndev, &quota))
+	if (rdev_rx(rdev, &quota))
 		goto out;
 	else if (rswitch_is_chain_rxed(rdev->rx_chain, DT_FEMPTY))
 		goto retry;
@@ -1799,7 +1799,7 @@ static void rdev_enable_mii(struct rswitch_device *rdev)
 			 FIELD_PREP(MPIC_PSMHT_MASK, 0x06));
 }
 
-static int rswitch_etha_hw_init(struct rswitch_device *rdev)
+static int rdev_etha_hw_init(struct rswitch_device *rdev)
 {
 	int err;
 
@@ -2380,7 +2380,7 @@ static void rdev_adjust_link(struct net_device *ndev)
 	}
 }
 
-static int rswitch_phy_init(struct rswitch_device *rdev)
+static int rdev_phy_init(struct rswitch_device *rdev)
 {
 	struct phy_device *phydev;
 
@@ -2402,12 +2402,12 @@ static int rswitch_phy_init(struct rswitch_device *rdev)
 	return 0;
 }
 
-static void rswitch_phy_deinit(struct rswitch_device *rdev)
+static void rdev_phy_deinit(struct rswitch_device *rdev)
 {
 	phy_disconnect(rdev->ndev->phydev);
 }
 
-static int rswitch_open(struct net_device *ndev)
+static int rdev_open(struct net_device *ndev)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
 	struct rswitch_private *priv = rdev->priv;
@@ -2440,7 +2440,7 @@ static int rswitch_open(struct net_device *ndev)
 	return 0;
 };
 
-static int rswitch_stop(struct net_device *ndev)
+static int rdev_close(struct net_device *ndev)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
 	struct rswitch_private *priv = rdev->priv;
@@ -2471,7 +2471,7 @@ static int rswitch_stop(struct net_device *ndev)
 	return 0;
 };
 
-static int rswitch_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+static int rdev_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
 	int ret = NETDEV_TX_OK;
@@ -2485,7 +2485,7 @@ static int rswitch_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	spin_lock_irqsave(&rdev->lock, flags);
 
 	if (rdev->l3_offload_enabled)
-		rswitch_handle_l3_learning(rdev, skb);
+		rdev_handle_l3_learning(rdev, skb);
 
 	num_desc = skb->len % MAX_DESC_SZ ? skb->len / MAX_DESC_SZ + 1 : skb->len / MAX_DESC_SZ;
 
@@ -2585,15 +2585,13 @@ drop:
 
 }
 
-static struct net_device_stats *rswitch_get_stats(struct net_device *ndev)
+static struct net_device_stats *rdev_get_stats(struct net_device *ndev)
 {
 	return &ndev->stats;
 }
 
-static int rswitch_hwstamp_get(struct net_device *ndev, struct ifreq *req)
+static int rswitch_hwstamp_get(struct rswitch_private *priv, struct ifreq *req)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
-	struct rswitch_private *priv = rdev->priv;
 	struct rtsn_ptp_private *ptp_priv = priv->ptp_priv;
 	struct hwtstamp_config config;
 
@@ -2615,10 +2613,8 @@ static int rswitch_hwstamp_get(struct net_device *ndev, struct ifreq *req)
 	return copy_to_user(req->ifr_data, &config, sizeof(config)) ? -EFAULT : 0;
 }
 
-static int rswitch_hwstamp_set(struct net_device *ndev, struct ifreq *req)
+static int rswitch_hwstamp_set(struct rswitch_private *priv, struct ifreq *req)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
-	struct rswitch_private *priv = rdev->priv;
 	struct rtsn_ptp_private *ptp_priv = priv->ptp_priv;
 	struct hwtstamp_config config;
 	u32 tstamp_rx_ctrl = RTSN_RXTSTAMP_ENABLED;
@@ -2660,16 +2656,19 @@ static int rswitch_hwstamp_set(struct net_device *ndev, struct ifreq *req)
 	return copy_to_user(req->ifr_data, &config, sizeof(config)) ? -EFAULT : 0;
 }
 
-static int rswitch_do_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
+static int rdev_do_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 {
+	struct rswitch_device *rdev = netdev_priv(ndev);
+	struct rswitch_private *priv = rdev->priv;
+
 	if (!netif_running(ndev))
 		return -EINVAL;
 
 	switch (cmd) {
 	case SIOCGHWTSTAMP:
-		return rswitch_hwstamp_get(ndev, req);
+		return rswitch_hwstamp_get(priv, req);
 	case SIOCSHWTSTAMP:
-		return rswitch_hwstamp_set(ndev, req);
+		return rswitch_hwstamp_set(priv, req);
 	default:
 		if (ndev->phydev)
 			return phy_mii_ioctl(ndev->phydev, req, cmd);
@@ -2678,8 +2677,8 @@ static int rswitch_do_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 	return -EOPNOTSUPP;
 }
 
-static int rswitch_get_port_parent_id(struct net_device *ndev,
-				      struct netdev_phys_item_id *ppid)
+static int rdev_get_port_parent_id(struct net_device *ndev,
+				   struct netdev_phys_item_id *ppid)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
 	const char *name;
@@ -2690,8 +2689,8 @@ static int rswitch_get_port_parent_id(struct net_device *ndev,
 	return 0;
 }
 
-static int rswitch_get_phys_port_name(struct net_device *ndev,
-				      char *name, size_t len)
+static int rdev_get_phys_port_name(struct net_device *ndev,
+				   char *name, size_t len)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
 
@@ -2699,7 +2698,7 @@ static int rswitch_get_phys_port_name(struct net_device *ndev,
 	return 0;
 }
 
-int rswitch_set_mac_address(struct net_device *ndev, void *p)
+int rdev_set_mac_address(struct net_device *ndev, void *p)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
 	int ret;
@@ -2716,24 +2715,25 @@ int rswitch_set_mac_address(struct net_device *ndev, void *p)
 	return ret;
 }
 
-static const struct net_device_ops rswitch_netdev_ops = {
-	.ndo_open = rswitch_open,
-	.ndo_stop = rswitch_stop,
-	.ndo_start_xmit = rswitch_start_xmit,
-	.ndo_get_stats = rswitch_get_stats,
-	.ndo_do_ioctl = rswitch_do_ioctl,
-	.ndo_get_port_parent_id = rswitch_get_port_parent_id,
-	.ndo_get_phys_port_name = rswitch_get_phys_port_name,
+static const struct net_device_ops rdev_netdev_ops = {
+	.ndo_open = rdev_open,
+	.ndo_stop = rdev_close,
+	.ndo_start_xmit = rdev_start_xmit,
+	.ndo_get_stats = rdev_get_stats,
+	.ndo_do_ioctl = rdev_do_ioctl,
+	.ndo_get_port_parent_id = rdev_get_port_parent_id,
+	.ndo_get_phys_port_name = rdev_get_phys_port_name,
 	.ndo_validate_addr = eth_validate_addr,
-	.ndo_set_mac_address = rswitch_set_mac_address,
+	.ndo_set_mac_address = rdev_set_mac_address,
 };
 
 static bool rswitch_port_check(const struct net_device *ndev)
 {
-	return (ndev->netdev_ops == &rswitch_netdev_ops);
+	return (ndev->netdev_ops == &rdev_netdev_ops);
 }
 
-static int rswitch_get_ts_info(struct net_device *ndev, struct ethtool_ts_info *info)
+static int rdev_get_ts_info(struct net_device *ndev,
+			    struct ethtool_ts_info *info)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
 
@@ -2750,8 +2750,8 @@ static int rswitch_get_ts_info(struct net_device *ndev, struct ethtool_ts_info *
 	return 0;
 }
 
-static const struct ethtool_ops rswitch_ethtool_ops = {
-	.get_ts_info = rswitch_get_ts_info,
+static const struct ethtool_ops rdev_ethtool_ops = {
+	.get_ts_info = rdev_get_ts_info,
 	.get_link_ksettings = phy_ethtool_get_link_ksettings,
 	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
@@ -3237,7 +3237,7 @@ static void rswitch_rxdmac_free(struct net_device *ndev,
 	rswitch_gwca_put(priv, rdev->rx_chain);
 }
 
-static void rswitch_init_mac_address(struct rswitch_device *rdev)
+static void rdev_init_mac_address(struct rswitch_device *rdev)
 {
 	struct net_device *ndev = rdev->ndev;
 	const u8 *mac;
@@ -3288,7 +3288,7 @@ static int rswitch_ndev_init(struct rswitch_device *rdev)
 
 	netif_napi_add(ndev, &rdev->napi, rdev_napi_poll, 64);
 
-	rswitch_init_mac_address(rdev);
+	rdev_init_mac_address(rdev);
 
 	/* FIXME: it seems S4 VPF has FWPBFCSDC0/1 only so that we cannot set
 	 * CSD = 1 (rx_chain->index = 1) for FWPBFCS03. So, use index = 0
@@ -3625,7 +3625,7 @@ static int rswitch_init(struct rswitch_private *priv)
 
 	if (!parallel_mode) {
 		rswitch_for_all_ports(priv, rdev) {
-			err = rswitch_etha_hw_init(rdev);
+			err = rdev_etha_hw_init(rdev);
 			if (err < 0)
 				goto err_etha_hw_init;
 		}
@@ -3666,7 +3666,7 @@ static int rswitch_init(struct rswitch_private *priv)
 
 	rswitch_for_all_ports(priv, rdev) {
 		/* Register mii and attach to phy before registering netdev,
-		 * otherwise can enter rswitch_open when phy attachment is
+		 * otherwise can enter rdev_open when phy attachment is
 		 * not yes complete, which leads to crash inside phy subsystem.
 		 */
 		if (!parallel_mode) {
@@ -3675,7 +3675,7 @@ static int rswitch_init(struct rswitch_private *priv)
 				goto err_mii_register;
 		}
 
-		err = rswitch_phy_init(rdev);
+		err = rdev_phy_init(rdev);
 		if (err)
 			goto err_phy_init;
 
@@ -3684,7 +3684,7 @@ static int rswitch_init(struct rswitch_private *priv)
 		err_mii_register:
 			rswitch_undo_for_prev_ports(priv, rdev) {
 				unregister_netdev(rdev->ndev);
-				rswitch_phy_deinit(rdev);
+				rdev_phy_deinit(rdev);
 		err_phy_init:
 				rdev_mii_unregister(rdev);
 			}
@@ -3719,7 +3719,7 @@ static void rswitch_deinit(struct rswitch_private *priv)
 
 	rswitch_for_all_ports(priv, rdev) {
 		unregister_netdev(rdev->ndev);
-		rswitch_phy_deinit(rdev);
+		rdev_phy_deinit(rdev);
 		rdev_mii_unregister(rdev);
 		rswitch_ndev_deinit(rdev);
 	}
@@ -4388,7 +4388,7 @@ static void rdev_remove_ipv4_dst_offload(struct rswitch_device *rdev,
 }
 
 /* called under rswitch_device lock */
-static void rswitch_handle_l3_learning(struct rswitch_device *rdev,
+static void rdev_handle_l3_learning(struct rswitch_device *rdev,
 		struct sk_buff *skb)
 {
 	struct ethhdr *ethhdr = (struct ethhdr *)skb->data;
@@ -4677,7 +4677,7 @@ static const struct soc_device_attribute soc_needs_usgmii_serdes_check[] = {
 	{ /* Sentinel */ }
 };
 
-static void rswitch_device_create(struct rswitch_private *priv,
+static void rdev_create(struct rswitch_private *priv,
 		struct device_node *port_dn)
 {
 	struct device *dev = &priv->pdev->dev;
@@ -4713,8 +4713,8 @@ static void rswitch_device_create(struct rswitch_private *priv,
 	SET_NETDEV_DEV(ndev, &priv->pdev->dev);
 	ndev->base_addr = (unsigned long)priv->addr;
 	snprintf(ndev->name, IFNAMSIZ, "tsn%d", port);
-	ndev->netdev_ops = &rswitch_netdev_ops;
-	ndev->ethtool_ops = &rswitch_ethtool_ops;
+	ndev->netdev_ops = &rdev_netdev_ops;
+	ndev->ethtool_ops = &rdev_ethtool_ops;
 	ndev->max_mtu = MAX_MTU_SZ;
 
 	rdev = netdev_priv(ndev);
@@ -4810,7 +4810,7 @@ static void rdev_destroy_ipv4_route_lists(struct rswitch_device *rdev)
 	}
 }
 
-static void rswitch_device_destroy(struct rswitch_device *rdev)
+static void rdev_destroy(struct rswitch_device *rdev)
 {
 	list_del(&rdev->list);
 
@@ -4825,7 +4825,7 @@ static void rswitch_device_destroy(struct rswitch_device *rdev)
 	free_netdev(rdev->ndev);
 }
 
-static int renesas_eth_sw_probe(struct platform_device *pdev)
+static int rswitch_probe(struct platform_device *pdev)
 {
 	struct rswitch_private *priv;
 	struct resource *res, *res_serdes;
@@ -4918,7 +4918,7 @@ static int renesas_eth_sw_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	for_each_available_child_of_node(ports_dn, port_dn) {
-		rswitch_device_create(priv, port_dn);
+		rdev_create(priv, port_dn);
 	}
 	of_node_put(ports_dn);
 
@@ -4964,13 +4964,13 @@ rswitch_init_failed:
 
 	while (!list_empty(&priv->port_list)) {
 		rdev = list_first_entry(&priv->port_list, typeof(*rdev), list);
-		rswitch_device_destroy(rdev);
+		rdev_destroy(rdev);
 	}
 
 	return ret;
 }
 
-static int renesas_eth_sw_remove(struct platform_device *pdev)
+static int rswitch_remove(struct platform_device *pdev)
 {
 	struct rswitch_private *priv = platform_get_drvdata(pdev);
 	struct rswitch_device *rdev;
@@ -4993,7 +4993,7 @@ static int renesas_eth_sw_remove(struct platform_device *pdev)
 
 	while (!list_empty(&priv->port_list)) {
 		rdev = list_first_entry(&priv->port_list, typeof(*rdev), list);
-		rswitch_device_destroy(rdev);
+		rdev_destroy(rdev);
 	}
 
 	return 0;
@@ -5009,7 +5009,7 @@ static int __maybe_unused rswitch_suspend(struct device *dev)
 
 		if (netif_running(ndev)) {
 			netif_stop_subqueue(ndev, 0);
-			rswitch_stop(ndev);
+			rdev_close(ndev);
 		}
 
 		rswitch_txdmac_free(ndev, priv);
@@ -5042,7 +5042,7 @@ static int rswitch_resume_chan(struct net_device *ndev)
 	}
 
 	if (netif_running(ndev)) {
-		ret = rswitch_open(ndev);
+		ret = rdev_open(ndev);
 		if (ret)
 			goto error;
 	}
@@ -5091,7 +5091,7 @@ static int __maybe_unused rswitch_resume(struct device *dev)
 
 	if (!parallel_mode) {
 		rswitch_for_all_ports(priv, rdev) {
-			ret = rswitch_etha_hw_init(rdev);
+			ret = rdev_etha_hw_init(rdev);
 			if (ret < 0)
 				return ret;
 		}
@@ -5147,8 +5147,8 @@ static const struct of_device_id renesas_eth_sw_of_table[] = {
 MODULE_DEVICE_TABLE(of, renesas_eth_sw_of_table);
 
 static struct platform_driver renesas_eth_sw_driver_platform = {
-	.probe = renesas_eth_sw_probe,
-	.remove = renesas_eth_sw_remove,
+	.probe = rswitch_probe,
+	.remove = rswitch_remove,
 	.driver = {
 		.name	= "renesas_eth_sw",
 		.pm	= &rswitch_dev_pm_ops,
