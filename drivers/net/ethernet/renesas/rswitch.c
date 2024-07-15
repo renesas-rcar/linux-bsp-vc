@@ -28,6 +28,7 @@
 #include <linux/spinlock.h>
 #include <linux/reset.h>
 #include <linux/sys_soc.h>
+#include <net/pkt_cls.h>
 #include <net/switchdev.h>
 
 #include "rtsn_ptp.h"
@@ -727,6 +728,12 @@ enum rswitch_etha_mode {
 #define EAMS_OPS_MASK	EAMC_OPC_OPERATION
 
 #define EAVCC_VEM_SC_TAG	(0x3 << 16)
+
+#define EACAIVC(i)		(EACAIVC0 + (i) * 0x04)
+#define EACAIVC_CIV		GENMASK(19, 0)
+
+#define EACAULC(i)		(EACAULC0 + (i) * 0x04)
+#define EACAULC_CUL		GENMASK(30, 0)
 
 #define MPIC_PIS_MASK		GENMASK(2, 0)
 #define MPIC_PIS_GMII		0x02
@@ -2677,6 +2684,104 @@ static int rdev_do_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 	return -EOPNOTSUPP;
 }
 
+static int rdev_setup_qdisc_tbf(struct rswitch_device *rdev,
+				struct tc_tbf_qopt_offload *qopt)
+{
+	struct net_device *ndev = rdev->ndev;
+	u64 bps, x;
+	u32 clk_rate, burst_limit, civ, cul;
+
+	switch (qopt->command) {
+	case TC_TBF_REPLACE:
+		if (qopt->parent != TC_H_ROOT) {
+			netdev_warn(ndev, "can only offload root tbf\n");
+			return -EOPNOTSUPP;
+		}
+
+		clk_rate = clk_get_rate(rdev->priv->clk);
+
+		/* qopt->replace_params.rate.rate_bytes_ps - rate limit, in
+		 * bytes per second.
+		 *
+		 * Need to convert it to bytes-per-clk-cycle, and write to
+		 * EACAIVC in 4.16 fixed point format
+		 */
+		bps = qopt->replace_params.rate.rate_bytes_ps;
+		x = bps << 16;
+		if ((x >> 16) != bps)
+			goto bps_out_of_range;
+		do_div(x, clk_rate);
+		if (x > FIELD_MAX(EACAIVC_CIV)) {
+		bps_out_of_range:
+			netdev_err(ndev,
+				"CBS: hardware clocked at %u Hz can't support %llu bytes-per-second\n",
+				clk_rate, bps);
+			return -EINVAL;
+		}
+		civ = x;
+
+		/* credit upper limit is exactly number of bytes that is
+		 * allowed to be sent at once, that comes in
+		 * qopt->replace_params.max_size */
+		burst_limit = qopt->replace_params.max_size;
+		cul = min_t(u32, burst_limit, FIELD_MAX(EACAULC_CUL));
+		if (cul < burst_limit) {
+			netdev_warn(ndev,
+				"CBS: truncated max_size from %u to %u bytes due to hw limitations\n",
+				burst_limit, (u32)FIELD_MAX(EACAULC_CUL));
+		}
+
+		/* Per experiment:
+		 * - EACAEC bit is NOT under control of EACC,
+		 * - have to disable EACAEC bit before changing CBS params,
+		 *   otherwise get wrong result.
+		 */
+
+		rdev_etha_modify(rdev, EACAEC, BIT(0), 0);
+
+		rdev_etha_write(rdev, EACAIVC(0), FIELD_PREP(EACAIVC_CIV, civ));
+		rdev_etha_write(rdev, EACAULC(0), FIELD_PREP(EACAULC_CUL, cul));
+		rdev_etha_write(rdev, EACC, BIT(0));
+
+		rdev_etha_modify(rdev, EACAEC, 0, BIT(0));
+
+		netdev_info(ndev,
+			"CBS enabled for etha queue 0: %u.%05u credits per cycle, %u credits limit\n",
+			civ >> 16, (civ & 0xffff) * 100000 / 65536,
+			cul);
+		return 0;
+
+	case TC_TBF_DESTROY:
+		if (qopt->parent != TC_H_ROOT)
+			return -EOPNOTSUPP;
+
+		rdev_etha_modify(rdev, EACAEC, BIT(0), 0);
+
+		netdev_info(ndev, "CBS disabled for etha queue 0\n");
+		return 0;
+
+	case TC_TBF_STATS:
+		/* Hardware does not provide any CBS statistics */
+		return -EOPNOTSUPP;
+
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int rdev_setup_tc(struct net_device *ndev,
+			 enum tc_setup_type type, void *data)
+{
+	struct rswitch_device *rdev = netdev_priv(ndev);
+
+	switch (type) {
+	case TC_SETUP_QDISC_TBF:
+		return rdev_setup_qdisc_tbf(rdev, data);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
 static int rdev_get_port_parent_id(struct net_device *ndev,
 				   struct netdev_phys_item_id *ppid)
 {
@@ -2721,6 +2826,7 @@ static const struct net_device_ops rdev_netdev_ops = {
 	.ndo_start_xmit = rdev_start_xmit,
 	.ndo_get_stats = rdev_get_stats,
 	.ndo_do_ioctl = rdev_do_ioctl,
+	.ndo_setup_tc = rdev_setup_tc,
 	.ndo_get_port_parent_id = rdev_get_port_parent_id,
 	.ndo_get_phys_port_name = rdev_get_phys_port_name,
 	.ndo_validate_addr = eth_validate_addr,
@@ -4713,6 +4819,7 @@ static void rdev_create(struct rswitch_private *priv,
 	SET_NETDEV_DEV(ndev, &priv->pdev->dev);
 	ndev->base_addr = (unsigned long)priv->addr;
 	snprintf(ndev->name, IFNAMSIZ, "tsn%d", port);
+	ndev->features = NETIF_F_HW_TC;
 	ndev->netdev_ops = &rdev_netdev_ops;
 	ndev->ethtool_ops = &rdev_ethtool_ops;
 	ndev->max_mtu = MAX_MTU_SZ;
