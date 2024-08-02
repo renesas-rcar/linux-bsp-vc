@@ -11,4 +11,5 @@ obj-$(CONFIG_RAVB) += ravb.o
 
 obj-$(CONFIG_RTSN_PTP) += rtsn_ptp.o
 obj-$(CONFIG_RTSN) += rtsn.o
+obj-$(CONFIG_RENESAS_ETHER_SWITCH_LIB) += rswitch_lib.o
 obj-$(CONFIG_RENESAS_ETHER_SWITCH) += rswitch.o

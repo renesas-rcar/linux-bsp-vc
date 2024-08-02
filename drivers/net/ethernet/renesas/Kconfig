@@ -46,9 +46,13 @@ config RTSN_PTP
 	tristate
 	default n
 
+config RENESAS_ETHER_SWITCH_LIB
+	tristate
+
 config RENESAS_ETHER_SWITCH
 	tristate "Renesas Ethernet Switch support"
 	depends on ARCH_RENESAS || COMPILE_TEST
+	select RENESAS_ETHER_SWITCH_LIB
 	select CRC32
 	select MII
 	select PHYLIB
