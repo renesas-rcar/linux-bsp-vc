@@ -31,6 +31,8 @@
 #include <net/pkt_cls.h>
 #include <net/switchdev.h>
 
+#include "rswitch_desc.h"
+#include "rswitch_lib.h"
 #include "rtsn_ptp.h"
 
 #define RSWITCH_NUM_HW		5
@@ -41,6 +43,7 @@
 
 #define RSWITCH_AXI_CHAIN_W	7
 #define RSWITCH_MAX_NUM_CHAINS	(1 << RSWITCH_AXI_CHAIN_W)
+#define RSWITCH_NUM_IRQ_REGS	(RSWITCH_MAX_NUM_CHAINS / BITS_PER_TYPE(u32))
 
 #define RSWITCH_MAC_ENTRY_W	10
 
@@ -59,13 +62,6 @@
 #define TS_RING_SIZE		(TX_RING_SIZE * RSWITCH_MAX_NUM_ETHA)
 
 #define MAX_MTU_SZ		9000
-#define MAX_DESC_SZ		2048
-#define RSWITCH_ALIGN		128
-
-#define RSWITCH_RX_BUF_SIZE	(NET_SKB_PAD + NET_IP_ALIGN \
-				 + MAX_DESC_SZ \
-				 + SKB_DATA_ALIGN(sizeof(struct skb_shared_info)) \
-				 + RSWITCH_ALIGN)
 
 #if GWCA_INDEX == 1
 #define GWCA_IRQ_RESOURCE_NAME		"gwca1_rxtx0"
@@ -806,6 +802,7 @@ enum rswitch_gwca_mode {
 
 #define GWTPC_PPPL(ipv)		BIT(ipv)
 
+#define GWTRC(chain)		(GWTRC0 + (chain) * 4)
 #define GWDCC(chain)		(GWDCC0 + (chain) * 4)
 
 #define GWDIS(i)	GWDIS0 + (i) * 0x10
@@ -1000,116 +997,13 @@ enum rswitch_gwca_mode {
 #define BANK_1F80                               0x1f80
 #define VR_MII_AN_CTRL                          BANK_1F80, 0x0004
 
-/* Descriptors */
-enum RX_DS_CC_BIT {
-	RX_DS	= 0x0fff, /* Data size */
-	RX_TR	= 0x1000, /* Truncation indication */
-	RX_EI	= 0x2000, /* Error indication */
-	RX_PS	= 0xc000, /* Padding selection */
-};
 
-enum TX_DS_TAGL_BIT {
-	TX_DS	= 0x0fff, /* Data size */
-	TX_TAGL	= 0xf000, /* Frame tag LSBs */
-};
-
-enum DIE_DT {
-	/* Frame data */
-	DT_FSINGLE	= 0x80,
-	DT_FSTART	= 0x90,
-	DT_FMID		= 0xA0,
-	DT_FEND		= 0xB0,
-
-	/* Chain control */
-	DT_LEMPTY	= 0xC0,
-	DT_EEMPTY	= 0xD0,
-	DT_LINKFIX	= 0x00,
-	DT_LINK		= 0xE0,
-	DT_EOS		= 0xF0,
-	/* HW/SW arbitration */
-	DT_FEMPTY	= 0x40,
-	DT_FEMPTY_IS	= 0x10,
-	DT_FEMPTY_IC	= 0x20,
-	DT_FEMPTY_ND	= 0x30,
-	DT_FEMPTY_START	= 0x50,
-	DT_FEMPTY_MID	= 0x60,
-	DT_FEMPTY_END	= 0x70,
-
-	DT_MASK		= 0xF0,
-	DIE		= 0x08,	/* Descriptor Interrupt Enable */
-};
-
-/* For timestamp descriptor in dptrl (Byte 4 to 7) */
-#define TS_DESC_TSUN(dptrl)	((dptrl) & GENMASK(7, 0))
-#define TS_DESC_SPN(dptrl)	(((dptrl) & GENMASK(10, 8)) >> 8)
-#define TS_DESC_DPN(dptrl)	(((dptrl) & GENMASK(17, 16)) >> 16)
-#define TS_DESC_TN(dptrl)	((dptrl) & BIT(24))
-
-struct rswitch_desc {
-	__le16 info_ds;	/* Descriptor size */
-	u8 die_dt;	/* Descriptor interrupt enable and type */
-	__u8  dptrh;	/* Descriptor pointer MSB */
-	__le32 dptrl;	/* Descriptor pointer LSW */
-} __packed;
-
-struct rswitch_ts_desc {
-	__le16 info_ds;	/* Descriptor size */
-	u8 die_dt;	/* Descriptor interrupt enable and type */
-	__u8  dptrh;	/* Descriptor pointer MSB */
-	__le32 dptrl;	/* Descriptor pointer LSW */
-	__le32 ts_nsec;
-	__le32 ts_sec;
-} __packed;
-
-struct rswitch_ext_desc {
-	__le16 info_ds;	/* Descriptor size */
-	u8 die_dt;	/* Descriptor interrupt enable and type */
-	__u8  dptrh;	/* Descriptor pointer MSB */
-	__le32 dptrl;	/* Descriptor pointer LSW */
-	__le64 info1;
-} __packed;
-
-struct rswitch_ext_ts_desc {
-	__le16 info_ds;	/* Descriptor size */
-	u8 die_dt;	/* Descriptor interrupt enable and type */
-	__u8  dptrh;	/* Descriptor pointer MSB */
-	__le32 dptrl;	/* Descriptor pointer LSW */
-	__le64 info1;
-	__le32 ts_nsec;
-	__le32 ts_sec;
-} __packed;
-
-#define INFO1_FMT               BIT(2)
-#define INFO1_TXC		BIT(3)
-
-#define INFO1_TSUN(val)		((u64)(val) << 8ULL)
-#define INFO1_IPV(prio)		((u64)(prio) << 28ULL)
-#define INFO1_DV(port_vector)	((u64)(port_vector) << 48ULL)
-
-struct rswitch_gwca_chain {
-	union {
-		struct rswitch_ext_desc *tx_ring;
-		struct rswitch_ext_ts_desc *rx_ring;
-		struct rswitch_ts_desc *ts_ring;
-	};
-
-	/* Common */
+struct rswitch_gwca_ts_queue {
+	struct rswitch_ts_desc *ts_ring;
 	dma_addr_t ring_dma;
 	u32 num_ring;
 	u32 cur;
 	u32 dirty;
-
-	/* For [rt]x_ring */
-	int index;
-	bool dir_tx;
-	struct sk_buff **skb;
-	struct net_device *ndev;	/* chain to ndev for irq */
-
-	/* For RX multi-descriptor handling */
-	void **rx_bufs;
-	bool multi_desc;
-	u16 total_len;
-	struct sk_buff *skb_multi;
 };
 
 struct rswitch_gwca_ts_info {
@@ -1120,18 +1014,12 @@ struct rswitch_gwca_ts_info {
 	u8 tag;
 };
 
-#define RSWITCH_NUM_IRQ_REGS	(RSWITCH_MAX_NUM_CHAINS / BITS_PER_TYPE(u32))
 struct rswitch_gwca {
-	struct rswitch_gwca_chain *chains;
-	int num_chains;
-	struct rswitch_gwca_chain ts_queue;
+	struct rswitch_gwca_ts_queue ts_queue;
 	struct list_head ts_info_list;
 	DECLARE_BITMAP(used, RSWITCH_MAX_NUM_CHAINS);
-	u32 tx_irq_bits[RSWITCH_NUM_IRQ_REGS];
-	u32 rx_irq_bits[RSWITCH_NUM_IRQ_REGS];
 };
 
-#define NUM_CHAINS_PER_NDEV	2
 struct rswitch_device {
 	struct rswitch_private *priv;
 	struct list_head list;
@@ -1151,8 +1039,9 @@ struct rswitch_device {
 
 	struct net_device *ndev;
 	struct napi_struct napi;
-	struct rswitch_gwca_chain *tx_chain;
-	struct rswitch_gwca_chain *rx_chain;
+	int tx_chain_index, rx_chain_index;
+	struct rswitch_tx_ring *tx_ring;
+	struct rswitch_rx_ring *rx_ring;
 	spinlock_t lock;
 	u8 ts_tag;
 
@@ -1468,32 +1357,10 @@ static int rdev_serdes_poll(struct rswitch_device *rdev,
 }
 
 
-static bool __maybe_unused rswitch_is_any_data_irq(struct rswitch_private *priv, u32 *dis, bool tx)
-{
-	int i;
-	u32 *mask = tx ? priv->gwca.tx_irq_bits : priv->gwca.rx_irq_bits;
-
-	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++) {
-		if (dis[i] & mask[i])
-			return true;
-	}
-
-	return false;
-}
-
-static void rswitch_get_data_irq_status(struct rswitch_private *priv, u32 *dis)
-{
-	int i;
-
-	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
-		dis[i] = rswitch_gwca_read(priv, GWDIS(i));
-}
-
 static void rswitch_enadis_data_irq(struct rswitch_private *priv, int index, bool enable)
 {
 	if (enable) {
-		/* read part - for VPF? */
-		rswitch_gwca_modify(priv, GWDIE(index / 32), 0, BIT(index % 32));
+		rswitch_gwca_write(priv, GWDIE(index / 32), BIT(index % 32));
 	} else {
 		rswitch_gwca_write(priv, GWDID(index / 32), BIT(index % 32));
 	}
@@ -1504,191 +1371,9 @@ static void rswitch_ack_data_irq(struct rswitch_private *priv, int index)
 	rswitch_gwca_write(priv, GWDIS(index / 32), BIT(index % 32));
 }
 
-static bool rswitch_is_chain_rxed(struct rswitch_gwca_chain *c, u8 unexpected)
+static void rswitch_kick_tx_queue(struct rswitch_private *priv, int index)
 {
-	int entry;
-	struct rswitch_ext_ts_desc *desc;
-
-	entry = c->dirty % c->num_ring;
-	desc = &c->rx_ring[entry];
-
-	if ((desc->die_dt & DT_MASK) != unexpected)
-		return true;
-
-	return false;
-}
-
-
-static bool rdev_rx(struct rswitch_device *rdev, int *quota)
-{
-	struct net_device *ndev = rdev->ndev;
-	struct rswitch_gwca_chain *c = rdev->rx_chain;
-	int boguscnt = c->dirty + c->num_ring - c->cur;
-	int entry = c->cur % c->num_ring;
-	struct rswitch_ext_ts_desc *desc = &c->rx_ring[entry];
-	int limit;
-	u16 pkt_len;
-	struct sk_buff *skb;
-	dma_addr_t dma_addr;
-	u32 get_ts;
-
-	boguscnt = min(boguscnt, *quota);
-	limit = boguscnt;
-
-	while ((desc->die_dt & DT_MASK) != DT_FEMPTY) {
-		dma_rmb();
-		pkt_len = le16_to_cpu(desc->info_ds) & RX_DS;
-		if (--boguscnt < 0)
-			break;
-		dma_addr = le32_to_cpu(desc->dptrl) | ((__le64)le32_to_cpu(desc->dptrh) << 32);
-		dma_unmap_single(ndev->dev.parent, dma_addr,
-				 RSWITCH_RX_BUF_SIZE - NET_SKB_PAD - NET_IP_ALIGN,
-				 DMA_FROM_DEVICE);
-
-		if ((desc->die_dt & DT_MASK) == DT_FSTART) {
-			if (c->multi_desc) {
-				/* Got the error so freed the multi-descriptor skb */
-				dev_kfree_skb_any(c->skb_multi);
-			}
-			c->skb_multi = build_skb(c->rx_bufs[entry], RSWITCH_RX_BUF_SIZE);
-			if (!c->skb_multi) {
-				c->multi_desc = false;
-				goto next;
-			}
-			skb_checksum_none_assert(c->skb_multi);
-			skb_reserve(c->skb_multi, NET_SKB_PAD + NET_IP_ALIGN);
-			skb_put(c->skb_multi, pkt_len);
-			c->multi_desc = true;
-			c->total_len = pkt_len;
-
-			goto next;
-		} else if ((desc->die_dt & DT_MASK) == DT_FMID) {
-			if (!c->multi_desc)
-				goto next;
-
-			skb_add_rx_frag(c->skb_multi,
-					skb_shinfo(c->skb_multi)->nr_frags,
-					virt_to_page(c->rx_bufs[entry]),
-					offset_in_page(c->rx_bufs[entry]) + NET_SKB_PAD + NET_IP_ALIGN,
-					pkt_len, RSWITCH_RX_BUF_SIZE);
-			c->total_len += pkt_len;
-			goto next;
-		} else if ((desc->die_dt & DT_MASK) == DT_FEND) {
-			if (!c->multi_desc)
-				goto next;
-
-			skb_add_rx_frag(c->skb_multi,
-					skb_shinfo(c->skb_multi)->nr_frags,
-					virt_to_page(c->rx_bufs[entry]),
-					offset_in_page(c->rx_bufs[entry]) + NET_SKB_PAD + NET_IP_ALIGN,
-					pkt_len, RSWITCH_RX_BUF_SIZE);
-
-			skb = c->skb_multi;
-			pkt_len += c->total_len;
-			c->skb_multi = NULL;
-			c->multi_desc = false;
-		}  else {
-			/* F_SINGLE */
-			if (c->multi_desc) {
-				/* Got the error so freed the multi-descriptor skb */
-				dev_kfree_skb_any(c->skb_multi);
-				c->skb_multi = NULL;
-				c->multi_desc = false;
-			}
-			skb = build_skb(c->rx_bufs[entry], RSWITCH_RX_BUF_SIZE);
-			if (!skb)
-				goto next;
-			skb_checksum_none_assert(skb);
-			skb_reserve(skb, NET_SKB_PAD + NET_IP_ALIGN);
-			skb_put(skb, pkt_len);
-		}
-
-		get_ts = rdev->priv->ptp_priv->tstamp_rx_ctrl & RTSN_RXTSTAMP_TYPE_V2_L2_EVENT;
-		if (get_ts) {
-			struct skb_shared_hwtstamps *shhwtstamps;
-			struct timespec64 ts;
-
-			shhwtstamps = skb_hwtstamps(skb);
-			memset(shhwtstamps, 0, sizeof(*shhwtstamps));
-			ts.tv_sec = (u64)le32_to_cpu(desc->ts_sec);
-			ts.tv_nsec = le32_to_cpu(desc->ts_nsec & 0x3FFFFFFF);
-			shhwtstamps->hwtstamp = timespec64_to_ktime(ts);
-		}
-		skb->protocol = eth_type_trans(skb, ndev);
-		napi_gro_receive(&rdev->napi, skb);
-		ndev->stats.rx_packets++;
-		ndev->stats.rx_bytes += pkt_len;
-
-next:
-		c->rx_bufs[entry] = NULL;
-		entry = (++c->cur) % c->num_ring;
-		desc = &c->rx_ring[entry];
-	}
-
-	/* Refill the RX ring buffers */
-	for (; c->cur - c->dirty > 0; c->dirty++) {
-		entry = c->dirty % c->num_ring;
-		desc = &c->rx_ring[entry];
-		desc->info_ds = cpu_to_le16(MAX_DESC_SZ);
-
-		if (!c->rx_bufs[entry]) {
-			c->rx_bufs[entry] = netdev_alloc_frag(RSWITCH_RX_BUF_SIZE);
-			if (!c->rx_bufs[entry])
-				break;	/* Better luch next round */
-
-			dma_addr = dma_map_single(ndev->dev.parent,
-					c->rx_bufs[entry] + NET_SKB_PAD + NET_IP_ALIGN,
-					RSWITCH_RX_BUF_SIZE - NET_SKB_PAD - NET_IP_ALIGN,
-					DMA_FROM_DEVICE);
-
-			if (dma_mapping_error(ndev->dev.parent, dma_addr))
-				desc->info_ds = cpu_to_le16(0);
-			desc->dptrl = cpu_to_le32(lower_32_bits(dma_addr));
-			desc->dptrh = cpu_to_le32(upper_32_bits(dma_addr));
-		}
-		dma_wmb();
-		desc->die_dt = DT_FEMPTY | DIE;
-	}
-
-	*quota -= limit - (++boguscnt);
-
-	return boguscnt <= 0;
-}
-
-static int rdev_tx_free(struct rswitch_device *rdev, bool free_txed_only)
-{
-	struct net_device *ndev = rdev->ndev;
-	struct rswitch_ext_desc *desc;
-	int free_num = 0;
-	int entry, size;
-	dma_addr_t dma_addr;
-	struct rswitch_gwca_chain *c = rdev->tx_chain;
-	struct sk_buff *skb;
-
-	for (; c->cur - c->dirty > 0; c->dirty++) {
-		entry = c->dirty % c->num_ring;
-		desc = &c->tx_ring[entry];
-		if (free_txed_only && (desc->die_dt & DT_MASK) != DT_FEMPTY)
-			break;
-
-		dma_rmb();
-		size = le16_to_cpu(desc->info_ds) & TX_DS;
-		skb = c->skb[entry];
-		if (skb) {
-			dma_addr = le32_to_cpu(desc->dptrl) |
-				   ((__le64)le32_to_cpu(desc->dptrh) << 32);
-			dma_unmap_single(ndev->dev.parent, dma_addr,
-					size, DMA_TO_DEVICE);
-			dev_kfree_skb_any(c->skb[entry]);
-			c->skb[entry] = NULL;
-			ndev->stats.tx_packets++;
-			free_num++;
-		}
-		desc->die_dt = DT_EEMPTY;
-		ndev->stats.tx_bytes += size;
-	}
-
-	return free_num;
+	rswitch_gwca_write(priv, GWTRC(index / 32), BIT(index % 32));
 }
 
 static int rdev_napi_poll(struct napi_struct *napi, int budget)
@@ -1696,31 +1381,40 @@ static int rdev_napi_poll(struct napi_struct *napi, int budget)
 	struct net_device *ndev = napi->dev;
 	struct rswitch_device *rdev = netdev_priv(ndev);
 	struct rswitch_private *priv = rdev->priv;
+	bool handle_ts = !!(rdev->priv->ptp_priv->tstamp_rx_ctrl &
+			RTSN_RXTSTAMP_TYPE_V2_L2_EVENT);
+	struct sk_buff *skb;
+	int work_done = 0;
 	unsigned long flags;
-	int quota = budget;
 
-retry:
-	rdev_tx_free(rdev, true);
+	if (rswitch_tx_ring_handle_complete(rdev->tx_ring, &ndev->stats))
+		netif_wake_subqueue(ndev, 0);
 
-	if (rdev_rx(rdev, &quota))
-		goto out;
-	else if (rswitch_is_chain_rxed(rdev->rx_chain, DT_FEMPTY))
-		goto retry;
+	while (work_done < budget) {
+		skb = rswitch_rx_ring_process(rdev->rx_ring, handle_ts);
+		if (skb) {
+			skb->protocol = eth_type_trans(skb, ndev);
+			ndev->stats.rx_packets++;
+			ndev->stats.rx_bytes += skb->len;
+			napi_gro_receive(&rdev->napi, skb);
+		}
 
-	netif_wake_subqueue(ndev, 0);
+		work_done++;
+		if (!rswitch_rx_ring_need_process(rdev->rx_ring))
+			break;
+	}
 
-	if (napi_complete_done(napi, budget - quota)) {
+	if (work_done < budget && napi_complete_done(napi, work_done)) {
 		spin_lock_irqsave(&priv->lock, flags);
 		/* Re-enable RX/TX interrupts */
-		rswitch_enadis_data_irq(priv, rdev->tx_chain->index, true);
-		rswitch_enadis_data_irq(priv, rdev->rx_chain->index, true);
+		rswitch_enadis_data_irq(priv, rdev->tx_chain_index, true);
+		rswitch_enadis_data_irq(priv, rdev->rx_chain_index, true);
 		spin_unlock_irqrestore(&priv->lock, flags);
 	}
 
-	__iowmb();
+	__iowmb();	/* FXIME: what for? */
 
-out:
-	return budget - quota;
+	return work_done;
 }
 
 static int rdev_set_etha_mode(struct rswitch_device *rdev,
@@ -2439,12 +2133,14 @@ static int rdev_open(struct net_device *ndev)
 	netif_start_queue(ndev);
 
 	/* Enable RX */
-	rswitch_gwca_modify(priv, GWTRC0, 0, BIT(rdev->rx_chain->index));
+	/* (FIXME: is this needed? Per doc. GWTRC is for TX onlyi) */
+	rswitch_gwca_modify(priv, GWTRC(rdev->rx_chain_index / 32),
+			0, BIT(rdev->rx_chain_index % 32));
 
 	/* Enable interrupt */
 	spin_lock_irqsave(&priv->lock, flags);
-	rswitch_enadis_data_irq(priv, rdev->tx_chain->index, true);
-	rswitch_enadis_data_irq(priv, rdev->rx_chain->index, true);
+	rswitch_enadis_data_irq(priv, rdev->tx_chain_index, true);
+	rswitch_enadis_data_irq(priv, rdev->rx_chain_index, true);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	rswitch_gwca_write(priv, GWTSDIE, GWCA_TS_IRQ_BIT);
@@ -2493,115 +2189,54 @@ static int rdev_close(struct net_device *ndev)
 static int rdev_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
-	int ret = NETDEV_TX_OK;
-	int entry;
-	dma_addr_t dma_addr;
-	struct rswitch_ext_desc *desc;
+	struct rswitch_private *priv = rdev->priv;
+	int ret, ring_ret;
+	struct rswitch_gwca_ts_info *ts_info = NULL;
+	u64 info1;
 	unsigned long flags;
-	struct rswitch_gwca_chain *c = rdev->tx_chain;
-	int i, num_desc, pkt_len, size;
 
 	spin_lock_irqsave(&rdev->lock, flags);
 
 	if (rdev->l3_offload_enabled)
 		rdev_handle_l3_learning(rdev, skb);
 
-	num_desc = skb->len % MAX_DESC_SZ ? skb->len / MAX_DESC_SZ + 1 : skb->len / MAX_DESC_SZ;
-
-	if (c->cur - c->dirty > c->num_ring - num_desc) {
-		netif_stop_subqueue(ndev, 0);
-		ret = NETDEV_TX_BUSY;
-		goto out;
-	}
-
-	if (skb_put_padto(skb, ETH_ZLEN))
-		goto out;
-
-	dma_addr = dma_map_single(ndev->dev.parent, skb->data, skb->len, DMA_TO_DEVICE);
-	if (dma_mapping_error(ndev->dev.parent, dma_addr))
-		goto drop;
-
-	entry = c->cur % c->num_ring;
-
-	/* Stored the skb at the last descriptor so that can free the previous descriptors ASAP */
-	c->skb[(entry + num_desc - 1) % c->num_ring] = skb;
-	desc = &c->tx_ring[entry];
-	desc->dptrl = cpu_to_le32(lower_32_bits(dma_addr));
-	desc->dptrh = cpu_to_le32(upper_32_bits(dma_addr));
-
-	if (num_desc > 1) {
-		size = skb->len / num_desc;
-
-		pkt_len = skb->len - (num_desc - 1) * size;
-		desc->info_ds = cpu_to_le16(pkt_len);
-		for (i = 1; i < num_desc; i++) {
-			desc = &c->tx_ring[(entry + i) % c->num_ring];
-			desc->dptrl = cpu_to_le32(lower_32_bits(dma_addr + pkt_len));
-			desc->dptrh = cpu_to_le32(upper_32_bits(dma_addr + pkt_len));
-			desc->info_ds = cpu_to_le16(size);
-
-			pkt_len += size;
-		}
-	} else {
-		desc->info_ds = cpu_to_le16(skb->len);
-	}
-
 	if (!parallel_mode)
-		desc->info1 = cpu_to_le64(INFO1_DV(BIT(rdev->port)) |
-					  INFO1_IPV(GWCA_IPV_NUM) | INFO1_FMT);
+		info1 = INFO1_DV(BIT(rdev->port)) |
+			INFO1_IPV(GWCA_IPV_NUM) |
+			INFO1_FMT;
 	else
-		desc->info1 = cpu_to_le64(INFO1_IPV(GWCA_IPV_NUM));
+		info1 = INFO1_IPV(GWCA_IPV_NUM);
 
-	if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) {
-		struct rswitch_gwca_ts_info *ts_info;
-
+	if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP)
 		ts_info = kzalloc(sizeof(*ts_info), GFP_ATOMIC);
-		if (!ts_info) {
-			dma_unmap_single(ndev->dev.parent, dma_addr, skb->len, DMA_TO_DEVICE);
-			return -ENOMEM;
-		}
 
-		skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
+	if (ts_info) {
 		rdev->ts_tag++;
-		desc->info1 |= cpu_to_le64(INFO1_TSUN(rdev->ts_tag) | INFO1_TXC);
+		info1 |= INFO1_TSUN(rdev->ts_tag) | INFO1_TXC;
 
 		ts_info->skb = skb_get(skb);
 		ts_info->port = rdev->port;
 		ts_info->tag = rdev->ts_tag;
-		list_add_tail(&ts_info->list, &rdev->priv->gwca.ts_info_list);
-
-		skb_tx_timestamp(skb);
+		list_add_tail(&ts_info->list, &priv->gwca.ts_info_list);
 	}
 
-	dma_wmb();
-
-	if (num_desc > 1) {
-		for (i = num_desc - 1; i >= 0; i--) {
-			desc = &c->tx_ring[(entry + i) % c->num_ring];
-			if (!i)
-				desc->die_dt = DT_FSTART;
-			else if (i == num_desc - 1)
-				desc->die_dt = DT_FEND | DIE;
-			else
-				desc->die_dt = DT_FMID;
-		}
+	ring_ret = rswitch_tx_ring_add_skb(rdev->tx_ring, skb, 0, info1);
+	if (ring_ret == 0) {
+		ret = NETDEV_TX_OK;
+		rswitch_kick_tx_queue(priv, rdev->tx_chain_index);
 	} else {
-		desc = &c->tx_ring[entry];
-		desc->die_dt = DT_FSINGLE | DIE;
+		ret = NETDEV_TX_BUSY;
+		if (ring_ret == -ENOSPC)
+			netif_stop_subqueue(ndev, 0);
+		if (ts_info) {
+			list_del(&ts_info->list);
+			kfree(ts_info);
+		}
 	}
 
-	c->cur += num_desc;
-	rswitch_gwca_modify(rdev->priv, GWTRC0, 0, BIT(c->index));
-
-out:
 	spin_unlock_irqrestore(&rdev->lock, flags);
 
 	return ret;
-
-drop:
-	dev_kfree_skb_any(skb);
-	goto out;
-
 }
 
 static struct net_device_stats *rdev_get_stats(struct net_device *ndev)
@@ -3017,36 +2652,9 @@ static int rswitch_gwca_hw_init(struct rswitch_private *priv)
 	return 0;
 }
 
-static void rswitch_gwca_chain_free(struct net_device *ndev,
-				    struct rswitch_private *priv,
-				    struct rswitch_gwca_chain *c)
-{
-	int i;
-
-	if (!c->dir_tx) {
-		dma_free_coherent(ndev->dev.parent,
-				  sizeof(struct rswitch_ext_ts_desc) *
-				  (c->num_ring + 1), c->rx_ring, c->ring_dma);
-		c->rx_ring = NULL;
-
-		for (i = 0; i < c->num_ring; i++)
-			skb_free_frag(c->rx_bufs[i]);
-
-		kfree(c->rx_bufs);
-		c->rx_bufs = NULL;
-	} else {
-		dma_free_coherent(ndev->dev.parent,
-				  sizeof(struct rswitch_desc) *
-				  (c->num_ring + 1), c->tx_ring, c->ring_dma);
-		c->tx_ring = NULL;
-		kfree(c->skb);
-		c->skb = NULL;
-	}
-}
-
 static void rswitch_gwca_ts_queue_free(struct rswitch_private *priv)
 {
-	struct rswitch_gwca_chain *gq = &priv->gwca.ts_queue;
+	struct rswitch_gwca_ts_queue *gq = &priv->gwca.ts_queue;
 
 	dma_free_coherent(&priv->pdev->dev,
 			  sizeof(struct rswitch_ts_desc) * (gq->num_ring + 1),
@@ -3054,65 +2662,9 @@ static void rswitch_gwca_ts_queue_free(struct rswitch_private *priv)
 	gq->ts_ring = NULL;
 }
 
-static int rswitch_gwca_chain_init(struct net_device *ndev,
-				   struct rswitch_private *priv,
-				   struct rswitch_gwca_chain *c,
-				   bool dir_tx, int num_ring)
-{
-	int i, bit;
-	int index = c->index;	/* Keep the index before memset() */
-	void *rx_buf;
-
-	memset(c, 0, sizeof(*c));
-	c->index = index;
-	c->dir_tx = dir_tx;
-	c->num_ring = num_ring;
-	c->ndev = ndev;
-
-	if (!dir_tx) {
-		c->rx_bufs = kcalloc(c->num_ring, sizeof(*c->rx_bufs), GFP_KERNEL);
-		if (!c->rx_bufs)
-			goto out;
-
-		for (i = 0; i < c->num_ring; i++) {
-			rx_buf = netdev_alloc_frag(RSWITCH_RX_BUF_SIZE);
-			if (!rx_buf)
-				goto out;
-			c->rx_bufs[i] = rx_buf;
-		}
-		c->rx_ring = dma_alloc_coherent(ndev->dev.parent,
-				sizeof(struct rswitch_ext_ts_desc) *
-				(c->num_ring + 1), &c->ring_dma, GFP_KERNEL);
-	} else {
-		c->skb = kcalloc(c->num_ring, sizeof(*c->skb), GFP_KERNEL);
-		if (!c->skb)
-			return -ENOMEM;
-
-		c->tx_ring = dma_alloc_coherent(ndev->dev.parent,
-				sizeof(struct rswitch_ext_desc) *
-				(c->num_ring + 1), &c->ring_dma, GFP_KERNEL);
-	}
-	if (!c->rx_ring && !c->tx_ring)
-		goto out;
-
-	index = c->index / 32;
-	bit = BIT(c->index % 32);
-	if (dir_tx)
-		priv->gwca.tx_irq_bits[index] |= bit;
-	else
-		priv->gwca.rx_irq_bits[index] |= bit;
-
-	return 0;
-
-out:
-	rswitch_gwca_chain_free(ndev, priv, c);
-
-	return -ENOMEM;
-}
-
 static int rswitch_gwca_ts_queue_alloc(struct rswitch_private *priv)
 {
-	struct rswitch_gwca_chain *gq = &priv->gwca.ts_queue;
+	struct rswitch_gwca_ts_queue *gq = &priv->gwca.ts_queue;
 
 	memset(gq, 0, sizeof(*gq));
 	gq->num_ring = TS_RING_SIZE;
@@ -3122,53 +2674,10 @@ static int rswitch_gwca_ts_queue_alloc(struct rswitch_private *priv)
 	return !gq->ts_ring ? -ENOMEM : 0;
 }
 
-static int rswitch_gwca_chain_format(struct net_device *ndev,
-				struct rswitch_private *priv,
-				struct rswitch_gwca_chain *c)
-{
-	struct rswitch_ext_desc *ring;
-	struct rswitch_desc *desc;
-	int tx_ring_size = sizeof(*ring) * c->num_ring;
-	int i;
-	dma_addr_t dma_addr;
-
-	memset(c->tx_ring, 0, tx_ring_size);
-	for (i = 0, ring = c->tx_ring; i < c->num_ring; i++, ring++) {
-		if (!c->dir_tx) {
-			dma_addr = dma_map_single(ndev->dev.parent,
-					c->rx_bufs[i] + NET_SKB_PAD + NET_IP_ALIGN,
-					RSWITCH_RX_BUF_SIZE - NET_SKB_PAD - NET_IP_ALIGN,
-					DMA_FROM_DEVICE);
-			if (!dma_mapping_error(ndev->dev.parent, dma_addr))
-				ring->info_ds = cpu_to_le16(MAX_DESC_SZ);
-			ring->dptrl = cpu_to_le32(lower_32_bits(dma_addr));
-			ring->dptrh = cpu_to_le32(upper_32_bits(dma_addr));
-			ring->die_dt = DT_FEMPTY | DIE;
-		} else {
-			ring->die_dt = DT_EEMPTY | DIE;
-		}
-	}
-	ring->dptrl = cpu_to_le32(lower_32_bits(c->ring_dma));
-	ring->dptrh = cpu_to_le32(upper_32_bits(c->ring_dma));
-	ring->die_dt = DT_LINKFIX;
-
-	desc = &priv->desc_bat[c->index];
-	desc->die_dt = DT_LINKFIX;
-	desc->dptrl = cpu_to_le32(lower_32_bits(c->ring_dma));
-	desc->dptrh = cpu_to_le32(upper_32_bits(c->ring_dma));
-
-	rswitch_gwca_write(priv, GWDCC(c->index),
-			GWDCC_BALR |
-			(c->dir_tx ? GWDCC_DCP(GWCA_IPV_NUM) | GWDCC_DQT : 0) |
-			GWDCC_EDE);
-
-	return 0;
-}
-
 static void rswitch_gwca_ts_queue_fill(struct rswitch_private *priv,
 				       int start_index, int num)
 {
-	struct rswitch_gwca_chain *gq = &priv->gwca.ts_queue;
+	struct rswitch_gwca_ts_queue *gq = &priv->gwca.ts_queue;
 	struct rswitch_ts_desc *desc;
 	int i, index;
 
@@ -3184,61 +2693,18 @@ static void rswitch_gwca_ts_queue_fill(struct rswitch_private *priv,
 	desc->dptrh = cpu_to_le32(upper_32_bits(gq->ring_dma));
 }
 
-static int rswitch_gwca_chain_ext_ts_format(struct net_device *ndev,
-					    struct rswitch_private *priv,
-					    struct rswitch_gwca_chain *c)
-{
-	struct rswitch_ext_ts_desc *ring;
-	struct rswitch_desc *desc;
-	int ring_size = sizeof(*ring) * c->num_ring;
-	int i;
-	dma_addr_t dma_addr;
-
-	memset(c->rx_ring, 0, ring_size);
-	for (i = 0, ring = c->rx_ring; i < c->num_ring; i++, ring++) {
-		if (!c->dir_tx) {
-			dma_addr = dma_map_single(ndev->dev.parent,
-					c->rx_bufs[i] + NET_SKB_PAD + NET_IP_ALIGN,
-					RSWITCH_RX_BUF_SIZE - NET_SKB_PAD - NET_IP_ALIGN,
-					DMA_FROM_DEVICE);
-			if (!dma_mapping_error(ndev->dev.parent, dma_addr))
-				ring->info_ds = cpu_to_le16(MAX_DESC_SZ);
-			ring->dptrl = cpu_to_le32(lower_32_bits(dma_addr));
-			ring->dptrh = cpu_to_le32(upper_32_bits(dma_addr));
-			ring->die_dt = DT_FEMPTY | DIE;
-		} else {
-			ring->die_dt = DT_EEMPTY | DIE;
-		}
-	}
-	ring->dptrl = cpu_to_le32(lower_32_bits(c->ring_dma));
-	ring->dptrh = cpu_to_le32(upper_32_bits(c->ring_dma));
-	ring->die_dt = DT_LINKFIX;
-
-	desc = &priv->desc_bat[c->index];
-	desc->die_dt = DT_LINKFIX;
-	desc->dptrl = cpu_to_le32(lower_32_bits(c->ring_dma));
-	desc->dptrh = cpu_to_le32(upper_32_bits(c->ring_dma));
-
-	rswitch_gwca_write(priv, GWDCC(c->index),
-			GWDCC_BALR |
-			(c->dir_tx ? GWDCC_DCP(GWCA_IPV_NUM) | GWDCC_DQT : 0) |
-			GWDCC_ETS |
-			GWDCC_EDE);
-
-	return 0;
-}
-
 static int rswitch_desc_alloc(struct rswitch_private *priv)
 {
 	struct device *dev = &priv->pdev->dev;
-	int i, num_chains = priv->gwca.num_chains;
+	int i;
 
-	priv->desc_bat_size = sizeof(struct rswitch_desc) * num_chains;
+	priv->desc_bat_size =
+			sizeof(struct rswitch_desc) * RSWITCH_MAX_NUM_CHAINS;
 	priv->desc_bat = dma_alloc_coherent(dev, priv->desc_bat_size,
 					    &priv->desc_bat_dma, GFP_KERNEL);
 	if (!priv->desc_bat)
 		return -ENOMEM;
-	for (i = 0; i < num_chains; i++)
+	for (i = 0; i < RSWITCH_MAX_NUM_CHAINS; i++)
 		priv->desc_bat[i].die_dt = DT_EOS;
 
 	return 0;
@@ -3252,98 +2718,129 @@ static void rswitch_desc_free(struct rswitch_private *priv)
 	priv->desc_bat = NULL;
 }
 
-static struct rswitch_gwca_chain *rswitch_gwca_get(struct rswitch_private *priv)
+static int rswitch_gwca_get(struct rswitch_private *priv)
 {
 	int index;
 
-	index = find_first_zero_bit(priv->gwca.used, priv->gwca.num_chains);
-	if (index >= priv->gwca.num_chains)
-		return NULL;
+	index = find_first_zero_bit(priv->gwca.used, RSWITCH_MAX_NUM_CHAINS);
+	if (index >= RSWITCH_MAX_NUM_CHAINS)
+		return -1;
 	set_bit(index, priv->gwca.used);
-	priv->gwca.chains[index].index = index;
 
-	return &priv->gwca.chains[index];
+	return index;
 }
 
-static void rswitch_gwca_put(struct rswitch_private *priv,
-			     struct rswitch_gwca_chain *c)
+static void rswitch_gwca_put(struct rswitch_private *priv, int index)
 {
-	clear_bit(c->index, priv->gwca.used);
+	clear_bit(index, priv->gwca.used);
+}
+
+static void rswitch_gwca_attach_ring(struct rswitch_private *priv, int index,
+		dma_addr_t ring_dma, u32 gwdcc_bits)
+{
+	struct rswitch_desc *desc = &priv->desc_bat[index];
+
+	desc->dptrl = cpu_to_le32(lower_32_bits(ring_dma));
+	desc->dptrh = cpu_to_le32(upper_32_bits(ring_dma));
+	dma_wmb();
+	desc->die_dt = DT_LINKFIX;
+
+	rswitch_gwca_write(priv, GWDCC(index), gwdcc_bits | GWDCC_BALR);
+}
+
+static int rswitch_gwca_detach_ring(struct rswitch_private *priv, int index)
+{
+	struct rswitch_desc *desc = &priv->desc_bat[index];
+
+	desc->die_dt = DT_EOS;
+
+	rswitch_gwca_modify(priv, GWDCC(index), 0, GWDCC_BALR);
+	return rswitch_gwca_poll(priv, GWDCC(index), GWDCC_BALR, 0);
 }
 
 static int rswitch_txdmac_init(struct net_device *ndev,
 			       struct rswitch_private *priv)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
-	int err;
+	dma_addr_t ring_dma;
 
-	rdev->tx_chain = rswitch_gwca_get(priv);
-	if (!rdev->tx_chain)
-		return -EBUSY;
+	rdev->tx_chain_index = rswitch_gwca_get(priv);
+	if (rdev->tx_chain_index == -1)
+		return -ENOSPC;
 
-	err = rswitch_gwca_chain_init(ndev, priv, rdev->tx_chain, true, TX_RING_SIZE);
-	if (err < 0)
-		goto out_init;
+	rdev->tx_ring = rswitch_tx_ring_create(&priv->pdev->dev, TX_RING_SIZE);
+	if (!rdev->tx_ring) {
+		rswitch_gwca_put(priv, rdev->tx_chain_index);
+		rdev->tx_chain_index = -1;
+		return -ENOMEM;
+	}
 
-	err = rswitch_gwca_chain_format(ndev, priv, rdev->tx_chain);
-	if (err < 0)
-		goto out_format;
+	ring_dma = rswitch_tx_ring_dma_addr(rdev->tx_ring);
+	rswitch_gwca_attach_ring(priv, rdev->tx_chain_index, ring_dma,
+			GWDCC_DQT |	/* transmit queue */
+			GWDCC_DCP(GWCA_IPV_NUM) | /* transmit priority */
+			GWDCC_EDE);	/* extended descriptor */
 
 	return 0;
-
-out_format:
-	rswitch_gwca_chain_free(ndev, priv, rdev->tx_chain);
-
-out_init:
-	rswitch_gwca_put(priv, rdev->tx_chain);
-
-	return err;
 }
 
 static void rswitch_txdmac_free(struct net_device *ndev,
 				struct rswitch_private *priv)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
+	int ret;
 
-	rswitch_gwca_chain_free(ndev, priv, rdev->tx_chain);
-	rswitch_gwca_put(priv, rdev->tx_chain);
+	ret = rswitch_gwca_detach_ring(priv, rdev->tx_chain_index);
+	if (ret)
+		dev_err(&priv->pdev->dev, "tx chain detach failed\n");
+	else
+		rswitch_tx_ring_destroy(rdev->tx_ring);
+	rdev->tx_ring = NULL;
+
+	rswitch_gwca_put(priv, rdev->tx_chain_index);
+	rdev->tx_chain_index = -1;
 }
 
 static int rswitch_rxdmac_init(struct net_device *ndev,
 			       struct rswitch_private *priv)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
-	int err;
+	dma_addr_t ring_dma;
 
-	rdev->rx_chain = rswitch_gwca_get(priv);
-	if (!rdev->rx_chain)
-		return -EBUSY;
+	rdev->rx_chain_index = rswitch_gwca_get(priv);
+	if (rdev->rx_chain_index == -1)
+		return -ENOSPC;
 
-	err = rswitch_gwca_chain_init(ndev, priv, rdev->rx_chain, false, RX_RING_SIZE);
-	if (err < 0)
-		goto out_init;
-	err = rswitch_gwca_chain_ext_ts_format(ndev, priv, rdev->rx_chain);
-	if (err < 0)
-		goto out_format;
+	rdev->rx_ring = rswitch_rx_ring_create(&priv->pdev->dev, RX_RING_SIZE);
+	if (!rdev->rx_ring) {
+		rswitch_gwca_put(priv, rdev->rx_chain_index);
+		rdev->rx_chain_index = -1;
+		return -ENOMEM;
+	}
+
+	ring_dma = rswitch_rx_ring_dma_addr(rdev->rx_ring);
+	rswitch_gwca_attach_ring(priv, rdev->rx_chain_index, ring_dma,
+			GWDCC_EDE |	/* extended descriptor */
+			GWDCC_ETS);	/* ... with timestamps */
 
 	return 0;
-
-out_format:
-	rswitch_gwca_chain_free(ndev, priv, rdev->rx_chain);
-
-out_init:
-	rswitch_gwca_put(priv, rdev->rx_chain);
-
-	return err;
 }
 
 static void rswitch_rxdmac_free(struct net_device *ndev,
 				struct rswitch_private *priv)
 {
 	struct rswitch_device *rdev = netdev_priv(ndev);
+	int ret;
 
-	rswitch_gwca_chain_free(ndev, priv, rdev->rx_chain);
-	rswitch_gwca_put(priv, rdev->rx_chain);
+	ret = rswitch_gwca_detach_ring(priv, rdev->rx_chain_index);
+	if (ret)
+		dev_err(&priv->pdev->dev, "tx chain detach failed\n");
+	else
+		rswitch_rx_ring_destroy(rdev->rx_ring);
+	rdev->rx_ring = NULL;
+
+	rswitch_gwca_put(priv, rdev->rx_chain_index);
+	rdev->rx_chain_index = -1;
 }
 
 static void rdev_init_mac_address(struct rswitch_device *rdev)
@@ -3455,59 +2952,63 @@ static void rswitch_coma_init(struct rswitch_private *priv)
 	rswitch_write(priv, CABPPFLC0, CABPPFLC_INIT_VALUE);
 }
 
-static void rswitch_queue_interrupt(struct net_device *ndev)
+static bool rswitch_check_ack_irq(struct rswitch_private *priv,
+		u32 *status, int chain)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
-
-	if (napi_schedule_prep(&rdev->napi)) {
-		spin_lock(&rdev->priv->lock);
-		rswitch_enadis_data_irq(rdev->priv, rdev->tx_chain->index, false);
-		rswitch_enadis_data_irq(rdev->priv, rdev->rx_chain->index, false);
-		spin_unlock(&rdev->priv->lock);
-		__napi_schedule(&rdev->napi);
+	if (chain >= 0 && (status[chain / 32] & BIT(chain % 32))) {
+		rswitch_ack_data_irq(priv, chain);
+		return true;
 	}
+
+	return false;
 }
 
-static irqreturn_t __maybe_unused rswitch_data_irq(struct rswitch_private *priv, u32 *dis)
+static void rdev_interrupt(struct rswitch_device *rdev)
 {
-	struct rswitch_gwca_chain *c;
-	int i;
-	int index, bit;
+	struct rswitch_private *priv = rdev->priv;
 
-	for (i = 0; i < priv->gwca.num_chains; i++) {
-		if (!test_bit(i, priv->gwca.used))
-			continue;
-		c = &priv->gwca.chains[i];
-		index = c->index / 32;
-		bit = BIT(c->index % 32);
-		if (!(dis[index] & bit))
-			continue;
-
-		rswitch_ack_data_irq(priv, c->index);
-		rswitch_queue_interrupt(c->ndev);
+	if (napi_schedule_prep(&rdev->napi)) {
+		spin_lock(&priv->lock);
+		rswitch_enadis_data_irq(priv, rdev->tx_chain_index, false);
+		rswitch_enadis_data_irq(priv, rdev->rx_chain_index, false);
+		spin_unlock(&priv->lock);
+		__napi_schedule(&rdev->napi);
 	}
-
-	return IRQ_HANDLED;
 }
 
 static irqreturn_t rswitch_irq(int irq, void *dev_id)
 {
 	struct rswitch_private *priv = dev_id;
 	irqreturn_t ret = IRQ_NONE;
-	u32 dis[RSWITCH_NUM_IRQ_REGS];
+	u32 irq_status[RSWITCH_NUM_IRQ_REGS];
+	int i;
+	struct rswitch_device *rdev;
+	bool tx_irq, rx_irq;
 
-	rswitch_get_data_irq_status(priv, dis);
+	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
+		irq_status[i] = rswitch_gwca_read(priv, GWDIS(i));
 
-	if (rswitch_is_any_data_irq(priv, dis, true) ||
-	    rswitch_is_any_data_irq(priv, dis, false))
-		ret = rswitch_data_irq(priv, dis);
+	rswitch_for_all_ports(priv, rdev) {
+		tx_irq = rswitch_check_ack_irq(priv, irq_status,
+				rdev->tx_chain_index);
+		rx_irq = rswitch_check_ack_irq(priv, irq_status,
+				rdev->rx_chain_index);
+		if (tx_irq || rx_irq) {
+			rdev_interrupt(rdev);
+			ret = IRQ_HANDLED;
+		}
+	}
 
 	return ret;
 }
 
 static int rswitch_request_irqs(struct rswitch_private *priv)
 {
-	int irq, err;
+	int irq, err, i;
+
+	/* Mask all data interrupts before setting the handler */
+	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
+		rswitch_gwca_write(priv, GWDID(i), 0xffffffff);
 
 	/* FIXME: other queues */
 	irq = platform_get_irq_byname(priv->pdev, GWCA_IRQ_RESOURCE_NAME);
@@ -3537,7 +3038,7 @@ static int rswitch_free_irqs(struct rswitch_private *priv)
 
 static void rswitch_ts(struct rswitch_private *priv)
 {
-	struct rswitch_gwca_chain *gq = &priv->gwca.ts_queue;
+	struct rswitch_gwca_ts_queue *gq = &priv->gwca.ts_queue;
 	struct rswitch_gwca_ts_info *ts_info, *ts_info2;
 	struct skb_shared_hwtstamps shhwtstamps;
 	int entry = gq->cur % gq->num_ring;
@@ -3636,7 +3137,7 @@ static int rswitch_fwd_init(struct rswitch_private *priv)
 				FIELD_PREP(FWPBFC_PBDV_MASK, BIT(GWCA_PORT)));
 		/* Subdestination within GWCA port */
 		rswitch_write(priv, FWPBFCSDC(GWCA_INDEX, port),
-				rdev->rx_chain->index);
+				rdev->rx_chain_index);
 	}
 
 	/* For GWCA port, allow direct descriptors */
@@ -4833,6 +4334,9 @@ static void rdev_create(struct rswitch_private *priv,
 	rdev->port_dn = of_node_get(port_dn);
 	rdev->port = port;
 
+	rdev->tx_chain_index = -1;
+	rdev->rx_chain_index = -1;
+
 	spin_lock_init(&rdev->lock);
 
 	INIT_LIST_HEAD(&rdev->ipv4_local_route_list);
@@ -5010,12 +4514,6 @@ static int rswitch_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	priv->gwca.num_chains = num_etha_ports * NUM_CHAINS_PER_NDEV;
-	priv->gwca.chains = devm_kcalloc(&pdev->dev, priv->gwca.num_chains,
-					 sizeof(*priv->gwca.chains), GFP_KERNEL);
-	if (!priv->gwca.chains)
-		return -ENOMEM;
-
 	INIT_LIST_HEAD(&priv->port_list);
 	ports_dn = of_get_child_by_name(priv->pdev->dev.of_node, "ports");
 	if (!ports_dn) {
@@ -5164,7 +4662,6 @@ out_dmac:
 	 */
 	rswitch_gwca_get(rdev->priv);
 	rswitch_gwca_get(rdev->priv);
-	rdev->tx_chain->index = -1;
 
 	return ret;
 }
