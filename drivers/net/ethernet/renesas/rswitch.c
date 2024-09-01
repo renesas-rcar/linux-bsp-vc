@@ -1020,6 +1020,18 @@ struct rswitch_gwca {
 	DECLARE_BITMAP(used, RSWITCH_MAX_NUM_CHAINS);
 };
 
+struct rswitch_route_monitor {
+	struct net_device *ndev;
+
+	struct notifier_block fib_nb;
+
+	struct list_head ipv4_local_route_list;
+	struct list_head ipv4_bcast_route_list;
+	struct list_head ipv4_ucast_route_list;
+
+	spinlock_t lock;	/* spinlock because fib notifier is atomic */
+};
+
 struct rswitch_device {
 	struct rswitch_private *priv;
 	struct list_head list;
@@ -1042,7 +1054,6 @@ struct rswitch_device {
 	int tx_chain_index, rx_chain_index;
 	struct rswitch_tx_ring *tx_ring;
 	struct rswitch_rx_ring *rx_ring;
-	spinlock_t lock;
 	u8 ts_tag;
 
 	u8 mac_addr[MAX_ADDR_LEN];
@@ -1063,10 +1074,7 @@ struct rswitch_device {
 	unsigned int forwarding_requested : 1;
 	unsigned int forwarding_offloaded : 1;
 
-	struct list_head ipv4_local_route_list;
-	struct list_head ipv4_bcast_route_list;
-	struct list_head ipv4_ucast_route_list;
-
+	struct rswitch_route_monitor rmon;
 	unsigned int l3_offload_enabled : 1;
 };
 
@@ -1101,9 +1109,6 @@ struct rswitch_private {
 	spinlock_t l3_lock;
 	DECLARE_BITMAP(l23_update_bitmap, RSWITCH_MAX_NUM_RRULE);
 	struct list_head l23_update_list;
-
-	struct notifier_block fib_nb;
-	bool fib_nb_registered;
 };
 
 struct rswitch_l23update_spec {
@@ -1117,7 +1122,7 @@ struct rswitch_l23update {
 	struct rswitch_l23update_spec spec;
 };
 
-struct rswitch_ipv4_route {
+struct rmon_ipv4_route {
 	struct list_head list;
 	__be32 addr;
 	__be32 mask;
@@ -1125,7 +1130,7 @@ struct rswitch_ipv4_route {
 	struct list_head offload_list;
 };
 
-struct rswitch_ipv4_route_exception {
+struct rmon_ipv4_route_exception {
 	struct list_head list;
 	__be32 addr;
 };
@@ -1135,7 +1140,7 @@ struct rswitch_ipv4_route_exception {
 #define RSWITCH_FRAME_TYPE_IPV4_UDP	2
 #define RSWITCH_FRAME_TYPE_IPV4_OTHER	1
 
-struct rswitch_ipv4_dst_offload {
+struct rmon_ipv4_dst_offload {
 	struct list_head list;
 	struct rswitch_l23update *update;
 	__be32 addr;
@@ -1150,9 +1155,10 @@ struct rswitch_ipv4_dst_offload {
 
 static void rswitch_update_l2_offload(struct rswitch_private *priv);
 static void rswitch_update_l3_offload(struct rswitch_private *priv);
-static void rdev_handle_l3_learning(struct rswitch_device *rdev,
+
+static void rmon_handle_l3_learning(struct rswitch_route_monitor *rmon,
 		struct sk_buff *skb);
-static void rdev_cleanup_ipv4_offloads_all(struct rswitch_device *rdev);
+static void rmon_cleanup_ipv4_offloads_all(struct rswitch_route_monitor *rmon);
 
 
 static int num_etha_ports = 3;
@@ -2195,10 +2201,10 @@ static int rdev_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	u64 info1;
 	unsigned long flags;
 
-	spin_lock_irqsave(&rdev->lock, flags);
-
+	spin_lock_irqsave(&rdev->rmon.lock, flags);
 	if (rdev->l3_offload_enabled)
-		rdev_handle_l3_learning(rdev, skb);
+		rmon_handle_l3_learning(&rdev->rmon, skb);
+	spin_unlock_irqrestore(&rdev->rmon.lock, flags);
 
 	if (!parallel_mode)
 		info1 = INFO1_DV(BIT(rdev->port)) |
@@ -2233,8 +2239,6 @@ static int rdev_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 			kfree(ts_info);
 		}
 	}
-
-	spin_unlock_irqrestore(&rdev->lock, flags);
 
 	return ret;
 }
@@ -3513,7 +3517,7 @@ static void rswitch_update_l3_offload(struct rswitch_private *priv)
 			rdev->l3_offload_enabled = 0;
 
 			/* cleanup any offloads at disable */
-			rdev_cleanup_ipv4_offloads_all(rdev);
+			rmon_cleanup_ipv4_offloads_all(&rdev->rmon);
 
 			netdev_info(rdev->ndev, "stopping l3 offload\n");
 		}
@@ -3753,11 +3757,26 @@ static bool rswitch_l23update_hw_op(struct rswitch_private *priv,
 	return true;
 }
 
-static bool rswitch_ipv4_dst_offload_hw_op(struct rswitch_device *rdev,
-		struct rswitch_ipv4_dst_offload *offload,
+static struct rswitch_private *rmon_to_rswitch_private(
+		struct rswitch_route_monitor *rmon)
+{
+	struct rswitch_device *rdev;
+
+	if (rswitch_port_check(rmon->ndev)) {
+		rdev = netdev_priv(rmon->ndev);
+		return rdev->priv;
+	}
+
+	BUG();
+	return NULL;
+}
+
+static bool rmon_ipv4_dst_offload_hw_op(struct rswitch_route_monitor *rmon,
+		struct rmon_ipv4_dst_offload *offload,
 		u8 frame_type, bool install)
 {
-	struct rswitch_private *priv = rdev->priv;
+	struct rswitch_private *priv = rmon_to_rswitch_private(rmon);
+	struct rswitch_device *rdev;
 	u32 val, err_flags, collisions;
 	int ret;
 	const char *frame_type_name[] = {
@@ -3765,6 +3784,7 @@ static bool rswitch_ipv4_dst_offload_hw_op(struct rswitch_device *rdev,
 		[RSWITCH_FRAME_TYPE_IPV4_UDP] = "UDP",
 		[RSWITCH_FRAME_TYPE_IPV4_OTHER] = "OTHER",
 	};
+	char target[16] = "<undefined>";
 
 	spin_lock(&priv->l3_lock);
 
@@ -3783,11 +3803,16 @@ static bool rswitch_ipv4_dst_offload_hw_op(struct rswitch_device *rdev,
 	      FIELD_PREP(FWLTHTL7_RN, offload->update->index);
 	rswitch_write(priv, FWLTHTL7, val);
 
-	rswitch_write(priv, FWLTHTL8(0), 0);
-	rswitch_write(priv, FWLTHTL8(1), 0);
+	if (rswitch_port_check(rmon->ndev)) {
+		rdev = netdev_priv(rmon->ndev);
+		snprintf(target, sizeof(target), "port %d", rdev->port);
 
-	val = FIELD_PREP(FWLTHTL9_DV, BIT(rdev->port));
-	rswitch_write(priv, FWLTHTL9, val);
+		rswitch_write(priv, FWLTHTL8(0), 0);
+		rswitch_write(priv, FWLTHTL8(1), 0);
+
+		val = FIELD_PREP(FWLTHTL9_DV, BIT(rdev->port));
+		rswitch_write(priv, FWLTHTL9, val);
+	}
 
 	/* ... table entry write starts after writing to FWLTHTL9 */
 
@@ -3817,11 +3842,11 @@ static bool rswitch_ipv4_dst_offload_hw_op(struct rswitch_device *rdev,
 		offload->types_offloaded &= ~BIT(frame_type);
 
 	dev_info(&priv->pdev->dev,
-		"%s IPv4/%s forwarding %pI4b -> tsn%u, mac %pM; table collisions: %u\n",
+		"%s IPv4/%s forwarding %pI4b -> %s, mac %pM; table collisions: %u\n",
 		install ? "added" : "removed",
 		frame_type_name[frame_type],
 		&offload->addr,
-		rdev->port,
+		target,
 		offload->update->spec.dst_mac,
 		collisions);
 	return true;
@@ -3906,10 +3931,10 @@ static inline bool addr4_ranges_intersect(__be32 addr1, __be32 mask1,
 	return (addr1 & wider_mask) == (addr2 & wider_mask);
 }
 
-/* expected call under rswitch_device lock */
+/* called under rmon lock (for rmon owning the list) */
 static inline bool addr4_in_exception_list(__be32 addr, struct list_head *list)
 {
-	struct rswitch_ipv4_route_exception *entry;
+	struct rmon_ipv4_route_exception *entry;
 
 	list_for_each_entry(entry, list, list) {
 		if (entry->addr == addr)
@@ -3919,13 +3944,13 @@ static inline bool addr4_in_exception_list(__be32 addr, struct list_head *list)
 	return false;
 }
 
-/* called under rswitch_device lock */
-static struct rswitch_ipv4_route *rdev_lookup_ipv4_ucast_route(
-		struct rswitch_device *rdev, __be32 addr)
+/* called under rmon lock */
+static struct rmon_ipv4_route *rmon_lookup_ipv4_ucast_route(
+		struct rswitch_route_monitor *rmon, __be32 addr)
 {
-	struct rswitch_ipv4_route *route;
+	struct rmon_ipv4_route *route;
 
-	list_for_each_entry(route, &rdev->ipv4_ucast_route_list, list) {
+	list_for_each_entry(route, &rmon->ipv4_ucast_route_list, list) {
 		if (addr4_in_range(addr, route->addr, route->mask))
 			return route;
 	}
@@ -3933,11 +3958,11 @@ static struct rswitch_ipv4_route *rdev_lookup_ipv4_ucast_route(
 	return NULL;
 }
 
-/* called under rswitch_device lock */
-static struct rswitch_ipv4_dst_offload *rdev_lookup_ipv4_dst_offload(
-		struct rswitch_ipv4_route *route, __be32 addr)
+/* called under rmon lock (for rmon owning the route) */
+static struct rmon_ipv4_dst_offload *rmon_lookup_ipv4_dst_offload(
+		struct rmon_ipv4_route *route, __be32 addr)
 {
-	struct rswitch_ipv4_dst_offload *offload;
+	struct rmon_ipv4_dst_offload *offload;
 
 	list_for_each_entry(offload, &route->offload_list, list) {
 		if (offload->addr == addr)
@@ -3947,20 +3972,24 @@ static struct rswitch_ipv4_dst_offload *rdev_lookup_ipv4_dst_offload(
 	return NULL;
 }
 
-/* called under rswitch_device lock */
-static struct rswitch_ipv4_dst_offload *rdev_add_ipv4_dst_offload(
-		struct rswitch_device *rdev,
-		struct rswitch_ipv4_route *route,
+/* called under rmon lock (for rmon owning the route) */
+static struct rmon_ipv4_dst_offload *rmon_add_ipv4_dst_offload(
+		struct rswitch_route_monitor *rmon,
+		struct rmon_ipv4_route *route,
 		__be32 addr,
 		struct rswitch_l23update_spec *spec)
 {
-	struct rswitch_ipv4_dst_offload *offload;
+	/* FIXME: what if setup already exists to forward this addr
+	 *        to a different port? */
+
+	struct rswitch_private *priv = rmon_to_rswitch_private(rmon);
+	struct rmon_ipv4_dst_offload *offload;
 
 	offload = kzalloc(sizeof(*offload), GFP_ATOMIC);
 	if (!offload)
 		return NULL;
 
-	offload->update = rswitch_get_l23update(rdev->priv, spec);
+	offload->update = rswitch_get_l23update(priv, spec);
 	if (!offload->update) {
 		kfree(offload);
 		return NULL;
@@ -3971,38 +4000,37 @@ static struct rswitch_ipv4_dst_offload *rdev_add_ipv4_dst_offload(
 	return offload;
 }
 
-/* called under rswitch_device lock */
-static void rdev_remove_ipv4_dst_offload(struct rswitch_device *rdev,
-		struct rswitch_ipv4_route *route,
-		struct rswitch_ipv4_dst_offload *offload)
+/* called under rmon lock */
+static void rmon_remove_ipv4_dst_offload(struct rswitch_route_monitor *rmon,
+		struct rmon_ipv4_route *route,
+		struct rmon_ipv4_dst_offload *offload)
 {
+	struct rswitch_private *priv = rmon_to_rswitch_private(rmon);
 	unsigned long types_offloaded = offload->types_offloaded;
 	u8 frame_type;
 
 	for_each_set_bit(frame_type, &types_offloaded, BITS_PER_LONG) {
-		rswitch_ipv4_dst_offload_hw_op(rdev,
-				offload, frame_type, false);
+		rmon_ipv4_dst_offload_hw_op(rmon, offload, frame_type, false);
 	}
 	if (offload->types_offloaded) {
-		/* FIXME: what to do if failed? rebuild l3 table? */
-		dev_err(&rdev->priv->pdev->dev,
-			"further operation unreliable\n");
+		/* FIXME: possible? what to do? rebuild l3 table? */
+		netdev_err(rmon->ndev, "further operation unreliable\n");
 	}
 
 	list_del(&offload->list);
-	rswitch_put_l23update(rdev->priv, offload->update);
+	rswitch_put_l23update(priv, offload->update);
 	kfree(offload);
 }
 
-/* called under rswitch_device lock */
-static void rdev_handle_l3_learning(struct rswitch_device *rdev,
+/* called under rmon lock */
+static void rmon_handle_l3_learning(struct rswitch_route_monitor *rmon,
 		struct sk_buff *skb)
 {
 	struct ethhdr *ethhdr = (struct ethhdr *)skb->data;
 	struct iphdr *iphdr;
 	__be32 src_addr, dst_addr;
-	struct rswitch_ipv4_route *route;
-	struct rswitch_ipv4_dst_offload *offload;
+	struct rmon_ipv4_route *route;
+	struct rmon_ipv4_dst_offload *offload;
 	u8 frame_type;
 
 	if (ethhdr->h_proto != cpu_to_be16(ETH_P_IP))
@@ -4012,25 +4040,25 @@ static void rdev_handle_l3_learning(struct rswitch_device *rdev,
 	dst_addr = iphdr->daddr;
 
 	/* Packets from local address are not subject for learning */
-	if (addr4_in_exception_list(src_addr, &rdev->ipv4_local_route_list))
+	if (addr4_in_exception_list(src_addr, &rmon->ipv4_local_route_list))
 		return;
 
 	/* Packet to local address? Why? */
-	if (addr4_in_exception_list(dst_addr, &rdev->ipv4_local_route_list))
+	if (addr4_in_exception_list(dst_addr, &rmon->ipv4_local_route_list))
 		return;
 
 	/* Packets to broadcast destination are not subject for learning */
-	if (addr4_in_exception_list(dst_addr, &rdev->ipv4_bcast_route_list))
+	if (addr4_in_exception_list(dst_addr, &rmon->ipv4_bcast_route_list))
 		return;
 
 	/* Lookup route to learn for */
-	route = rdev_lookup_ipv4_ucast_route(rdev, dst_addr);
+	route = rmon_lookup_ipv4_ucast_route(rmon, dst_addr);
 	if (!route)
 		return;
 
 	/* Packet is candidate for offload (and not offloaded yet) */
 
-	offload = rdev_lookup_ipv4_dst_offload(route, dst_addr);
+	offload = rmon_lookup_ipv4_dst_offload(route, dst_addr);
 	if (offload) {
 		/* TODO: verify that ethhdr->h_dest matches offload's */
 	} else {
@@ -4039,7 +4067,7 @@ static void rdev_handle_l3_learning(struct rswitch_device *rdev,
 		struct rswitch_l23update_spec spec;
 
 		ether_addr_copy(spec.dst_mac, ethhdr->h_dest);
-		offload = rdev_add_ipv4_dst_offload(rdev,
+		offload = rmon_add_ipv4_dst_offload(rmon,
 				route, dst_addr, &spec);
 		if (!offload)
 			return;
@@ -4055,72 +4083,71 @@ static void rdev_handle_l3_learning(struct rswitch_device *rdev,
 	if (offload->types_offloaded & BIT(frame_type))
 		return;
 
-	if (!rswitch_ipv4_dst_offload_hw_op(rdev, offload, frame_type, true)) {
+	if (!rmon_ipv4_dst_offload_hw_op(rmon, offload, frame_type, true)) {
 		/* FIXME: what to do if failed? rebuild l3 table? */
-		dev_err(&rdev->priv->pdev->dev,
-			"further operation unreliable\n");
+		netdev_err(rmon->ndev, "further operation unreliable\n");
 	}
 }
 
 
-/* called under rswitch_device lock */
-static void rdev_cleanup_ipv4_route_offloads(struct rswitch_device *rdev,
-		struct rswitch_ipv4_route *route,
+/* called under rmon lock */
+static void rmon_cleanup_ipv4_route_offloads(struct rswitch_route_monitor *rmon,
+		struct rmon_ipv4_route *route,
 		__be32 addr, __be32 mask)
 {
-	struct rswitch_ipv4_dst_offload *offload, *tmp;
+	struct rmon_ipv4_dst_offload *offload, *tmp;
 
 	list_for_each_entry_safe(offload, tmp, &route->offload_list, list) {
 		if (addr4_in_range(offload->addr, addr, mask))
-			rdev_remove_ipv4_dst_offload(rdev, route, offload);
+			rmon_remove_ipv4_dst_offload(rmon, route, offload);
 	}
 }
 
-/* called under rswitch_device lock */
-static void rdev_cleanup_ipv4_offloads_from(struct rswitch_device *rdev,
+/* called under rmon lock */
+static void rmon_cleanup_ipv4_offloads_from(struct rswitch_route_monitor *rmon,
 		struct list_head *pos,
 		__be32 addr, __be32 mask)
 {
-	struct rswitch_ipv4_route *route;
+	struct rmon_ipv4_route *route;
 
-	while (pos != &rdev->ipv4_ucast_route_list) {
+	while (pos != &rmon->ipv4_ucast_route_list) {
 		route = list_entry(pos, typeof(*route), list);
 		if (addr4_ranges_intersect(addr, mask,
 					route->addr, route->mask))
-			rdev_cleanup_ipv4_route_offloads(rdev, route,
+			rmon_cleanup_ipv4_route_offloads(rmon, route,
 					addr, mask);
 		pos = pos->next;
 	}
 }
 
-/* called under rswitch_device lock */
-static void rdev_cleanup_ipv4_offloads_addr(struct rswitch_device *rdev,
+/* called under rmon lock */
+static void rmon_cleanup_ipv4_offloads_addr(struct rswitch_route_monitor *rmon,
 		__be32 addr)
 {
-	rdev_cleanup_ipv4_offloads_from(rdev,
-			rdev->ipv4_ucast_route_list.next, addr, 0xffffffff);
+	rmon_cleanup_ipv4_offloads_from(rmon,
+			rmon->ipv4_ucast_route_list.next, addr, 0xffffffff);
 }
 
-static void rdev_cleanup_ipv4_offloads_all(struct rswitch_device *rdev)
+static void rmon_cleanup_ipv4_offloads_all(struct rswitch_route_monitor *rmon)
 {
 	unsigned long flags;
 
-	spin_lock_irqsave(&rdev->lock, flags);
-	rdev_cleanup_ipv4_offloads_from(rdev,
-			rdev->ipv4_ucast_route_list.next, 0, 0);
-	spin_unlock_irqrestore(&rdev->lock, flags);
+	spin_lock_irqsave(&rmon->lock, flags);
+	rmon_cleanup_ipv4_offloads_from(rmon,
+			rmon->ipv4_ucast_route_list.next, 0, 0);
+	spin_unlock_irqrestore(&rmon->lock, flags);
 }
 
-/* called under rswitch_device lock */
-static void rdev_ipv4_update_route(struct rswitch_device *rdev,
+/* called under rmon lock */
+static void rmon_update_ipv4_route(struct rswitch_route_monitor *rmon,
 		__be32 addr, __be32 mask, __be32 gw_addr, bool keep)
 {
-	struct rswitch_ipv4_route *route;
+	struct rmon_ipv4_route *route;
 	struct list_head *pos;
 	bool found = false;
 
 	/* Find the route in the list, and/or location for the route */
-	list_for_each(pos, &rdev->ipv4_ucast_route_list) {
+	list_for_each(pos, &rmon->ipv4_ucast_route_list) {
 		route = list_entry(pos, typeof(*route), list);
 		if (route->addr == addr && route->mask == mask) {
 			found = true;
@@ -4135,7 +4162,7 @@ static void rdev_ipv4_update_route(struct rswitch_device *rdev,
 	if (!found && !keep)
 		return;
 
-	rdev_cleanup_ipv4_offloads_from(rdev, pos, addr, mask);
+	rmon_cleanup_ipv4_offloads_from(rmon, pos, addr, mask);
 
 	if (found && !keep) {
 		BUG_ON(!list_empty(&route->offload_list));
@@ -4148,7 +4175,7 @@ static void rdev_ipv4_update_route(struct rswitch_device *rdev,
 		route = kzalloc(sizeof(*route), GFP_ATOMIC);
 		if (!route) {
 			/* FIXME: what to do? disable l3 offload? */
-			dev_err(&rdev->priv->pdev->dev,
+			netdev_err(rmon->ndev,
 				"allocation failure, further operation unreliable\n");
 			return;
 		}
@@ -4161,11 +4188,11 @@ static void rdev_ipv4_update_route(struct rswitch_device *rdev,
 	route->gw_addr = gw_addr;
 }
 
-/* called under rswitch_device lock */
-static void rdev_ipv4_update_route_exception(struct rswitch_device *rdev,
+/* called under rmon lock */
+static void rmon_update_ipv4_route_exception(struct rswitch_route_monitor *rmon,
 		struct list_head *list, __be32 addr, bool keep)
 {
-	struct rswitch_ipv4_route_exception *entry;
+	struct rmon_ipv4_route_exception *entry;
 
 	list_for_each_entry(entry, list, list) {
 		if (entry->addr == addr) {
@@ -4182,7 +4209,7 @@ static void rdev_ipv4_update_route_exception(struct rswitch_device *rdev,
 		entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
 		if (!entry) {
 			/* FIXME: what to do? disable l3 offload? */
-			dev_err(&rdev->priv->pdev->dev,
+			netdev_err(rmon->ndev,
 				"allocation failure, further operation unreliable\n");
 			return;
 		}
@@ -4191,87 +4218,143 @@ static void rdev_ipv4_update_route_exception(struct rswitch_device *rdev,
 		list_add_tail(&entry->list, list);
 
 		/* addr could be in existing offloads */
-		rdev_cleanup_ipv4_offloads_addr(rdev, addr);
+		rmon_cleanup_ipv4_offloads_addr(rmon, addr);
 	}
 }
 
-static void rswitch_ipv4_fib_update(struct rswitch_private *priv,
+static void rmon_ipv4_fib_update(struct rswitch_route_monitor *rmon,
 		struct fib_notifier_info *info, bool keep)
 {
 	struct fib_entry_notifier_info *feni =
 			container_of(info, typeof(*feni), info);
 	struct fib_info *fib = feni->fi;
 	struct fib_nh *fib_nh;
-	struct net_device *ndev;
-	struct rswitch_device *rdev = NULL;
 	unsigned long flags;
 
-	/* FIXME: what if multiple tables? */
+	/* FIXME: the below is far incomplete against what is possible */
 
-	if (fib->fib_nhs != 1 || fib->nh != NULL) {
-		/* FIXME: what to do? */
-		return;
-	}
+	if (fib->fib_nhs != 1 || fib->nh != NULL)
+		return;		/* FIXME: what to do? */
 	fib_nh = &fib->fib_nh[0];
-	ndev = fib_nh->fib_nh_dev;
+	if (rmon->ndev != fib_nh->fib_nh_dev)
+		return;		/* destination not on rmon's ndev */
 
-	if (!rswitch_port_check(ndev)) {
-		/* not an rswitch port */
-		return;
-	}
-	rdev = netdev_priv(ndev);
-	if (rdev->priv != priv) {
-		/* not this rswitch instance */
-		return;
-	}
-
-	/* FIXME: the above is far incomplete against what is possible */
-
-	spin_lock_irqsave(&rdev->lock, flags);
+	spin_lock_irqsave(&rmon->lock, flags);
 
 	if (fib->fib_type == RTN_UNICAST) {
 		__be32 addr = cpu_to_be32(feni->dst);
 		__be32 mask = cpu_to_be32(0xffffffff << (32 - feni->dst_len));
 		__be32 gw_addr = fib_nh->fib_nh_gw4;
 
-		netdev_info(ndev,
+		netdev_info(rmon->ndev,
 			"%s ucast route info: addr %pI4b mask %pI4b gw %pI4b\n",
 			keep ? "set" : "unset", &addr, &mask, &gw_addr);
-		rdev_ipv4_update_route(rdev, addr, mask, gw_addr, keep);
+		rmon_update_ipv4_route(rmon, addr, mask, gw_addr, keep);
 	} else if (fib->fib_type == RTN_LOCAL) {
 		__be32 addr = cpu_to_be32(feni->dst);
 
-		netdev_info(ndev, "%s local route info: addr %pI4b\n",
+		netdev_info(rmon->ndev, "%s local route info: addr %pI4b\n",
 				keep ? "set" : "unset", &addr);
-		rdev_ipv4_update_route_exception(rdev,
-				&rdev->ipv4_local_route_list, addr, keep);
+		rmon_update_ipv4_route_exception(rmon,
+				&rmon->ipv4_local_route_list, addr, keep);
 	} else if (fib->fib_type == RTN_BROADCAST) {
 		__be32 addr = cpu_to_be32(feni->dst);
 
-		netdev_info(ndev, "%s bcast route info: addr %pI4b\n",
+		netdev_info(rmon->ndev, "%s bcast route info: addr %pI4b\n",
 				keep ? "set" : "unset", &addr);
-		rdev_ipv4_update_route_exception(rdev,
-				&rdev->ipv4_bcast_route_list, addr, keep);
+		rmon_update_ipv4_route_exception(rmon,
+				&rmon->ipv4_bcast_route_list, addr, keep);
 	}
 
-	spin_unlock_irqrestore(&rdev->lock, flags);
+	spin_unlock_irqrestore(&rmon->lock, flags);
 }
 
-static int rswitch_fib_event(struct notifier_block *nb,
+static int rmon_fib_event(struct notifier_block *nb,
 		unsigned long event, void *ptr)
 {
-	struct rswitch_private *priv = container_of(nb, typeof(*priv), fib_nb);
+	struct rswitch_route_monitor *rmon =
+				container_of(nb, typeof(*rmon), fib_nb);
 	struct fib_notifier_info *info = ptr;
 
 	/* Handle only IPv4 for now */
 	if (info->family == AF_INET) {
 		if (event == FIB_EVENT_ENTRY_REPLACE)
-			rswitch_ipv4_fib_update(priv, info, true);
+			rmon_ipv4_fib_update(rmon, info, true);
 		else if (event == FIB_EVENT_ENTRY_DEL)
-			rswitch_ipv4_fib_update(priv, info, false);
+			rmon_ipv4_fib_update(rmon, info, false);
 	}
 
 	return NOTIFY_DONE;
+}
+
+static int rmon_init(struct rswitch_route_monitor *rmon,
+		struct net_device *ndev)
+{
+	int ret;
+
+	if (WARN_ON(!rswitch_port_check(ndev)))
+		return -ENOTSUPP;
+
+	rmon->ndev = ndev;
+	INIT_LIST_HEAD(&rmon->ipv4_local_route_list);
+	INIT_LIST_HEAD(&rmon->ipv4_bcast_route_list);
+	INIT_LIST_HEAD(&rmon->ipv4_ucast_route_list);
+
+	spin_lock_init(&rmon->lock);
+
+	rmon->fib_nb.notifier_call = rmon_fib_event;
+	ret = register_fib_notifier(&init_net, &rmon->fib_nb, NULL, NULL);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static void rmon_cleanup(struct rswitch_route_monitor *rmon)
+{
+	/* Per experiment, on module unload path the route lists are not
+	 * cleaned up via fib events. Thus have to clean explicitly.
+	 *
+	 * This runs when fib_notifier is already unregistered, which includes
+	 * synchronization. No parallel route lists manupulation shuld be
+	 * possible. Thus no locking needed.
+	 */
+
+	struct rmon_ipv4_route *route, *tmp_route;
+	struct rmon_ipv4_route_exception *exception, *tmp_expection;
+	unsigned long flags;
+
+	unregister_fib_notifier(&init_net, &rmon->fib_nb);
+
+	/* Notifier unregister does not send any cleanup events, so clean up
+	 * gathered information manually.
+	 *
+	 * For paranoid safety, still take the lock */
+
+	spin_lock_irqsave(&rmon->lock, flags);
+
+	list_for_each_entry_safe(exception, tmp_expection,
+			&rmon->ipv4_local_route_list, list) {
+		list_del(&exception->list);
+		kfree(exception);
+	}
+
+	list_for_each_entry_safe(exception, tmp_expection,
+			&rmon->ipv4_bcast_route_list, list) {
+		list_del(&exception->list);
+		kfree(exception);
+	}
+
+	list_for_each_entry_safe(route, tmp_route,
+			&rmon->ipv4_ucast_route_list, list) {
+		/* offloads must have been cleared at netdev close time */
+		WARN_ON(!list_empty(&route->offload_list));
+
+		list_del(&route->list);
+		kfree(exception);
+	}
+
+	spin_unlock_irqrestore(&rmon->lock, flags);
 }
 
 static const struct soc_device_attribute soc_needs_stop_wa[] = {
@@ -4320,7 +4403,7 @@ static void rdev_create(struct rswitch_private *priv,
 	SET_NETDEV_DEV(ndev, &priv->pdev->dev);
 	ndev->base_addr = (unsigned long)priv->addr;
 	snprintf(ndev->name, IFNAMSIZ, "tsn%d", port);
-	ndev->features = NETIF_F_HW_TC;
+	ndev->features = NETIF_F_HW_TC | NETIF_F_NETNS_LOCAL;
 	ndev->netdev_ops = &rdev_netdev_ops;
 	ndev->ethtool_ops = &rdev_ethtool_ops;
 	ndev->max_mtu = MAX_MTU_SZ;
@@ -4336,12 +4419,6 @@ static void rdev_create(struct rswitch_private *priv,
 
 	rdev->tx_chain_index = -1;
 	rdev->rx_chain_index = -1;
-
-	spin_lock_init(&rdev->lock);
-
-	INIT_LIST_HEAD(&rdev->ipv4_local_route_list);
-	INIT_LIST_HEAD(&rdev->ipv4_bcast_route_list);
-	INIT_LIST_HEAD(&rdev->ipv4_ucast_route_list);
 
 	ret = of_get_phy_mode(rdev->port_dn, &rdev->phy_interface);
 	if (ret < 0) {
@@ -4366,6 +4443,16 @@ static void rdev_create(struct rswitch_private *priv,
 		goto no_phy_dn;
 	}
 
+	if (!parallel_mode) {
+		ret = rmon_init(&rdev->rmon, ndev);
+		if (ret) {
+			dev_err(dev,
+				"could not initialize route monitor for port %d\n",
+				port);
+			goto rmon_init_failed;
+		}
+	}
+
 	if (rdev->phy_interface == PHY_INTERFACE_MODE_SGMII &&
 	    soc_device_match(soc_needs_stop_wa))
 		rdev->needs_stop_workaround = true;
@@ -4380,52 +4467,19 @@ static void rdev_create(struct rswitch_private *priv,
 	list_add_tail(&rdev->list, &priv->port_list);
 	return;
 
+rmon_init_failed:
 no_phy_dn:
 register_fixed_link_failed:
 	free_netdev(ndev);
 	return;
 }
 
-static void rdev_destroy_ipv4_route_lists(struct rswitch_device *rdev)
-{
-	struct rswitch_ipv4_route *route, *tmp_route;
-	struct rswitch_ipv4_route_exception *exception, *tmp_expection;
-
-	/* Per experiment, on module unload path the route lists are not
-	 * cleaned up via fib events. Thus have to clean explicitly.
-	 *
-	 * This runs when fib_notifier is already unregistered, which includes
-	 * synchronization. No parallel route lists manupulation shuld be
-	 * possible. Thus no locing needed.
-	 */
-
-	list_for_each_entry_safe(exception, tmp_expection,
-			&rdev->ipv4_local_route_list, list) {
-		list_del(&exception->list);
-		kfree(exception);
-	}
-
-	list_for_each_entry_safe(exception, tmp_expection,
-			&rdev->ipv4_bcast_route_list, list) {
-		list_del(&exception->list);
-		kfree(exception);
-	}
-
-	list_for_each_entry_safe(route, tmp_route,
-			&rdev->ipv4_ucast_route_list, list) {
-		/* offloads must have been cleared at netdev close time */
-		WARN_ON_ONCE(!list_empty(&route->offload_list));
-
-		list_del(&route->list);
-		kfree(exception);
-	}
-}
-
 static void rdev_destroy(struct rswitch_device *rdev)
 {
 	list_del(&rdev->list);
 
-	rdev_destroy_ipv4_route_lists(rdev);
+	if (!parallel_mode)
+		rmon_cleanup(&rdev->rmon);
 
 	if (rdev->phy_dn_is_fixed_link)
 		of_phy_deregister_fixed_link(rdev->phy_dn);
@@ -4541,12 +4595,10 @@ static int rswitch_probe(struct platform_device *pdev)
 
 	if (!parallel_mode) {
 		ret = rswitch_register_notifiers();
-		if (ret)
+		if (ret) {
+			dev_err(&pdev->dev, "could not register notifiers\n");
 			goto rswitch_register_notifiers_failed;
-
-		priv->fib_nb.notifier_call = rswitch_fib_event;
-		ret = register_fib_notifier(&init_net, &priv->fib_nb, NULL, NULL);
-		priv->fib_nb_registered = (ret == 0);
+		}
 	}
 
 	device_set_wakeup_capable(&pdev->dev, 1);
@@ -4578,12 +4630,8 @@ static int rswitch_remove(struct platform_device *pdev)
 	struct rswitch_private *priv = platform_get_drvdata(pdev);
 	struct rswitch_device *rdev;
 
-	if (!parallel_mode) {
-		if (priv->fib_nb_registered)
-			unregister_fib_notifier(&init_net, &priv->fib_nb);
-
+	if (!parallel_mode)
 		rswitch_unregister_notifiers();
-	}
 
 	rswitch_deinit(priv);
 
