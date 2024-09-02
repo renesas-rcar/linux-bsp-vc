@@ -3,7 +3,8 @@
 #ifndef RSWITCH_LIB_H
 #define RSWITCH_LIB_H
 
-#include <linux/types.h>
+#include <linux/netdevice.h>
+
 
 struct rswitch_tx_ring;
 struct rswitch_rx_ring;
@@ -89,5 +90,85 @@ struct sk_buff *rswitch_rx_ring_process(struct rswitch_rx_ring *ring,
  * Locking is CALLER responsibility.
  */
 bool rswitch_rx_ring_need_process(struct rswitch_rx_ring *ring);
+
+
+struct rswitch_private;
+struct rswitch_vport_backend;
+struct rswitch_vport_frontend;
+
+struct rswitch_vport_desc;
+struct rswitch_vport_desc_ops {
+	int (*vport_register)(struct rswitch_vport_desc *rvpd);
+	void (*vport_unregister)(struct rswitch_vport_desc *rvpd);
+
+	int (*attach_frontend_rings)(struct rswitch_vport_desc *rvpd);
+	int (*detach_frontend_rings)(struct rswitch_vport_desc *rvpd);
+};
+
+struct rswitch_vport_desc {
+	const struct rswitch_vport_desc_ops *ops;
+
+	/* Requested vport id, or RSWITCH_VPORT_ID_DYNAMIC for allocation */
+	unsigned int id;
+#define RSWITCH_VPORT_ID_DYNAMIC  ~(0u)
+
+	/* GWCA interrupt index to deliver frontend interrupts */
+	unsigned int irq_index;
+
+	/* Rswitch register base, valid at frontend side
+	 * (can be set to NULL if frontend driver and rswitch driver are in the
+	 * same kernel) */
+	void __iomem *fe_reg_base;
+
+	/* Interrupt number to deliver frontend interrupts, requestable at
+	 * frontend side
+	 * (can be set to -1 if frontend driver and rswitch driver are in the
+	 * same kernel) */
+	int fe_irq;
+
+	/* Device struct for DMA operations on frontend chains
+	 * (can be set to NULL if frontend driver and rswitch driver are in the
+	 * same kernel) */
+	struct device *dma_dev;
+
+	/* Rswitch driver's private pointer */
+	struct rswitch_vport_backend *rvpb;
+
+	/* Rswitch lib's private pointer */
+	struct rswitch_vport_frontend *rvpf;
+
+	/* Frontend Tx and Rx DMA addresses, accessible via the above OSID
+	 * - filled by lib, used by rswitch driver */
+	dma_addr_t fe_tx_ring_dma;
+	dma_addr_t fe_rx_ring_dma;
+
+	/* Operation details - filled by rswitch driver, used by lib */
+
+	u64 info1_to_be;	/* info1 for sending to backend */
+	u64 info1_to_fwd;	/* info1 for sending to switch forwarder */
+
+	u32 kick_tx_offset;	/* register to kick tx ring */
+	u32 kick_tx_val;	/* value to kick tx ring */
+
+	u32 tx_irq_ena_offset, rx_irq_ena_offset;
+	u32 tx_irq_dis_offset, rx_irq_dis_offset;
+	u32 tx_irq_status_offset, rx_irq_status_offset;
+	u32 tx_irq_bit, rx_irq_bit;
+};
+
+/* Provide full lifecycle of vport frontend device */
+int rswitch_vport_frontend_run(struct rswitch_vport_desc *rvpd);
+void rswitch_vport_frontend_stop(struct rswitch_vport_desc *rvpd);
+
+
+/* Rswitch driver exports */
+
+/* Vport registration
+ * (FIXME: support multiple rswitch instances)*/
+int rswitch_vport_register(struct rswitch_vport_desc *rvpd);
+void rswitch_vport_unregister(struct rswitch_vport_desc *rvpd);
+
+int rswitch_vport_attach_frontend_rings(struct rswitch_vport_desc *rvpd);
+int rswitch_vport_detach_frontend_rings(struct rswitch_vport_desc *rvpd);
 
 #endif

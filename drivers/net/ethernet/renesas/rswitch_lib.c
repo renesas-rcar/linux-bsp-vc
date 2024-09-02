@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/etherdevice.h>
 #include <linux/module.h>
-#include <linux/netdevice.h>
 
 #include "rswitch_desc.h"
 #include "rswitch_lib.h"
@@ -425,5 +425,265 @@ void rswitch_rx_ring_destroy(struct rswitch_rx_ring *ring)
 	kfree(ring);
 }
 EXPORT_SYMBOL(rswitch_rx_ring_destroy);
+
+
+struct rswitch_vport_frontend {
+	struct rswitch_vport_desc *rvpd;
+
+	struct net_device *ndev;
+	struct napi_struct napi;
+
+	struct rswitch_tx_ring *tx_ring;
+	struct rswitch_rx_ring *rx_ring;
+
+	spinlock_t lock;
+};
+
+#define RVP_READ(rvpd, field) \
+	readl(rvpd->fe_reg_base + rvpd->field ## _offset)
+#define RVP_WRITE(rvpd, field, val) \
+	writel((val), rvpd->fe_reg_base + rvpd->field ## _offset)
+
+static irqreturn_t rvpf_irq_handler(int irq, void *data)
+{
+	struct rswitch_vport_frontend *rvpf = data;
+	struct rswitch_vport_desc *rvpd = rvpf->rvpd;
+	u32 tx_status, rx_status;
+
+	tx_status = RVP_READ(rvpd, tx_irq_status) & rvpd->tx_irq_bit;
+	if (tx_status)
+		RVP_WRITE(rvpd, tx_irq_status, tx_status);
+
+	rx_status = RVP_READ(rvpd, rx_irq_status) & rvpd->rx_irq_bit;
+	if (rx_status)
+		RVP_WRITE(rvpd, rx_irq_status, rx_status);
+
+	if (!tx_status && !rx_status)
+		return IRQ_NONE;
+
+	if (napi_schedule_prep(&rvpf->napi)) {
+		spin_lock(&rvpf->lock);
+		RVP_WRITE(rvpd, tx_irq_dis, rvpd->tx_irq_bit);
+		RVP_WRITE(rvpd, rx_irq_dis, rvpd->rx_irq_bit);
+		spin_unlock(&rvpf->lock);
+
+		__napi_schedule(&rvpf->napi);
+	}
+
+	return IRQ_HANDLED;
+}
+
+static int rvpf_open(struct net_device *ndev)
+{
+	struct rswitch_vport_frontend *rvpf = netdev_priv(ndev);
+	struct rswitch_vport_desc *rvpd = rvpf->rvpd;
+	int ret;
+	unsigned long flags;
+	bool can_destroy_rings = true;
+
+	rvpf->tx_ring = rswitch_tx_ring_create(rvpd->dma_dev, 256);
+	if (!rvpf->tx_ring) {
+		netdev_err(ndev, "could not create tx ring\n");
+		ret = -ENOMEM;
+		goto tx_ring_create_failed;
+	}
+	rvpd->fe_tx_ring_dma = rswitch_tx_ring_dma_addr(rvpf->tx_ring);
+
+	rvpf->rx_ring = rswitch_rx_ring_create(rvpd->dma_dev, 256);
+	if (!rvpf->rx_ring) {
+		netdev_err(ndev, "could not create rx ring\n");
+		ret = -ENOMEM;
+		goto rx_ring_create_failed;
+	}
+	rvpd->fe_rx_ring_dma = rswitch_rx_ring_dma_addr(rvpf->rx_ring);
+
+	ret = rvpd->ops->attach_frontend_rings(rvpd);
+	if (ret) {
+		netdev_err(ndev, "could not attach rings\n");
+		goto attach_rings_failed;
+	}
+
+	ret = request_irq(rvpd->fe_irq, rvpf_irq_handler,
+			IRQF_SHARED, netdev_name(ndev), rvpf);
+	if (ret) {
+		netdev_err(ndev, "could not request irq");
+		goto request_irq_failed;
+	}
+
+	spin_lock_irqsave(&rvpf->lock, flags);
+	RVP_WRITE(rvpd, tx_irq_ena, rvpd->tx_irq_bit);
+	RVP_WRITE(rvpd, rx_irq_ena, rvpd->rx_irq_bit);
+	spin_unlock_irqrestore(&rvpf->lock, flags);
+
+	netif_start_queue(ndev);
+	napi_enable(&rvpf->napi);
+
+	return 0;
+
+request_irq_failed:
+	can_destroy_rings = (rvpd->ops->detach_frontend_rings(rvpd) == 0);
+attach_rings_failed:
+	if (can_destroy_rings)
+		rswitch_rx_ring_destroy(rvpf->rx_ring);
+rx_ring_create_failed:
+	if (can_destroy_rings)
+		rswitch_tx_ring_destroy(rvpf->tx_ring);
+tx_ring_create_failed:
+	return ret;
+}
+
+static int rvpf_close(struct net_device *ndev)
+{
+	struct rswitch_vport_frontend *rvpf = netdev_priv(ndev);
+	struct rswitch_vport_desc *rvpd = rvpf->rvpd;
+	unsigned long flags;
+	bool can_destroy_rings;
+
+	napi_disable(&rvpf->napi);
+	netif_stop_queue(ndev);
+
+	spin_lock_irqsave(&rvpf->lock, flags);
+	RVP_WRITE(rvpd, tx_irq_dis, rvpd->tx_irq_bit);
+	RVP_WRITE(rvpd, rx_irq_dis, rvpd->rx_irq_bit);
+	spin_unlock_irqrestore(&rvpf->lock, flags);
+
+	free_irq(rvpd->fe_irq, rvpf);
+
+	can_destroy_rings = (rvpd->ops->detach_frontend_rings(rvpd) == 0);
+	if (can_destroy_rings) {
+		rswitch_rx_ring_destroy(rvpf->rx_ring);
+		rswitch_tx_ring_destroy(rvpf->tx_ring);
+	} else {
+		netdev_warn(ndev, "rings not detached - skipping destroy\n");
+	}
+
+	return 0;
+}
+
+static int rvpf_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+{
+	struct rswitch_vport_frontend *rvpf = netdev_priv(ndev);
+	struct rswitch_vport_desc *rvpd = rvpf->rvpd;
+	int ret, ring_ret;
+
+	ring_ret = rswitch_tx_ring_add_skb(rvpf->tx_ring, skb, 0, rvpd->info1_to_be);
+	if (ring_ret == 0) {
+		RVP_WRITE(rvpd, kick_tx, rvpd->kick_tx_val);
+		ret = NETDEV_TX_OK;
+	} else {
+		if (ring_ret == -ENOSPC)
+			netif_stop_subqueue(ndev, 0);
+		ret = NETDEV_TX_BUSY;
+	}
+
+	return ret;
+}
+
+static int rvpf_napi_poll(struct napi_struct *napi, int budget)
+{
+	struct net_device *ndev = napi->dev;
+	struct rswitch_vport_frontend *rvpf = netdev_priv(ndev);
+	struct rswitch_vport_desc *rvpd = rvpf->rvpd;
+	struct sk_buff *skb;
+	int work_done = 0;
+	unsigned long flags;
+
+	if (rswitch_tx_ring_handle_complete(rvpf->tx_ring, &ndev->stats))
+		netif_wake_subqueue(ndev, 0);
+
+	while (work_done < budget) {
+		skb = rswitch_rx_ring_process(rvpf->rx_ring, false);
+		if (skb) {
+			skb->protocol = eth_type_trans(skb, ndev);
+			ndev->stats.rx_packets++;
+			ndev->stats.rx_bytes += skb->len;
+			napi_gro_receive(napi, skb);
+		}
+
+		work_done++;
+		if (!rswitch_rx_ring_need_process(rvpf->rx_ring))
+			break;
+	}
+
+	if (work_done < budget && napi_complete_done(napi, work_done)) {
+		spin_lock_irqsave(&rvpf->lock, flags);
+		RVP_WRITE(rvpd, tx_irq_ena, rvpd->tx_irq_bit);
+		RVP_WRITE(rvpd, rx_irq_ena, rvpd->rx_irq_bit);
+		spin_unlock_irqrestore(&rvpf->lock, flags);
+	}
+
+	return work_done;
+}
+
+static struct net_device_stats *rvpf_get_stats(struct net_device *ndev)
+{
+	return &ndev->stats;
+}
+
+static const struct net_device_ops rvpf_netdev_ops = {
+	.ndo_open = rvpf_open,
+	.ndo_stop = rvpf_close,
+	.ndo_start_xmit = rvpf_start_xmit,
+	.ndo_get_stats = rvpf_get_stats,
+};
+
+int rswitch_vport_frontend_run(struct rswitch_vport_desc *rvpd)
+{
+	struct net_device *ndev;
+	struct rswitch_vport_frontend *rvpf;
+	int ret;
+
+	ndev = alloc_etherdev(sizeof(*rvpf));
+	if (!ndev) {
+		printk(KERN_ERR "could not alloc frontend netdev\n");
+		return -ENOMEM;
+	}
+
+	SET_NETDEV_DEV(ndev, rvpd->dma_dev);
+	ndev->netdev_ops = &rvpf_netdev_ops;
+	eth_hw_addr_random(ndev);
+
+	rvpf = netdev_priv(ndev);
+	rvpf->ndev = ndev;
+	rvpf->rvpd = rvpd;
+	spin_lock_init(&rvpf->lock);
+
+	ret = rvpd->ops->vport_register(rvpd);
+	if (ret) {
+		printk(KERN_ERR "could not register rswitch vport\n");
+		goto rvp_register_failed;
+	}
+
+	snprintf(ndev->name, IFNAMSIZ, "rvpfront%d", rvpd->id);
+	netif_napi_add(ndev, &rvpf->napi, rvpf_napi_poll, 64);
+
+	ret = register_netdev(ndev);
+	if (ret) {
+		netdev_err(ndev, "could not register\n");
+		goto netdev_register_failed;
+	}
+
+	rvpd->rvpf = rvpf;
+	return 0;
+
+netdev_register_failed:
+	netif_napi_del(&rvpf->napi);
+	rvpd->ops->vport_unregister(rvpd);
+rvp_register_failed:
+	free_netdev(ndev);
+	return ret;
+}
+EXPORT_SYMBOL(rswitch_vport_frontend_run);
+
+void rswitch_vport_frontend_stop(struct rswitch_vport_desc *rvpd)
+{
+	struct rswitch_vport_frontend *rvpf = rvpd->rvpf;
+
+	unregister_netdev(rvpf->ndev);
+	netif_napi_del(&rvpf->napi);
+	rvpd->ops->vport_unregister(rvpd);
+	free_netdev(rvpf->ndev);
+}
+EXPORT_SYMBOL(rswitch_vport_frontend_stop);
 
 MODULE_LICENSE("GPL v2");

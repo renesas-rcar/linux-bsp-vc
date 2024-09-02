@@ -90,6 +90,8 @@ enum {
 #define INFO1_TSUN(val)		((u64)(val) << 8ULL)
 #define INFO1_IPV(prio)		((u64)(prio) << 28ULL)
 #define INFO1_DV(port_vector)	((u64)(port_vector) << 48ULL)
+#define INFO1_CSD(gwca_index, chain_index) \
+		((u64)(chain_index) << (32ULL + 8ULL * (gwca_index)))
 
 /* For timestamp descriptor in dptrl (Byte 4 to 7) */
 #define TS_DESC_TSUN(dptrl)	((dptrl) & GENMASK(7, 0))

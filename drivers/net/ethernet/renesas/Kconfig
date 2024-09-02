@@ -62,6 +62,10 @@ config RENESAS_ETHER_SWITCH
 	  This driver supports the following SoCs:
 		- R8A779Fx.
 
+config RENESAS_ETHER_SWITCH_VPORT_LOCAL
+	tristate "Local rswitch virtual port"
+	depends on RENESAS_ETHER_SWITCH
+
 config RTSN
         tristate "Renesas Ethernet-TSN support"
         depends on ARCH_RENESAS || COMPILE_TEST

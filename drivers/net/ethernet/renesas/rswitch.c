@@ -1111,6 +1111,30 @@ struct rswitch_device {
 	unsigned int l3_offload_enabled : 1;
 };
 
+struct rswitch_vport_backend {
+	struct rswitch_private *priv;
+	struct list_head list;
+	unsigned int id;
+
+	struct rswitch_vport_desc *rvpd;
+
+	/* backend chain ids */
+	int tx_chain_index;
+	int rx_chain_index;
+
+	/* backend rings */
+	struct rswitch_tx_ring *tx_ring;
+	struct rswitch_rx_ring *rx_ring;
+
+	/* backend netdev */
+	struct net_device *ndev;
+	struct napi_struct napi;
+
+	/* frontend chain ids */
+	int fe_tx_chain_index;
+	int fe_rx_chain_index;
+};
+
 struct rswitch_private {
 	struct platform_device *pdev;
 	void __iomem *addr;
@@ -1136,6 +1160,9 @@ struct rswitch_private {
 	struct clk *clk;
 
 	u32 parallel_mode_saved_clocks;
+
+	struct list_head vport_list;
+	unsigned long vport_ids;
 
 	struct net_device *offload_brdev;
 
@@ -1186,6 +1213,9 @@ struct rmon_ipv4_dst_offload {
 #define rswitch_undo_for_prev_ports(_priv, _rdev) \
 	list_for_each_entry_continue_reverse(_rdev, &_priv->port_list, list)
 
+#define rswitch_for_all_vports(_priv, _rvpb) \
+	list_for_each_entry(_rvpb, &_priv->vport_list, list)
+
 static void rswitch_update_l2_offload(struct rswitch_private *priv);
 static void rswitch_update_l3_offload(struct rswitch_private *priv);
 
@@ -1201,6 +1231,9 @@ MODULE_PARM_DESC(num_etha_ports, "Number of using ETHA ports");
 static bool parallel_mode;
 module_param(parallel_mode, bool, 0644);
 MODULE_PARM_DESC(parallel_mode, "Operate simultaneously with Realtime core");
+
+/* FIXME - support multiple instances */
+static struct rswitch_private *the_rswitch_priv;
 
 #define RSWITCH_TIMEOUT_MS	1000
 
@@ -3012,6 +3045,111 @@ static void rswitch_coma_init(struct rswitch_private *priv)
 	rswitch_write(priv, CABPPFLC0, CABPPFLC_INIT_VALUE);
 }
 
+
+static int rvp_be_open(struct net_device *ndev)
+{
+	struct rswitch_vport_backend *rvpb = netdev_priv(ndev);
+	struct rswitch_private *priv = rvpb->priv;
+	unsigned long flags;
+
+	spin_lock_irqsave(&priv->lock, flags);
+	rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, true);
+	rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, true);
+	spin_unlock_irqrestore(&priv->lock, flags);
+
+	napi_enable(&rvpb->napi);
+	netif_start_queue(ndev);
+
+	return 0;
+}
+
+static int rvp_be_close(struct net_device *ndev)
+{
+	struct rswitch_vport_backend *rvpb = netdev_priv(ndev);
+	struct rswitch_private *priv = rvpb->priv;
+	unsigned long flags;
+
+	napi_disable(&rvpb->napi);
+	netif_stop_queue(ndev);
+
+	spin_lock_irqsave(&priv->lock, flags);
+	rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, false);
+	rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, false);
+	spin_unlock_irqrestore(&priv->lock, flags);
+
+	return 0;
+}
+
+static int rvp_be_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+{
+	struct rswitch_vport_backend *rvpb = netdev_priv(ndev);
+	struct rswitch_private *priv = rvpb->priv;
+	u64 info1_to_fe = INFO1_FMT | INFO1_IPV(GWCA_IPV_NUM) |
+			  INFO1_DV(BIT(GWCA_PORT)) |
+			  INFO1_CSD(GWCA_INDEX, rvpb->fe_rx_chain_index);
+	int ret, ring_ret;
+
+	ring_ret = rswitch_tx_ring_add_skb(rvpb->tx_ring, skb, 0, info1_to_fe);
+	if (ring_ret == 0) {
+		rswitch_kick_tx_queue(priv, rvpb->tx_chain_index);
+		ret = NETDEV_TX_OK;
+	} else {
+		if (ring_ret == -ENOSPC)
+			netif_stop_subqueue(ndev, 0);
+		ret = NETDEV_TX_BUSY;
+	}
+
+	return ret;
+}
+
+static int rvp_be_napi_poll(struct napi_struct *napi, int budget)
+{
+	struct net_device *ndev = napi->dev;
+	struct rswitch_vport_backend *rvpb = netdev_priv(ndev);
+	struct rswitch_private *priv = rvpb->priv;
+	struct sk_buff *skb;
+	int work_done = 0;
+	unsigned long flags;
+
+	if (rswitch_tx_ring_handle_complete(rvpb->tx_ring, &ndev->stats))
+		netif_wake_subqueue(ndev, 0);
+
+	while (work_done < budget) {
+		skb = rswitch_rx_ring_process(rvpb->rx_ring, false);
+		if (skb) {
+			skb->protocol = eth_type_trans(skb, ndev);
+			ndev->stats.rx_packets++;
+			ndev->stats.rx_bytes += skb->len;
+			napi_gro_receive(napi, skb);
+		}
+
+		work_done++;
+		if (!rswitch_rx_ring_need_process(rvpb->rx_ring))
+			break;
+	}
+
+	if (work_done < budget && napi_complete_done(napi, work_done)) {
+		spin_lock_irqsave(&priv->lock, flags);
+		rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, true);
+		rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, true);
+		spin_unlock_irqrestore(&priv->lock, flags);
+	}
+
+	return work_done;
+}
+
+static struct net_device_stats *rvp_be_get_stats(struct net_device *ndev)
+{
+	return &ndev->stats;
+}
+
+static const struct net_device_ops rvp_be_netdev_ops = {
+	.ndo_open = rvp_be_open,
+	.ndo_stop = rvp_be_close,
+	.ndo_start_xmit = rvp_be_start_xmit,
+	.ndo_get_stats = rvp_be_get_stats,
+};
+
 static bool rswitch_check_ack_irq(struct rswitch_private *priv,
 		u32 *status, int chain)
 {
@@ -3036,6 +3174,19 @@ static void rdev_interrupt(struct rswitch_device *rdev)
 	}
 }
 
+static void rvp_be_interrupt(struct rswitch_vport_backend *rvpb)
+{
+	struct rswitch_private *priv = rvpb->priv;
+
+	if (napi_schedule_prep(&rvpb->napi)) {
+		spin_lock(&priv->lock);
+		rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, false);
+		rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, false);
+		spin_unlock(&priv->lock);
+		__napi_schedule(&rvpb->napi);
+	}
+}
+
 static irqreturn_t rswitch_irq(int irq, void *dev_id)
 {
 	struct rswitch_private *priv = dev_id;
@@ -3043,6 +3194,7 @@ static irqreturn_t rswitch_irq(int irq, void *dev_id)
 	u32 irq_status[RSWITCH_NUM_IRQ_REGS];
 	int i;
 	struct rswitch_device *rdev;
+	struct rswitch_vport_backend *rvpb;
 	bool tx_irq, rx_irq;
 
 	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
@@ -3056,6 +3208,17 @@ static irqreturn_t rswitch_irq(int irq, void *dev_id)
 				rdev->rx_chain_index);
 		if (tx_irq || rx_irq) {
 			rdev_interrupt(rdev);
+			ret = IRQ_HANDLED;
+		}
+	}
+
+	rswitch_for_all_vports(priv, rvpb) {
+		tx_irq = rswitch_check_ack_irq(priv, irq_status,
+				rvpb->tx_chain_index);
+		rx_irq = rswitch_check_ack_irq(priv, irq_status,
+				rvpb->rx_chain_index);
+		if (tx_irq || rx_irq) {
+			rvp_be_interrupt(rvpb);
 			ret = IRQ_HANDLED;
 		}
 	}
@@ -4561,6 +4724,248 @@ static void rdev_destroy(struct rswitch_device *rdev)
 	free_netdev(rdev->ndev);
 }
 
+int rswitch_vport_register(struct rswitch_vport_desc *rvpd)
+{
+	struct rswitch_private *priv = the_rswitch_priv;
+	unsigned int id;
+	struct net_device *ndev;
+	struct rswitch_vport_backend *rvpb;
+	int ret, ret2;
+
+	/* FIXME: locking */
+
+	if (parallel_mode)
+		return -ENOTSUPP;
+	if (!priv)
+		return -ENODEV;
+
+	if (rvpd->irq_index < 1 || rvpd->irq_index > 7)
+		return -EINVAL;
+
+	if (rvpd->id == RSWITCH_VPORT_ID_DYNAMIC) {
+		if (priv->vport_ids == ~0UL)
+			return -EBUSY;
+		id = ffz(priv->vport_ids);
+		rvpd->id = id;
+	} else {
+		if (rvpd->id >= 8 * sizeof(priv->vport_ids))
+			return -EINVAL;
+		if (priv->vport_ids & BIT(rvpd->id))
+			return -EBUSY;
+		id = rvpd->id;
+	}
+	priv->vport_ids |= BIT(rvpd->id);
+
+	ret = -ENOMEM;
+
+	ndev = alloc_etherdev(sizeof(*rvpb));
+	if (!ndev)
+		goto no_ndev;
+
+	SET_NETDEV_DEV(ndev, &priv->pdev->dev);
+	snprintf(ndev->name, IFNAMSIZ, "rvpback%d", id);
+	ndev->features = NETIF_F_NETNS_LOCAL;
+	ndev->netdev_ops = &rvp_be_netdev_ops;
+
+	ndev->addr_assign_type = NET_ADDR_STOLEN;
+	ether_addr_copy(ndev->dev_addr, priv->gwca.mac_addr);
+
+	rvpb = netdev_priv(ndev);
+	rvpb->rvpd = rvpd;
+	rvpb->id = id;
+	rvpb->priv = priv;
+	rvpb->ndev = ndev;
+
+	rvpd->rvpb = rvpb;
+
+	ret = -ENOSPC;
+
+	rvpb->tx_chain_index = rswitch_gwca_get(priv);
+	if (rvpb->tx_chain_index < 0)
+		goto no_be_tx_chain;
+	rvpb->rx_chain_index = rswitch_gwca_get(priv);
+	if (rvpb->rx_chain_index < 0)
+		goto no_be_rx_chain;
+	rvpb->fe_tx_chain_index = rswitch_gwca_get(priv);
+	if (rvpb->fe_tx_chain_index < 0)
+		goto no_fe_tx_chain;
+	rvpb->fe_rx_chain_index = rswitch_gwca_get(priv);
+	if (rvpb->fe_rx_chain_index < 0)
+		goto no_fe_rx_chain;
+
+	ret = -ENOMEM;
+
+	rvpb->tx_ring = rswitch_tx_ring_create(&priv->pdev->dev, 256);
+	if (!rvpb->tx_ring)
+		goto no_be_tx_ring;
+
+	rvpb->rx_ring = rswitch_rx_ring_create(&priv->pdev->dev, 256);
+	if (!rvpb->tx_ring)
+		goto no_be_rx_ring;
+
+	rswitch_gwca_attach_ring(priv, rvpb->tx_chain_index,
+			0, rswitch_tx_ring_dma_addr(rvpb->tx_ring),
+			GWDCC_DQT |	/* transmit queue */
+			GWDCC_DCP(GWCA_IPV_NUM) | /* transmit priority */
+			GWDCC_EDE);	/* extended descriptor */
+
+	rswitch_gwca_attach_ring(priv, rvpb->rx_chain_index,
+			0, rswitch_rx_ring_dma_addr(rvpb->rx_ring),
+			GWDCC_EDE |	/* extended descriptor */
+			GWDCC_ETS);	/* ... with timestamps */
+
+	/* FE rings are not yet attached, and observed iommu errors (attempt
+	 * to resolve address 0) when BE->FE send happened before FE is opened
+	 * and rings attached. Looks like need explicit chain initialization
+	 * so it notices EOS in BAT */
+	rswitch_gwca_modify(priv, GWDCC(rvpb->fe_rx_chain_index), 0, GWDCC_BALR);
+
+	if (!rvpd->fe_reg_base)
+		rvpd->fe_reg_base = priv->addr;
+	if (rvpd->fe_irq < 0) {
+		ret = rswitch_get_irq(priv, rvpd->irq_index);
+		if (ret < 0)
+			goto no_fe_irq;
+		rvpd->fe_irq = ret;
+	}
+	if (!rvpd->dma_dev)
+		rvpd->dma_dev = &priv->pdev->dev;
+
+	rvpd->info1_to_be = INFO1_FMT | INFO1_IPV(GWCA_IPV_NUM) |
+			    INFO1_DV(BIT(GWCA_PORT)) |
+			    INFO1_CSD(GWCA_INDEX, rvpb->rx_chain_index);
+	rvpd->info1_to_fwd = INFO1_IPV(GWCA_IPV_NUM);
+
+	rvpd->kick_tx_offset = GWTRC(rvpb->fe_tx_chain_index / 32);
+	rvpd->kick_tx_val = BIT(rvpb->fe_tx_chain_index % 32);
+
+	rvpd->tx_irq_ena_offset = GWDIE(rvpb->fe_tx_chain_index / 32);
+	rvpd->rx_irq_ena_offset = GWDIE(rvpb->fe_rx_chain_index / 32);
+	rvpd->tx_irq_dis_offset = GWDID(rvpb->fe_tx_chain_index / 32);
+	rvpd->rx_irq_dis_offset = GWDID(rvpb->fe_rx_chain_index / 32);
+	rvpd->tx_irq_status_offset = GWDIS(rvpb->fe_tx_chain_index / 32);
+	rvpd->rx_irq_status_offset = GWDIS(rvpb->fe_rx_chain_index / 32);
+	rvpd->tx_irq_bit = BIT(rvpb->fe_tx_chain_index % 32);
+	rvpd->rx_irq_bit = BIT(rvpb->fe_rx_chain_index % 32);
+
+	netif_napi_add(ndev, &rvpb->napi, rvp_be_napi_poll, 64);
+
+	ret = register_netdev(ndev);
+	if (ret)
+		goto no_ndev_register;
+
+	list_add_tail(&rvpb->list, &priv->vport_list);
+	return 0;
+
+no_ndev_register:
+	netif_napi_del(&rvpb->napi);
+
+no_fe_irq:
+	ret2 = rswitch_gwca_detach_ring(priv, rvpb->rx_chain_index);
+	if (ret2)
+		dev_err(&priv->pdev->dev,
+			"vport %u: be rx chain detach failed\n", id);
+
+	ret2 = rswitch_gwca_detach_ring(priv, rvpb->tx_chain_index);
+	if (ret2)
+		dev_err(&priv->pdev->dev,
+			"vport %u: be tx chain detach failed\n", id);
+
+	rswitch_rx_ring_destroy(rvpb->rx_ring);
+no_be_rx_ring:
+	rswitch_tx_ring_destroy(rvpb->tx_ring);
+no_be_tx_ring:
+	rswitch_gwca_put(priv, rvpb->fe_rx_chain_index);
+no_fe_rx_chain:
+	rswitch_gwca_put(priv, rvpb->fe_tx_chain_index);
+no_fe_tx_chain:
+	rswitch_gwca_put(priv, rvpb->rx_chain_index);
+no_be_rx_chain:
+	rswitch_gwca_put(priv, rvpb->tx_chain_index);
+no_be_tx_chain:
+	free_netdev(ndev);
+no_ndev:
+	priv->vport_ids &= ~BIT(id);
+	return ret;
+}
+EXPORT_SYMBOL(rswitch_vport_register);
+
+void rswitch_vport_unregister(struct rswitch_vport_desc *rvpd)
+{
+	struct rswitch_vport_backend *rvpb = rvpd->rvpb;
+	struct rswitch_private *priv = rvpb->priv;
+	unsigned int id = rvpb->id;
+	int ret;
+
+	list_del(&rvpb->list);
+
+	unregister_netdev(rvpb->ndev);
+	netif_napi_del(&rvpb->napi);
+
+	ret = rswitch_gwca_detach_ring(priv, rvpb->rx_chain_index);
+	if (ret)
+		dev_err(&priv->pdev->dev,
+			"vport %u: be rx chain detach failed\n", id);
+
+	ret = rswitch_gwca_detach_ring(priv, rvpb->tx_chain_index);
+	if (ret)
+		dev_err(&priv->pdev->dev,
+			"vport %u: be tx chain detach failed\n", id);
+
+	rswitch_rx_ring_destroy(rvpb->rx_ring);
+	rswitch_tx_ring_destroy(rvpb->tx_ring);
+
+	rswitch_gwca_put(priv, rvpb->fe_rx_chain_index);
+	rswitch_gwca_put(priv, rvpb->fe_tx_chain_index);
+	rswitch_gwca_put(priv, rvpb->rx_chain_index);
+	rswitch_gwca_put(priv, rvpb->tx_chain_index);
+
+	free_netdev(rvpb->ndev);
+
+	priv->vport_ids &= ~BIT(id);
+}
+EXPORT_SYMBOL(rswitch_vport_unregister);
+
+int rswitch_vport_attach_frontend_rings(struct rswitch_vport_desc *rvpd)
+{
+	struct rswitch_vport_backend *rvpb = rvpd->rvpb;
+	struct rswitch_private *priv = rvpb->priv;
+
+	rswitch_gwca_attach_ring(priv, rvpd->rvpb->fe_tx_chain_index,
+			rvpd->irq_index, rvpd->fe_tx_ring_dma,
+			GWDCC_DQT |	/* transmit queue */
+			GWDCC_DCP(GWCA_IPV_NUM) | /* transmit priority */
+			GWDCC_EDE);	/* extended descriptor */
+
+	rswitch_gwca_attach_ring(priv, rvpd->rvpb->fe_rx_chain_index,
+			rvpd->irq_index, rvpd->fe_rx_ring_dma,
+			GWDCC_EDE |	/* extended descriptor */
+			GWDCC_ETS);	/* ... with timestamps */
+
+	return 0;
+}
+EXPORT_SYMBOL(rswitch_vport_attach_frontend_rings);
+
+int rswitch_vport_detach_frontend_rings(struct rswitch_vport_desc *rvpd)
+{
+	struct rswitch_vport_backend *rvpb = rvpd->rvpb;
+	struct rswitch_private *priv = rvpb->priv;
+	int ret_rx, ret_tx;
+
+	ret_rx = rswitch_gwca_detach_ring(priv, rvpd->rvpb->fe_rx_chain_index);
+	if (ret_rx)
+		dev_err(&priv->pdev->dev,
+			"vport %u: fe rx chain detach failed\n", rvpd->id);
+
+	ret_tx = rswitch_gwca_detach_ring(priv, rvpd->rvpb->fe_tx_chain_index);
+	if (ret_tx)
+		dev_err(&priv->pdev->dev,
+			"vport %u: fe tx chain detach failed\n", rvpd->id);
+
+	return ret_rx ?: ret_tx;
+}
+EXPORT_SYMBOL(rswitch_vport_detach_frontend_rings);
+
 static int rswitch_probe(struct platform_device *pdev)
 {
 	struct rswitch_private *priv;
@@ -4644,6 +5049,7 @@ static int rswitch_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&priv->port_list);
 	ports_dn = of_get_child_by_name(priv->pdev->dev.of_node, "ports");
 	if (!ports_dn) {
+		/* FIXME: handle virtual ports only? */
 		dev_err(&pdev->dev, "no ports subnode\n");
 		return -EINVAL;
 	}
@@ -4654,6 +5060,8 @@ static int rswitch_probe(struct platform_device *pdev)
 
 	if (list_empty(&priv->port_list))
 		dev_warn(&pdev->dev, "could not initialize any ports\n");
+
+	INIT_LIST_HEAD(&priv->vport_list);
 
 	if (!parallel_mode) {
 		pm_runtime_enable(&pdev->dev);
@@ -4675,6 +5083,10 @@ static int rswitch_probe(struct platform_device *pdev)
 	}
 
 	device_set_wakeup_capable(&pdev->dev, 1);
+
+	if (!WARN_ON(the_rswitch_priv != NULL)) {
+		the_rswitch_priv = priv;
+	}
 
 	return 0;
 
@@ -4703,6 +5115,10 @@ static int rswitch_remove(struct platform_device *pdev)
 	struct rswitch_private *priv = platform_get_drvdata(pdev);
 	struct rswitch_device *rdev;
 
+	if (!WARN_ON(the_rswitch_priv != priv)) {
+		the_rswitch_priv = NULL;
+	}
+
 	if (!parallel_mode)
 		rswitch_unregister_notifiers();
 
@@ -4720,6 +5136,9 @@ static int rswitch_remove(struct platform_device *pdev)
 		rdev_destroy(rdev);
 	}
 
+	/* FIXME: handle case if detaching while vports are remaining */
+	BUG_ON(!list_empty(&priv->vport_list));
+
 	return 0;
 }
 
@@ -4727,6 +5146,10 @@ static int __maybe_unused rswitch_suspend(struct device *dev)
 {
 	struct rswitch_private *priv = dev_get_drvdata(dev);
 	struct rswitch_device *rdev;
+
+	/* FIXME */
+	if (!list_empty(&priv->vport_list))
+		return -EINVAL;
 
 	rswitch_for_all_ports(priv, rdev) {
 		struct net_device *ndev = rdev->ndev;
