@@ -1133,6 +1133,9 @@ struct rswitch_vport_backend {
 	/* frontend chain ids */
 	int fe_tx_chain_index;
 	int fe_rx_chain_index;
+
+	struct rswitch_route_monitor rmon;
+	bool l3_offload_cleanup_pending;
 };
 
 struct rswitch_private {
@@ -1167,6 +1170,7 @@ struct rswitch_private {
 	struct rswitch_rx_ring *vport_shared_rx_ring;
 	unsigned long vport_be_running;
 	unsigned long vport_napi_scheduled;
+	bool vport_l3_offload_enabled;
 
 	struct net_device *offload_brdev;
 
@@ -3068,6 +3072,11 @@ static int rvp_be_open(struct net_device *ndev)
 	napi_enable(&rvpb->napi);
 	netif_start_queue(ndev);
 
+	/* If opened device is not part of any upper device, vport l3 offload
+	 * could become possible. If opened device is part of an upper device,
+	 * vport l3 offload could become no longer possible. */
+	rswitch_update_l3_offload(priv);
+
 	return 0;
 }
 
@@ -3089,6 +3098,10 @@ static int rvp_be_close(struct net_device *ndev)
 			priv->vport_shared_rx_chain_index, false);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
+	if (priv->vport_l3_offload_enabled)
+		rvpb->l3_offload_cleanup_pending = true;
+	rswitch_update_l3_offload(priv);
+
 	return 0;
 }
 
@@ -3100,6 +3113,12 @@ static int rvp_be_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 			  INFO1_DV(BIT(GWCA_PORT)) |
 			  INFO1_CSD(GWCA_INDEX, rvpb->fe_rx_chain_index);
 	int ret, ring_ret;
+	unsigned long flags;
+
+	spin_lock_irqsave(&rvpb->rmon.lock, flags);
+	if (priv->vport_l3_offload_enabled)
+		rmon_handle_l3_learning(&rvpb->rmon, skb);
+	spin_unlock_irqrestore(&rvpb->rmon.lock, flags);
 
 	ring_ret = rswitch_tx_ring_add_skb(rvpb->tx_ring, skb, 0, info1_to_fe);
 	if (ring_ret == 0) {
@@ -3209,6 +3228,11 @@ static const struct net_device_ops rvp_be_netdev_ops = {
 	.ndo_start_xmit = rvp_be_start_xmit,
 	.ndo_get_stats = rvp_be_get_stats,
 };
+
+static bool rvp_be_check(const struct net_device *ndev)
+{
+	return (ndev->netdev_ops == &rvp_be_netdev_ops);
+}
 
 static bool rswitch_check_ack_irq(struct rswitch_private *priv,
 		u32 *status, int chain)
@@ -3775,23 +3799,41 @@ static void rswitch_update_offload_brdev(struct rswitch_private *priv)
 static void rswitch_update_l3_offload(struct rswitch_private *priv)
 {
 	struct rswitch_device *rdev;
-	unsigned int all_ports_mask, l3_ports_count, l3_ports_mask;
+	struct rswitch_vport_backend *rvpb;
+	unsigned int all_ports_mask, l3_ports_mask;
+	unsigned int l3_rdev_count, l3_rvp_count;
+	bool l3_offload_enable_cond;
 
 	all_ports_mask = GENMASK(RSWITCH_NUM_HW - 1, 0);
-
-	l3_ports_count = 0;
 	l3_ports_mask = all_ports_mask;
+
+	l3_rdev_count = 0;
 	rswitch_for_all_ports(priv, rdev) {
 		if (rdev_for_l3_offload(rdev)) {
-			l3_ports_count++;
+			l3_rdev_count++;
 			l3_ports_mask &= ~BIT(rdev->port);
 		}
 	}
 
-	rswitch_for_all_ports(priv, rdev) {
+	l3_rvp_count = 0;
+	rswitch_for_all_vports(priv, rvpb) {
+		if (!(priv->vport_be_running & BIT(rvpb->id)))
+			continue;
+		if (netdev_has_any_upper_dev(rvpb->ndev)) {
+			l3_rvp_count = 0;
+			break;
+		}
+		l3_rvp_count++;
+	}
+	if (l3_rvp_count > 0)
+		l3_ports_mask &= ~BIT(GWCA_PORT);
+
+	l3_offload_enable_cond = (l3_rdev_count + l3_rvp_count >= 2);
+
 #define FWPC0_L3_MASK (FWPC0_LTHTA | \
 		       FWPC0_IP4UE | FWPC0_IP4TE | FWPC0_IP4OE)
-		if (rdev_for_l3_offload(rdev) && l3_ports_count >= 2) {
+	rswitch_for_all_ports(priv, rdev) {
+		if (rdev_for_l3_offload(rdev) && l3_offload_enable_cond) {
 			/* Update allowed offload destinations even for ports
 			 * with l3 offload enabled earlier.
 			 *
@@ -3821,8 +3863,48 @@ static void rswitch_update_l3_offload(struct rswitch_private *priv)
 
 			netdev_info(rdev->ndev, "stopping l3 offload\n");
 		}
-#undef FWPC0_L3_MASK
 	}
+
+	if (l3_rvp_count > 0 && l3_offload_enable_cond) {
+		rswitch_modify(priv, FWPC1(GWCA_PORT),
+			FWCP1_LTHFW_MASK,
+			FIELD_PREP(FWCP1_LTHFW_MASK, l3_ports_mask));
+		if (!priv->vport_l3_offload_enabled) {
+			rswitch_modify(priv, FWPC0(GWCA_PORT),
+				0,
+				FWPC0_L3_MASK);
+			priv->vport_l3_offload_enabled = true;
+			dev_info(&priv->pdev->dev, "starting vport l3 offload\n");
+		} else {
+			/* if vport's backend device just went down, need to
+			 * remove offloads */
+			rswitch_for_all_vports(priv, rvpb) {
+				if (rvpb->l3_offload_cleanup_pending) {
+					rmon_cleanup_ipv4_offloads_all(&rvpb->rmon);
+					rvpb->l3_offload_cleanup_pending = false;
+				}
+			}
+		}
+	} else {
+		if (priv->vport_l3_offload_enabled) {
+			rswitch_modify(priv, FWPC0(GWCA_PORT),
+				FWPC0_L3_MASK,
+				0);
+			rswitch_modify(priv, FWPC1(GWCA_PORT),
+				FWCP1_LTHFW_MASK,
+				FIELD_PREP(FWCP1_LTHFW_MASK, all_ports_mask));
+
+			priv->vport_l3_offload_enabled = false;
+
+			rswitch_for_all_vports(priv, rvpb) {
+				rmon_cleanup_ipv4_offloads_all(&rvpb->rmon);
+				rvpb->l3_offload_cleanup_pending = false;
+			}
+
+			dev_info(&priv->pdev->dev, "stopping vport l3 offload\n");
+		}
+	}
+#undef FWPC0_L3_MASK
 }
 
 static void rdev_join_bridge(struct rswitch_device *rdev,
@@ -3853,28 +3935,38 @@ static int rswitch_netdevice_event(struct notifier_block *nb,
 				   unsigned long event, void *ptr)
 {
 	struct net_device *ndev = netdev_notifier_info_to_dev(ptr);
-	struct rswitch_device *rdev;
 	struct netdev_notifier_changeupper_info *info;
-
-	if (!rswitch_port_check(ndev))
-		return NOTIFY_DONE;
-	rdev = netdev_priv(ndev);
+	struct rswitch_device *rdev;
+	struct rswitch_vport_backend *rvpb;
 
 	if (event != NETDEV_CHANGEUPPER)
 		return NOTIFY_DONE;
 	info = ptr;
 
-	if (!netif_is_bridge_master(info->upper_dev))
-		return NOTIFY_DONE;
+	if (rswitch_port_check(ndev)) {
+		rdev = netdev_priv(ndev);
 
-	if (info->linking)
-		rdev_join_bridge(rdev, info->upper_dev);
-	else
-		rdev_leave_bridge(rdev);
+		if (netif_is_bridge_master(info->upper_dev)) {
+			if (info->linking)
+				rdev_join_bridge(rdev, info->upper_dev);
+			else
+				rdev_leave_bridge(rdev);
+		}
 
-	rswitch_update_l3_offload(rdev->priv);
+		rswitch_update_l3_offload(rdev->priv);
 
-	return NOTIFY_OK;
+		return NOTIFY_OK;
+	}
+
+	if (rvp_be_check(ndev)) {
+		rvpb = netdev_priv(ndev);
+
+		rswitch_update_l3_offload(rvpb->priv);
+
+		return NOTIFY_OK;
+	}
+
+	return NOTIFY_DONE;
 }
 
 static int rswitch_port_attr_set(struct net_device *ndev,
@@ -4061,10 +4153,16 @@ static struct rswitch_private *rmon_to_rswitch_private(
 		struct rswitch_route_monitor *rmon)
 {
 	struct rswitch_device *rdev;
+	struct rswitch_vport_backend *rvpb;
 
 	if (rswitch_port_check(rmon->ndev)) {
 		rdev = netdev_priv(rmon->ndev);
 		return rdev->priv;
+	}
+
+	if (rvp_be_check(rmon->ndev)) {
+		rvpb = netdev_priv(rmon->ndev);
+		return rvpb->priv;
 	}
 
 	BUG();
@@ -4077,6 +4175,7 @@ static bool rmon_ipv4_dst_offload_hw_op(struct rswitch_route_monitor *rmon,
 {
 	struct rswitch_private *priv = rmon_to_rswitch_private(rmon);
 	struct rswitch_device *rdev;
+	struct rswitch_vport_backend *rvpb;
 	u32 val, err_flags, collisions;
 	int ret;
 	const char *frame_type_name[] = {
@@ -4111,6 +4210,18 @@ static bool rmon_ipv4_dst_offload_hw_op(struct rswitch_route_monitor *rmon,
 		rswitch_write(priv, FWLTHTL8(1), 0);
 
 		val = FIELD_PREP(FWLTHTL9_DV, BIT(rdev->port));
+		rswitch_write(priv, FWLTHTL9, val);
+	}
+
+	if (rvp_be_check(rmon->ndev)) {
+		rvpb = netdev_priv(rmon->ndev);
+		snprintf(target, sizeof(target), "vport %d", rvpb->id);
+
+		rswitch_write(priv, FWLTHTL8(GWCA_INDEX),
+				rvpb->fe_rx_chain_index);
+		rswitch_write(priv, FWLTHTL8(1 - GWCA_INDEX), 0);
+
+		val = FIELD_PREP(FWLTHTL9_DV, BIT(GWCA_PORT));
 		rswitch_write(priv, FWLTHTL9, val);
 	}
 
@@ -4592,7 +4703,7 @@ static int rmon_init(struct rswitch_route_monitor *rmon,
 {
 	int ret;
 
-	if (WARN_ON(!rswitch_port_check(ndev)))
+	if (WARN_ON(!rswitch_port_check(ndev) && !rvp_be_check(ndev)))
 		return -ENOTSUPP;
 
 	rmon->ndev = ndev;
@@ -4974,8 +5085,15 @@ int rswitch_vport_register(struct rswitch_vport_desc *rvpd)
 	if (ret)
 		goto no_ndev_register;
 
+	ret = rmon_init(&rvpb->rmon, ndev);
+	if (ret)
+		goto no_rmon;
+
 	list_add_tail(&rvpb->list, &priv->vport_list);
 	return 0;
+
+no_rmon:
+	unregister_netdev(ndev);
 
 no_ndev_register:
 	netif_napi_del(&rvpb->napi);
@@ -5021,9 +5139,13 @@ void rswitch_vport_unregister(struct rswitch_vport_desc *rvpd)
 	unsigned int id = rvpb->id;
 	int ret;
 
+	/* unregister netdev first, to force it's close and offload cleanup */
+	unregister_netdev(rvpb->ndev);
+
 	list_del(&rvpb->list);
 
-	unregister_netdev(rvpb->ndev);
+	rmon_cleanup(&rvpb->rmon);
+
 	netif_napi_del(&rvpb->napi);
 
 	if (list_empty(&priv->vport_list))
