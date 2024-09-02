@@ -1163,6 +1163,10 @@ struct rswitch_private {
 
 	struct list_head vport_list;
 	unsigned long vport_ids;
+	int vport_shared_rx_chain_index;
+	struct rswitch_rx_ring *vport_shared_rx_ring;
+	unsigned long vport_be_running;
+	unsigned long vport_napi_scheduled;
 
 	struct net_device *offload_brdev;
 
@@ -3055,6 +3059,10 @@ static int rvp_be_open(struct net_device *ndev)
 	spin_lock_irqsave(&priv->lock, flags);
 	rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, true);
 	rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, true);
+	if (!priv->vport_be_running && !priv->vport_napi_scheduled)
+		rswitch_enadis_data_irq(priv,
+			priv->vport_shared_rx_chain_index, true);
+	priv->vport_be_running |= BIT(rvpb->id);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	napi_enable(&rvpb->napi);
@@ -3073,8 +3081,12 @@ static int rvp_be_close(struct net_device *ndev)
 	netif_stop_queue(ndev);
 
 	spin_lock_irqsave(&priv->lock, flags);
+	priv->vport_be_running &= ~BIT(rvpb->id);
 	rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, false);
 	rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, false);
+	if (!priv->vport_be_running)
+		rswitch_enadis_data_irq(priv,
+			priv->vport_shared_rx_chain_index, false);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return 0;
@@ -3102,40 +3114,88 @@ static int rvp_be_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	return ret;
 }
 
+static struct rswitch_vport_backend *rswitch_lookup_vport_for_rx_skb(
+		struct rswitch_private *priv, struct sk_buff *skb)
+{
+	struct ethhdr *ethhdr = (struct ethhdr *)skb->data;
+	struct rswitch_vport_backend *rvpb;
+
+	rswitch_for_all_vports(priv, rvpb) {
+		if (ether_addr_equal(ethhdr->h_source, rvpb->rvpd->mac_addr))
+			return rvpb;
+	}
+
+	return NULL;
+}
+
 static int rvp_be_napi_poll(struct napi_struct *napi, int budget)
 {
 	struct net_device *ndev = napi->dev;
 	struct rswitch_vport_backend *rvpb = netdev_priv(ndev);
 	struct rswitch_private *priv = rvpb->priv;
 	struct sk_buff *skb;
+	struct rswitch_vport_backend *skb_rvpb;
+	struct net_device *skb_ndev;
 	int work_done = 0;
+	bool rx_pending = true;
+	bool shared_rx_pending = true;
 	unsigned long flags;
 
 	if (rswitch_tx_ring_handle_complete(rvpb->tx_ring, &ndev->stats))
 		netif_wake_subqueue(ndev, 0);
 
-	while (work_done < budget) {
-		skb = rswitch_rx_ring_process(rvpb->rx_ring, false);
-		if (skb) {
-			skb->protocol = eth_type_trans(skb, ndev);
-			ndev->stats.rx_packets++;
-			ndev->stats.rx_bytes += skb->len;
-			napi_gro_receive(napi, skb);
+	while ((rx_pending || shared_rx_pending) && work_done < budget) {
+		if (rx_pending) {
+			skb = rswitch_rx_ring_process(rvpb->rx_ring, false);
+			if (skb) {
+				skb->protocol = eth_type_trans(skb, ndev);
+				ndev->stats.rx_packets++;
+				ndev->stats.rx_bytes += skb->len;
+				napi_gro_receive(napi, skb);
+			}
+			work_done++;
+			rx_pending = rswitch_rx_ring_need_process(
+					rvpb->rx_ring);
 		}
 
-		work_done++;
-		if (!rswitch_rx_ring_need_process(rvpb->rx_ring))
-			break;
+		if (shared_rx_pending) {
+			skb = rswitch_rx_ring_process(
+					priv->vport_shared_rx_ring, false);
+			if (skb) {
+				skb_rvpb = rswitch_lookup_vport_for_rx_skb(
+						priv, skb);
+				if (!skb_rvpb) {
+					dev_kfree_skb_any(skb);
+				} else {
+					skb_ndev = skb_rvpb->ndev;
+					skb->protocol =
+						eth_type_trans(skb, skb_ndev);
+					skb_ndev->stats.rx_packets++;
+					skb_ndev->stats.rx_bytes += skb->len;
+					if (skb_rvpb == rvpb)
+						napi_gro_receive(napi, skb);
+					else
+						netif_receive_skb(skb);
+				}
+			}
+			work_done++;
+			shared_rx_pending = rswitch_rx_ring_need_process(
+					priv->vport_shared_rx_ring);
+		}
 	}
 
 	if (work_done < budget && napi_complete_done(napi, work_done)) {
 		spin_lock_irqsave(&priv->lock, flags);
+		priv->vport_napi_scheduled &= ~BIT(rvpb->id);
 		rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, true);
 		rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, true);
+		if (!priv->vport_napi_scheduled)
+			rswitch_enadis_data_irq(priv,
+				priv->vport_shared_rx_chain_index, true);
 		spin_unlock_irqrestore(&priv->lock, flags);
 	}
 
-	return work_done;
+	return min(work_done, budget);
 }
 
 static struct net_device_stats *rvp_be_get_stats(struct net_device *ndev)
@@ -3182,6 +3242,10 @@ static void rvp_be_interrupt(struct rswitch_vport_backend *rvpb)
 		spin_lock(&priv->lock);
 		rswitch_enadis_data_irq(priv, rvpb->tx_chain_index, false);
 		rswitch_enadis_data_irq(priv, rvpb->rx_chain_index, false);
+		if (!priv->vport_napi_scheduled)
+			rswitch_enadis_data_irq(priv,
+				priv->vport_shared_rx_chain_index, false);
+		priv->vport_napi_scheduled |= BIT(rvpb->id);
 		spin_unlock(&priv->lock);
 		__napi_schedule(&rvpb->napi);
 	}
@@ -3195,7 +3259,7 @@ static irqreturn_t rswitch_irq(int irq, void *dev_id)
 	int i;
 	struct rswitch_device *rdev;
 	struct rswitch_vport_backend *rvpb;
-	bool tx_irq, rx_irq;
+	bool tx_irq, rx_irq, shared_rx_irq;
 
 	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
 		irq_status[i] = rswitch_gwca_read(priv, GWDIS(i)) &
@@ -3217,7 +3281,9 @@ static irqreturn_t rswitch_irq(int irq, void *dev_id)
 				rvpb->tx_chain_index);
 		rx_irq = rswitch_check_ack_irq(priv, irq_status,
 				rvpb->rx_chain_index);
-		if (tx_irq || rx_irq) {
+		shared_rx_irq = rswitch_check_ack_irq(priv, irq_status,
+				priv->vport_shared_rx_chain_index);
+		if (tx_irq || rx_irq || shared_rx_irq) {
 			rvp_be_interrupt(rvpb);
 			ret = IRQ_HANDLED;
 		}
@@ -4724,6 +4790,54 @@ static void rdev_destroy(struct rswitch_device *rdev)
 	free_netdev(rdev->ndev);
 }
 
+static int rswitch_vport_init_shared_rx_ring(struct rswitch_private *priv)
+{
+	priv->vport_shared_rx_chain_index = rswitch_gwca_get(priv);
+	if (priv->vport_shared_rx_chain_index < 0)
+		return -ENOSPC;
+
+	priv->vport_shared_rx_ring =
+			rswitch_rx_ring_create(&priv->pdev->dev, 256);
+	if (!priv->vport_shared_rx_ring) {
+		rswitch_gwca_put(priv, priv->vport_shared_rx_chain_index);
+		priv->vport_shared_rx_chain_index = -1;
+		return -ENOMEM;
+	}
+
+	rswitch_gwca_attach_ring(priv, priv->vport_shared_rx_chain_index,
+			0, rswitch_rx_ring_dma_addr(priv->vport_shared_rx_ring),
+			GWDCC_EDE |	/* extended descriptor */
+			GWDCC_ETS);	/* ... with timestamps */
+
+	/* Setup port based forwarding from CPU port to the shared ring */
+	rswitch_modify(priv, FWPBFC(GWCA_PORT), 0, BIT(GWCA_PORT));
+	rswitch_modify(priv, FWPBFCSDC(GWCA_INDEX, GWCA_PORT), 0,
+					priv->vport_shared_rx_chain_index);
+
+	return 0;
+}
+
+static void rswitch_vport_cleanup_shared_rx_ring(struct rswitch_private *priv)
+{
+	int ret;
+
+	/* Unsetup port based forwarding from CPU port to the shared ring */
+	rswitch_modify(priv, FWPBFCSDC(GWCA_INDEX, GWCA_PORT),
+				priv->vport_shared_rx_chain_index, 0);
+	rswitch_modify(priv, FWPBFC(GWCA_PORT), BIT(GWCA_PORT), 0);
+
+	ret = rswitch_gwca_detach_ring(priv, priv->vport_shared_rx_chain_index);
+	if (ret)
+		dev_err(&priv->pdev->dev,
+			"vport shared rx ring detach failed\n");
+	else
+		rswitch_rx_ring_destroy(priv->vport_shared_rx_ring);
+	priv->vport_shared_rx_ring = NULL;
+
+	rswitch_gwca_put(priv, priv->vport_shared_rx_chain_index);
+	priv->vport_shared_rx_chain_index = -1;
+}
+
 int rswitch_vport_register(struct rswitch_vport_desc *rvpd)
 {
 	struct rswitch_private *priv = the_rswitch_priv;
@@ -4820,6 +4934,12 @@ int rswitch_vport_register(struct rswitch_vport_desc *rvpd)
 	 * so it notices EOS in BAT */
 	rswitch_gwca_modify(priv, GWDCC(rvpb->fe_rx_chain_index), 0, GWDCC_BALR);
 
+	if (list_empty(&priv->vport_list)) {
+		ret = rswitch_vport_init_shared_rx_ring(priv);
+		if (ret)
+			goto no_shared_rx_ring;
+	}
+
 	if (!rvpd->fe_reg_base)
 		rvpd->fe_reg_base = priv->addr;
 	if (rvpd->fe_irq < 0) {
@@ -4860,6 +4980,10 @@ int rswitch_vport_register(struct rswitch_vport_desc *rvpd)
 no_ndev_register:
 	netif_napi_del(&rvpb->napi);
 
+	if (list_empty(&priv->vport_list))
+		rswitch_vport_cleanup_shared_rx_ring(priv);
+
+no_shared_rx_ring:
 no_fe_irq:
 	ret2 = rswitch_gwca_detach_ring(priv, rvpb->rx_chain_index);
 	if (ret2)
@@ -4901,6 +5025,9 @@ void rswitch_vport_unregister(struct rswitch_vport_desc *rvpd)
 
 	unregister_netdev(rvpb->ndev);
 	netif_napi_del(&rvpb->napi);
+
+	if (list_empty(&priv->vport_list))
+		rswitch_vport_cleanup_shared_rx_ring(priv);
 
 	ret = rswitch_gwca_detach_ring(priv, rvpb->rx_chain_index);
 	if (ret)
@@ -5062,6 +5189,7 @@ static int rswitch_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "could not initialize any ports\n");
 
 	INIT_LIST_HEAD(&priv->vport_list);
+	priv->vport_shared_rx_chain_index = -1;
 
 	if (!parallel_mode) {
 		pm_runtime_enable(&pdev->dev);

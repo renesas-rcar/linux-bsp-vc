@@ -565,8 +565,16 @@ static int rvpf_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	struct rswitch_vport_frontend *rvpf = netdev_priv(ndev);
 	struct rswitch_vport_desc *rvpd = rvpf->rvpd;
 	int ret, ring_ret;
+	struct ethhdr *ethhdr = (struct ethhdr *)skb->data;
+	u64 info1;
 
-	ring_ret = rswitch_tx_ring_add_skb(rvpf->tx_ring, skb, 0, rvpd->info1_to_be);
+	if (ether_addr_equal(ethhdr->h_source, rvpd->mac_addr) &&
+	    is_unicast_ether_addr(ethhdr->h_dest))
+		info1 = rvpd->info1_to_fwd;
+	else
+		info1 = rvpd->info1_to_be;
+
+	ring_ret = rswitch_tx_ring_add_skb(rvpf->tx_ring, skb, 0, info1);
 	if (ring_ret == 0) {
 		RVP_WRITE(rvpd, kick_tx, rvpd->kick_tx_val);
 		ret = NETDEV_TX_OK;
@@ -642,6 +650,7 @@ int rswitch_vport_frontend_run(struct rswitch_vport_desc *rvpd)
 	SET_NETDEV_DEV(ndev, rvpd->dma_dev);
 	ndev->netdev_ops = &rvpf_netdev_ops;
 	eth_hw_addr_random(ndev);
+	ether_addr_copy(rvpd->mac_addr, ndev->dev_addr);
 
 	rvpf = netdev_priv(ndev);
 	rvpf->ndev = ndev;

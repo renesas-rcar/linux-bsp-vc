@@ -3,6 +3,7 @@
 #ifndef RSWITCH_LIB_H
 #define RSWITCH_LIB_H
 
+#include <linux/if_ether.h>
 #include <linux/netdevice.h>
 
 
@@ -154,6 +155,8 @@ struct rswitch_vport_desc {
 	u32 tx_irq_dis_offset, rx_irq_dis_offset;
 	u32 tx_irq_status_offset, rx_irq_status_offset;
 	u32 tx_irq_bit, rx_irq_bit;
+
+	u8 mac_addr[ETH_ALEN];
 };
 
 /* Provide full lifecycle of vport frontend device */
