@@ -2558,7 +2558,7 @@ static const struct net_device_ops rdev_netdev_ops = {
 	.ndo_set_mac_address = rdev_set_mac_address,
 };
 
-static bool rswitch_port_check(const struct net_device *ndev)
+static bool is_rdev(const struct net_device *ndev)
 {
 	return (ndev->netdev_ops == &rdev_netdev_ops);
 }
@@ -3229,7 +3229,7 @@ static const struct net_device_ops rvp_be_netdev_ops = {
 	.ndo_get_stats = rvp_be_get_stats,
 };
 
-static bool rvp_be_check(const struct net_device *ndev)
+static bool is_rvp_be(const struct net_device *ndev)
 {
 	return (ndev->netdev_ops == &rvp_be_netdev_ops);
 }
@@ -3907,28 +3907,35 @@ static void rswitch_update_l3_offload(struct rswitch_private *priv)
 #undef FWPC0_L3_MASK
 }
 
-static void rdev_join_bridge(struct rswitch_device *rdev,
+static bool rswitch_port_check(const struct net_device *ndev)
+{
+	return is_rdev(ndev);
+}
+
+static void rswitch_port_update_brdev(struct net_device *ndev,
 			    struct net_device *brdev)
 {
-	rdev->brdev = brdev;
+	struct rswitch_device *rdev;
 
-	rswitch_update_offload_brdev(rdev->priv);
+	if (is_rdev(ndev)) {
+		rdev = netdev_priv(ndev);
+		rdev->brdev = brdev;
+		rswitch_update_offload_brdev(rdev->priv);
+	}
+
 }
 
-static void rdev_leave_bridge(struct rswitch_device *rdev)
+static void rswitch_port_update_stp_state(struct net_device *ndev, u8 stp_state)
 {
-	rdev->brdev = NULL;
+	struct rswitch_device *rdev;
 
-	rswitch_update_offload_brdev(rdev->priv);
-}
-
-static void rdev_update_stp_state(struct rswitch_device *rdev, u8 stp_state)
-{
-	rdev->learning_requested = (stp_state == BR_STATE_LEARNING ||
-				    stp_state == BR_STATE_FORWARDING);
-	rdev->forwarding_requested = (stp_state == BR_STATE_FORWARDING);
-
-	rswitch_update_l2_offload(rdev->priv);
+	if (is_rdev(ndev)) {
+		rdev = netdev_priv(ndev);
+		rdev->learning_requested = (stp_state == BR_STATE_LEARNING ||
+					    stp_state == BR_STATE_FORWARDING);
+		rdev->forwarding_requested = (stp_state == BR_STATE_FORWARDING);
+		rswitch_update_l2_offload(rdev->priv);
+	}
 }
 
 static int rswitch_netdevice_event(struct notifier_block *nb,
@@ -3936,49 +3943,43 @@ static int rswitch_netdevice_event(struct notifier_block *nb,
 {
 	struct net_device *ndev = netdev_notifier_info_to_dev(ptr);
 	struct netdev_notifier_changeupper_info *info;
+	struct net_device *brdev;
 	struct rswitch_device *rdev;
 	struct rswitch_vport_backend *rvpb;
 
+	if (!rswitch_port_check(ndev))
+		return NOTIFY_DONE;
 	if (event != NETDEV_CHANGEUPPER)
 		return NOTIFY_DONE;
+
 	info = ptr;
 
-	if (rswitch_port_check(ndev)) {
+	if (netif_is_bridge_master(info->upper_dev)) {
+		brdev = info->linking ? info->upper_dev : NULL;
+		rswitch_port_update_brdev(ndev, brdev);
+	}
+
+	if (is_rdev(ndev)) {
 		rdev = netdev_priv(ndev);
-
-		if (netif_is_bridge_master(info->upper_dev)) {
-			if (info->linking)
-				rdev_join_bridge(rdev, info->upper_dev);
-			else
-				rdev_leave_bridge(rdev);
-		}
-
 		rswitch_update_l3_offload(rdev->priv);
-
-		return NOTIFY_OK;
 	}
 
-	if (rvp_be_check(ndev)) {
+	if (is_rvp_be(ndev)) {
 		rvpb = netdev_priv(ndev);
-
 		rswitch_update_l3_offload(rvpb->priv);
-
-		return NOTIFY_OK;
 	}
 
-	return NOTIFY_DONE;
+	return NOTIFY_OK;
 }
 
 static int rswitch_port_attr_set(struct net_device *ndev,
 				 const struct switchdev_attr *attr,
 				 struct switchdev_trans *trans)
 {
-	struct rswitch_device *rdev = netdev_priv(ndev);
-
 	switch (attr->id) {
 	case SWITCHDEV_ATTR_ID_PORT_STP_STATE:
 		if (switchdev_trans_ph_commit(trans))
-			rdev_update_stp_state(rdev, attr->u.stp_state);
+			rswitch_port_update_stp_state(ndev, attr->u.stp_state);
 		return 0;
 	default:
 		return -EOPNOTSUPP;
@@ -4155,12 +4156,12 @@ static struct rswitch_private *rmon_to_rswitch_private(
 	struct rswitch_device *rdev;
 	struct rswitch_vport_backend *rvpb;
 
-	if (rswitch_port_check(rmon->ndev)) {
+	if (is_rdev(rmon->ndev)) {
 		rdev = netdev_priv(rmon->ndev);
 		return rdev->priv;
 	}
 
-	if (rvp_be_check(rmon->ndev)) {
+	if (is_rvp_be(rmon->ndev)) {
 		rvpb = netdev_priv(rmon->ndev);
 		return rvpb->priv;
 	}
@@ -4202,7 +4203,7 @@ static bool rmon_ipv4_dst_offload_hw_op(struct rswitch_route_monitor *rmon,
 	      FIELD_PREP(FWLTHTL7_RN, offload->update->index);
 	rswitch_write(priv, FWLTHTL7, val);
 
-	if (rswitch_port_check(rmon->ndev)) {
+	if (is_rdev(rmon->ndev)) {
 		rdev = netdev_priv(rmon->ndev);
 		snprintf(target, sizeof(target), "port %d", rdev->port);
 
@@ -4213,7 +4214,7 @@ static bool rmon_ipv4_dst_offload_hw_op(struct rswitch_route_monitor *rmon,
 		rswitch_write(priv, FWLTHTL9, val);
 	}
 
-	if (rvp_be_check(rmon->ndev)) {
+	if (is_rvp_be(rmon->ndev)) {
 		rvpb = netdev_priv(rmon->ndev);
 		snprintf(target, sizeof(target), "vport %d", rvpb->id);
 
@@ -4703,7 +4704,7 @@ static int rmon_init(struct rswitch_route_monitor *rmon,
 {
 	int ret;
 
-	if (WARN_ON(!rswitch_port_check(ndev) && !rvp_be_check(ndev)))
+	if (WARN_ON(!is_rdev(ndev) && !is_rvp_be(ndev)))
 		return -ENOTSUPP;
 
 	rmon->ndev = ndev;
