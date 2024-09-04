@@ -244,7 +244,7 @@ enum rswitch_reg {
 	FWMACTL1	= FWRO + 0x4634,
 	FWMACTL2	= FWRO + 0x4638,
 	FWMACTL3	= FWRO + 0x463C,
-	FWMACTL4	= FWRO + 0x4640,
+	FWMACTL40	= FWRO + 0x4640,
 	FWMACTL5	= FWRO + 0x4650,
 	FWMACTLR	= FWRO + 0x4654,
 	FWMACTIM	= FWRO + 0x4660,
@@ -932,6 +932,29 @@ enum rswitch_gwca_mode {
 #define FWLTHTIM_TR		BIT(1)
 #define FWLTHTIM_TIOG		BIT(0)
 
+#define FWMACTL0_ED		BIT(16)
+#define FWMACTL0_HLD		BIT(10)
+#define FWMACTL0_DE		BIT(9)
+#define FWMACTL0_SL		BIT(8)
+
+#define FWMACTL3_DSLV		GENMASK(16 + RSWITCH_NUM_HW - 1, 16)
+#define FWMACTL3_SSLV		GENMASK(RSWITCH_NUM_HW - 1, 0)
+
+#define FWMACTL4(i)		(FWMACTL40 + (i) * 4)
+
+#define FWMACTL5_CME		BIT(21)
+#define FWMACTL5_EME		BIT(20)
+#define FWMACTL5_IPU		BIT(19)
+#define FWMACTL5_IPV		GENMASK(18, 16)
+#define FWMACTL5_DV		GENMASK(RSWITCH_NUM_HW - 1, 0)
+
+#define FWMACTLR_L		BIT(31)
+#define FWMACTLR_LCN		GENMASK(16 + RSWITCH_LTH_STREAM_W - 1, 16)
+#define FWMACTLR_LO		BIT(3)
+#define FWMACTLR_LEF		BIT(2)
+#define FWMACTLR_LSF		BIT(1)
+#define FWMACTLR_LF		BIT(0)
+
 #define FWL23URL0_PV		GENMASK(16 + RSWITCH_NUM_HW - 1, 16)
 #define FWL23URL0_RN		GENMASK(7, 0)
 
@@ -1134,6 +1157,10 @@ struct rswitch_vport_backend {
 	int fe_tx_chain_index;
 	int fe_rx_chain_index;
 
+	struct net_device *brdev;	/* master bridge device */
+	unsigned int forwarding_requested : 1;
+	unsigned int l2_rule_installed : 1;
+
 	struct rswitch_route_monitor rmon;
 	bool l3_offload_cleanup_pending;
 };
@@ -1170,6 +1197,8 @@ struct rswitch_private {
 	struct rswitch_rx_ring *vport_shared_rx_ring;
 	unsigned long vport_be_running;
 	unsigned long vport_napi_scheduled;
+	struct net_device *vport_common_brdev;
+	bool vport_forwarding_enabled;
 	bool vport_l3_offload_enabled;
 
 	struct net_device *offload_brdev;
@@ -1225,6 +1254,8 @@ struct rmon_ipv4_dst_offload {
 	list_for_each_entry(_rvpb, &_priv->vport_list, list)
 
 static void rswitch_update_l2_offload(struct rswitch_private *priv);
+static void rswitch_update_offload_brdev(struct rswitch_private *priv,
+		bool force_update_l2_offload);
 static void rswitch_update_l3_offload(struct rswitch_private *priv);
 
 static void rmon_handle_l3_learning(struct rswitch_route_monitor *rmon,
@@ -3072,6 +3103,10 @@ static int rvp_be_open(struct net_device *ndev)
 	napi_enable(&rvpb->napi);
 	netif_start_queue(ndev);
 
+	/* If opened device is in a bridge, vport_common_brdev can change. */
+	if (rvpb->brdev)
+		rswitch_update_offload_brdev(priv, false);
+
 	/* If opened device is not part of any upper device, vport l3 offload
 	 * could become possible. If opened device is part of an upper device,
 	 * vport l3 offload could become no longer possible. */
@@ -3097,6 +3132,13 @@ static int rvp_be_close(struct net_device *ndev)
 		rswitch_enadis_data_irq(priv,
 			priv->vport_shared_rx_chain_index, false);
 	spin_unlock_irqrestore(&priv->lock, flags);
+
+	/* If closed device is in a bridge, vport_common_brdev can change.
+	 * Even if it does not change, a cleanup for closed device is required
+	 * if it was part of l2 offload */
+	if (rvpb->brdev)
+		rswitch_update_offload_brdev(priv,
+				rvpb->brdev == priv->vport_common_brdev);
 
 	if (priv->vport_l3_offload_enabled)
 		rvpb->l3_offload_cleanup_pending = true;
@@ -3681,11 +3723,84 @@ static bool rdev_for_l3_offload(struct rswitch_device *rdev)
 	       !netdev_has_any_upper_dev(rdev->ndev);
 }
 
+static bool rvp_l2_table_hw_op(struct rswitch_vport_backend *rvpb, bool install)
+{
+	struct rswitch_private *priv = rvpb->priv;
+	u32 val, err_flags, collisions;
+	int ret;
+	u8 *mac = rvpb->rvpd->mac_addr;
+
+	val = (install ? 0 : FWMACTL0_ED);
+	rswitch_write(priv, FWMACTL0, val);
+
+	val = (mac[0] << 8) | (mac[1] << 0);
+	rswitch_write(priv, FWMACTL1, val);
+
+	val = (mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | (mac[5] << 0);
+	rswitch_write(priv, FWMACTL2, val);
+
+	/* allow frames from all ports, restriction implemented by
+	 * enabling/disabling whole table for ports */
+	val = FIELD_PREP(FWMACTL3_DSLV, GENMASK(RSWITCH_NUM_HW - 1, 0)) |
+	      FIELD_PREP(FWMACTL3_SSLV, GENMASK(RSWITCH_NUM_HW - 1, 0));
+	rswitch_write(priv, FWMACTL3, val);
+
+	rswitch_write(priv, FWMACTL4(GWCA_INDEX), rvpb->fe_rx_chain_index);
+	rswitch_write(priv, FWMACTL4(1 - GWCA_INDEX), 0);
+
+	val = FIELD_PREP(FWMACTL5_DV, BIT(GWCA_PORT));
+	rswitch_write(priv, FWMACTL5, val);
+
+	/* ... table entry write starts after writing to FWLTHTL9 */
+
+	ret = rswitch_poll(priv, FWMACTLR, FWMACTLR_L, 0);
+	val = rswitch_read(priv, FWMACTLR);
+	err_flags = val & (FWMACTLR_LEF | FWMACTLR_LSF | FWMACTLR_LF);
+	collisions = FIELD_GET(FWMACTLR_LCN, val);
+
+	if (ret) {
+		dev_err(&priv->pdev->dev,
+			"timeout writing l2 table entry\n");
+		return false;
+	}
+
+	if (err_flags) {
+		dev_err(&priv->pdev->dev,
+			"writing l2 table entry failed (flags %d)\n",
+			err_flags);
+		return false;
+	}
+
+	dev_info(&priv->pdev->dev,
+		"%s MAC forwarding %pM -> vport %d, table collisions: %u\n",
+		install ? "added" : "removed",
+		rvpb->rvpd->mac_addr,
+		rvpb->id,
+		collisions);
+	return true;
+}
+
 static void rswitch_update_l2_offload(struct rswitch_private *priv)
 {
 	struct rswitch_device *rdev;
+	struct rswitch_vport_backend *rvpb;
 	unsigned int all_ports_mask, fwd_mask;
 	bool learning_needed, forwarding_needed;
+	bool vport_forwarding_needed, l2_rule_needed;
+
+	/* vport_forwarding_needed set to true when vports participate in
+	 * offload and all running vports are in forwarding state */
+	vport_forwarding_needed = false;
+	if (priv->vport_common_brdev &&
+			priv->vport_common_brdev == priv->offload_brdev) {
+		rswitch_for_all_vports(priv, rvpb) {
+			if (!(priv->vport_be_running & BIT(rvpb->id)))
+				continue;
+			vport_forwarding_needed = rvpb->forwarding_requested;
+			if (!vport_forwarding_needed)
+				break;
+		}
+	}
 
 	/* calculate fwd_mask with zeroes in bits corresponding to ports that
 	 * shall participate in hardware forwarding */
@@ -3695,6 +3810,8 @@ static void rswitch_update_l2_offload(struct rswitch_private *priv)
 		if (rdev_for_l2_offload(rdev) && rdev->forwarding_requested)
 			fwd_mask &= ~BIT(rdev->port);
 	}
+	if (vport_forwarding_needed)
+		fwd_mask &= ~BIT(GWCA_PORT);
 
 	rswitch_for_all_ports(priv, rdev) {
 		if (rdev_for_l2_offload(rdev)) {
@@ -3752,12 +3869,50 @@ static void rswitch_update_l2_offload(struct rswitch_private *priv)
 			netdev_info(rdev->ndev, "stopping hw forwarding\n");
 		}
 	}
+
+	if (vport_forwarding_needed) {
+		/* Forwarding from CPU port to CPU port is allowed */
+		rswitch_write(priv, FWPC2(GWCA_PORT),
+				FIELD_PREP(FWCP2_LTWFW_MASK, fwd_mask));
+
+		if (!priv->vport_forwarding_enabled) {
+			rswitch_modify(priv, FWPC0(GWCA_PORT), 0, FWPC0_MACSDA);
+
+			priv->vport_forwarding_enabled = true;
+			dev_info(&priv->pdev->dev,
+					"starting vport hw forwarding\n");
+		}
+	} else if (priv->vport_forwarding_enabled) {
+		rswitch_write(priv, FWPC2(GWCA_PORT),
+				FIELD_PREP(FWCP2_LTWFW_MASK, all_ports_mask));
+		rswitch_modify(priv, FWPC0(GWCA_PORT), FWPC0_MACSDA, 0);
+
+		priv->vport_forwarding_enabled = false;
+		dev_info(&priv->pdev->dev, "stopping vport hw forwarding\n");
+	}
+
+	rswitch_for_all_vports(priv, rvpb) {
+		l2_rule_needed = vport_forwarding_needed &&
+				 (priv->vport_be_running & BIT(rvpb->id));
+		if (!rvpb->l2_rule_installed && l2_rule_needed) {
+			rvpb->l2_rule_installed =
+					rvp_l2_table_hw_op(rvpb, true);
+		}
+		if (rvpb->l2_rule_installed && !l2_rule_needed) {
+			rvpb->l2_rule_installed =
+					!rvp_l2_table_hw_op(rvpb, false);
+		}
+	}
+
+	/* FIXME: need to change rule on fe mac change */
 }
 
-static void rswitch_update_offload_brdev(struct rswitch_private *priv)
+static void rswitch_update_offload_brdev(struct rswitch_private *priv,
+		bool force_update_l2_offload)
 {
 	struct rswitch_device *rdev, *rdev2;
 	struct net_device *offload_brdev = NULL;
+	struct rswitch_vport_backend *rvpb;
 
 	rswitch_for_all_ports(priv, rdev) {
 		if (!rdev->brdev)
@@ -3774,8 +3929,27 @@ static void rswitch_update_offload_brdev(struct rswitch_private *priv)
 			break;
 	}
 
-	if (offload_brdev == priv->offload_brdev)
+	priv->vport_common_brdev = NULL;
+	rswitch_for_all_vports(priv, rvpb) {
+		if (!(priv->vport_be_running & BIT(rvpb->id)))
+			continue;
+		if (!rvpb->brdev || (priv->vport_common_brdev &&
+				     rvpb->brdev != priv->vport_common_brdev)) {
+			priv->vport_common_brdev = NULL;
+			break;
+		}
+		priv->vport_common_brdev = rvpb->brdev;
+	}
+
+	if (!offload_brdev)
+		offload_brdev = priv->vport_common_brdev;
+
+
+	if (offload_brdev == priv->offload_brdev) {
+		if (offload_brdev && force_update_l2_offload)
+			rswitch_update_l2_offload(priv);
 		return;
+	}
 
 	if (offload_brdev && !priv->offload_brdev)
 		dev_info(&priv->pdev->dev, "starting l2 offload for %s\n",
@@ -3909,25 +4083,32 @@ static void rswitch_update_l3_offload(struct rswitch_private *priv)
 
 static bool rswitch_port_check(const struct net_device *ndev)
 {
-	return is_rdev(ndev);
+	return is_rdev(ndev) || is_rvp_be(ndev);
 }
 
 static void rswitch_port_update_brdev(struct net_device *ndev,
 			    struct net_device *brdev)
 {
 	struct rswitch_device *rdev;
+	struct rswitch_vport_backend *rvpb;
 
 	if (is_rdev(ndev)) {
 		rdev = netdev_priv(ndev);
 		rdev->brdev = brdev;
-		rswitch_update_offload_brdev(rdev->priv);
+		rswitch_update_offload_brdev(rdev->priv, false);
 	}
 
+	if (is_rvp_be(ndev)) {
+		rvpb = netdev_priv(ndev);
+		rvpb->brdev = brdev;
+		rswitch_update_offload_brdev(rvpb->priv, false);
+	}
 }
 
 static void rswitch_port_update_stp_state(struct net_device *ndev, u8 stp_state)
 {
 	struct rswitch_device *rdev;
+	struct rswitch_vport_backend *rvpb;
 
 	if (is_rdev(ndev)) {
 		rdev = netdev_priv(ndev);
@@ -3935,6 +4116,12 @@ static void rswitch_port_update_stp_state(struct net_device *ndev, u8 stp_state)
 					    stp_state == BR_STATE_FORWARDING);
 		rdev->forwarding_requested = (stp_state == BR_STATE_FORWARDING);
 		rswitch_update_l2_offload(rdev->priv);
+	}
+
+	if (is_rvp_be(ndev)) {
+		rvpb = netdev_priv(ndev);
+		rvpb->forwarding_requested = (stp_state == BR_STATE_FORWARDING);
+		rswitch_update_l2_offload(rvpb->priv);
 	}
 }
 
