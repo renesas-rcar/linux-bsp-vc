@@ -36,6 +36,9 @@
 #define RSWITCH_NUM_HW		5
 #define RSWITCH_MAX_NUM_ETHA	3
 
+#define GWCA_INDEX		1	/* could be 0 or 1 */
+#define GWCA_PORT		(RSWITCH_MAX_NUM_ETHA + GWCA_INDEX)
+
 #define RSWITCH_AXI_CHAIN_W	7
 #define RSWITCH_MAX_NUM_CHAINS	(1 << RSWITCH_AXI_CHAIN_W)
 
@@ -51,9 +54,6 @@
 #define RSWITCH_PSFP_MTR_W	5
 #define RSWITCH_FRER_RECE_W	7
 
-#define RSWITCH_GWCA_IDX_TO_HW_NUM(i)	((i) + RSWITCH_MAX_NUM_ETHA)
-#define RSWITCH_HW_NUM_TO_GWCA_IDX(i)	((i) - RSWITCH_MAX_NUM_ETHA)
-
 #define TX_RING_SIZE		1024
 #define RX_RING_SIZE		1024
 #define TS_RING_SIZE		(TX_RING_SIZE * RSWITCH_MAX_NUM_ETHA)
@@ -67,9 +67,19 @@
 				 + SKB_DATA_ALIGN(sizeof(struct skb_shared_info)) \
 				 + RSWITCH_ALIGN)
 
+#if GWCA_INDEX == 1
+#define GWCA_IRQ_RESOURCE_NAME		"gwca1_rxtx0"
+#define GWCA_IRQ_NAME			"rswitch: gwca1_rxtx0"
 #define GWCA_TS_IRQ_RESOURCE_NAME	"gwca1_rxts0"
 #define GWCA_TS_IRQ_NAME		"rswitch: gwca1_rxts0"
+#else
+#define GWCA_IRQ_RESOURCE_NAME		"gwca0_rxtx0"
+#define GWCA_IRQ_NAME			"rswitch: gwca0_rxtx0"
+#define GWCA_TS_IRQ_RESOURCE_NAME	"gwca0_rxts0"
+#define GWCA_TS_IRQ_NAME		"rswitch: gwca0_rxts0"
+#endif
 #define GWCA_TS_IRQ_BIT			BIT(0)
+
 #define GWCA_IPV_NUM		0
 
 #define RSWITCH_COMA_OFFSET	0x00009000
@@ -81,8 +91,11 @@
 
 #define FWRO	0
 #define CARO	RSWITCH_COMA_OFFSET
+#if GWCA_INDEX == 1
 #define GWRO	RSWITCH_GWCA1_OFFSET
-/*#define GWRO	RSWITCH_GWCA0_OFFSET*/
+#else
+#define GWRO	RSWITCH_GWCA0_OFFSET
+#endif
 #define TARO	0
 #define RMRO	0x1000
 enum rswitch_reg {
@@ -1109,7 +1122,6 @@ struct rswitch_gwca_ts_info {
 
 #define RSWITCH_NUM_IRQ_REGS	(RSWITCH_MAX_NUM_CHAINS / BITS_PER_TYPE(u32))
 struct rswitch_gwca {
-	int index;
 	struct rswitch_gwca_chain *chains;
 	int num_chains;
 	struct rswitch_gwca_chain ts_queue;
@@ -2872,7 +2884,7 @@ static void rswitch_clock_enable(struct rswitch_private *priv)
 	val |= RCEC_RCE;
 
 	/* Enable clock for the used GWCA */
-	val |= FIELD_PREP(RCEC_ACE, BIT(priv->gwca.index));
+	val |= FIELD_PREP(RCEC_ACE, BIT(GWCA_PORT));
 
 	/* Enable clock for used ports.
 	 *
@@ -2900,7 +2912,7 @@ static void rswitch_clock_disable(struct rswitch_private *priv)
 	if (!parallel_mode)
 		val |= RCDC_RCD;
 
-	val |= FIELD_PREP(RCDC_ACD, BIT(priv->gwca.index));
+	val |= FIELD_PREP(RCDC_ACD, BIT(GWCA_PORT));
 
 	rswitch_for_all_ports(priv, rdev)
 		val |= FIELD_PREP(RCDC_ACD, BIT(rdev->port));
@@ -2928,17 +2940,8 @@ static void rswitch_reset(struct rswitch_private *priv)
 		mdelay(1);
 		rswitch_serdes_write_direct(priv, RSWITCH_SERDES_LOCAL_OFFSET, 0);
 	} else {
-		int gwca_idx;
 		int mode;
 		int count;
-
-		/* FIXME: explicit access to registers of two GWCAs removed from
-		 *	  here, to be added ar gwca register accessors level */
-		if (priv->gwca.index == RSWITCH_GWCA_IDX_TO_HW_NUM(0)) {
-			gwca_idx = 1;
-		} else {
-			gwca_idx = 0;
-		}
 
 		count = 0;
 		do {
@@ -2948,7 +2951,7 @@ static void rswitch_reset(struct rswitch_private *priv)
 
 			count++;
 			if (!(count % 100))
-				pr_info(" rswitch wait for GWMS%d %d==%d\n", gwca_idx, mode,
+				pr_info(" rswitch wait for GWMS%d %d==%d\n", GWCA_INDEX, mode,
 					GWMC_OPC_OPERATION);
 
 			mdelay(10);
@@ -3507,11 +3510,11 @@ static int rswitch_request_irqs(struct rswitch_private *priv)
 	int irq, err;
 
 	/* FIXME: other queues */
-	irq = platform_get_irq_byname(priv->pdev, "gwca1_rxtx0");
+	irq = platform_get_irq_byname(priv->pdev, GWCA_IRQ_RESOURCE_NAME);
 	if (irq < 0)
 		goto out;
 
-	err = request_irq(irq, rswitch_irq, 0, "rswitch: gwca1_rxtx0", priv);
+	err = request_irq(irq, rswitch_irq, 0, GWCA_IRQ_NAME, priv);
 	if (err < 0)
 		goto out;
 
@@ -3523,7 +3526,7 @@ static int rswitch_free_irqs(struct rswitch_private *priv)
 {
 	int irq;
 
-	irq = platform_get_irq_byname(priv->pdev, "gwca1_rxtx0");
+	irq = platform_get_irq_byname(priv->pdev, GWCA_IRQ_RESOURCE_NAME);
 	if (irq < 0)
 		return irq;
 
@@ -3608,9 +3611,6 @@ static int rswitch_fwd_init(struct rswitch_private *priv)
 	int port, ret;
 	u32 all_ports = GENMASK(RSWITCH_NUM_HW - 1, 0);
 	struct rswitch_device *rdev;
-	/* FIXME */
-	int gwca_index = RSWITCH_HW_NUM_TO_GWCA_IDX(priv->gwca.index);
-	int gwca_port = priv->gwca.index;
 
 	/* Start with empty configuration, with all features disabled and
 	 * all forwarding disallowed */
@@ -3633,14 +3633,14 @@ static int rswitch_fwd_init(struct rswitch_private *priv)
 		port = rdev->port;
 		/* Port-based forwarding to GWCA port */
 		rswitch_write(priv, FWPBFC(port),
-				FIELD_PREP(FWPBFC_PBDV_MASK, BIT(gwca_port)));
+				FIELD_PREP(FWPBFC_PBDV_MASK, BIT(GWCA_PORT)));
 		/* Subdestination within GWCA port */
-		rswitch_write(priv, FWPBFCSDC(gwca_index, port),
+		rswitch_write(priv, FWPBFCSDC(GWCA_INDEX, port),
 				rdev->rx_chain->index);
 	}
 
 	/* For GWCA port, allow direct descriptors */
-	rswitch_modify(priv, FWPC1(gwca_port), 0, FWPC1_DDE);
+	rswitch_modify(priv, FWPC1(GWCA_PORT), 0, FWPC1_DDE);
 
 	/* Initialize hardware L2 forwarding table */
 
@@ -5010,8 +5010,6 @@ static int rswitch_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	/* Fixed to use GWCA1 */
-	priv->gwca.index = 4;
 	priv->gwca.num_chains = num_etha_ports * NUM_CHAINS_PER_NDEV;
 	priv->gwca.chains = devm_kcalloc(&pdev->dev, priv->gwca.num_chains,
 					 sizeof(*priv->gwca.chains), GFP_KERNEL);
