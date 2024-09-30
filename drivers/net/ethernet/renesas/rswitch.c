@@ -1173,6 +1173,7 @@ struct rswitch_private {
 	struct rswitch_desc *desc_bat;
 	dma_addr_t desc_bat_dma;
 	u32 desc_bat_size;
+	bool explicit_bat_address;
 
 	struct list_head port_list;
 
@@ -2821,8 +2822,12 @@ static int rswitch_desc_alloc(struct rswitch_private *priv)
 
 	priv->desc_bat_size =
 			sizeof(struct rswitch_desc) * RSWITCH_MAX_NUM_CHAINS;
-	priv->desc_bat = dma_alloc_coherent(dev, priv->desc_bat_size,
-					    &priv->desc_bat_dma, GFP_KERNEL);
+	if (priv->explicit_bat_address)
+		priv->desc_bat = memremap(priv->desc_bat_dma,
+					priv->desc_bat_size, MEMREMAP_WT);
+	else
+		priv->desc_bat = dma_alloc_coherent(dev, priv->desc_bat_size,
+					&priv->desc_bat_dma, GFP_KERNEL);
 	if (!priv->desc_bat)
 		return -ENOMEM;
 	for (i = 0; i < RSWITCH_MAX_NUM_CHAINS; i++)
@@ -2833,10 +2838,14 @@ static int rswitch_desc_alloc(struct rswitch_private *priv)
 
 static void rswitch_desc_free(struct rswitch_private *priv)
 {
-	if (priv->desc_bat)
-		dma_free_coherent(&priv->pdev->dev, priv->desc_bat_size,
-				  priv->desc_bat, priv->desc_bat_dma);
-	priv->desc_bat = NULL;
+	if (priv->desc_bat) {
+		if (priv->explicit_bat_address)
+			memunmap(priv->desc_bat);
+		else
+			dma_free_coherent(&priv->pdev->dev, priv->desc_bat_size,
+					priv->desc_bat, priv->desc_bat_dma);
+		priv->desc_bat = NULL;
+	}
 }
 
 static int rswitch_gwca_get(struct rswitch_private *priv)
@@ -5409,6 +5418,8 @@ static int rswitch_probe(struct platform_device *pdev)
 	struct resource *res, *res_serdes;
 	struct device_node *ports_dn, *port_dn;
 	struct rswitch_device *rdev;
+	const void *bat_address_prop;
+	int bat_address_prop_len;
 	int ret;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -5497,6 +5508,18 @@ static int rswitch_probe(struct platform_device *pdev)
 
 	if (list_empty(&priv->port_list))
 		dev_warn(&pdev->dev, "could not initialize any ports\n");
+
+	bat_address_prop = of_get_property(pdev->dev.of_node, "bat-address",
+			&bat_address_prop_len);
+	if (bat_address_prop) {
+		if (bat_address_prop_len != sizeof(dma_addr_t))
+			dev_warn(&pdev->dev, "wrong bat-address length\n");
+		else {
+			priv->explicit_bat_address = true;
+			priv->desc_bat_dma = of_read_number(bat_address_prop,
+					bat_address_prop_len / sizeof(u32));
+		}
+	}
 
 	INIT_LIST_HEAD(&priv->vport_list);
 	priv->vport_shared_rx_chain_index = -1;
