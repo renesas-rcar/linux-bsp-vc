@@ -960,6 +960,16 @@ enum rswitch_gwca_mode {
 #define FWL23UTIM_TR		BIT(1)
 #define FWL23UTIM_TIOG		BIT(0)
 
+/* TOP */
+
+#define TPEMIMC7(chain)		(TPEMIMC70 + (chain) * 4)
+
+#if GWCA_INDEX == 1
+#define TPEMIMC7_GDICM		GENMASK(10, 8)
+#else
+#define TPEMIMC7_GDICM		GENMASK(2, 0)
+#endif
+
 /* Serdes */
 #define RSWITCH_SERDES_LOCAL_OFFSET             0x2600
 #define RSWITCH_SERDES_OFFSET                   0x0400
@@ -1037,6 +1047,8 @@ struct rswitch_gwca {
 	struct rswitch_gwca_ts_queue ts_queue;
 	struct list_head ts_info_list;
 	DECLARE_BITMAP(used, RSWITCH_MAX_NUM_CHAINS);
+
+	u32 external_irq[RSWITCH_NUM_IRQ_REGS];
 };
 
 struct rswitch_route_monitor {
@@ -2759,9 +2771,15 @@ static void rswitch_gwca_put(struct rswitch_private *priv, int index)
 }
 
 static void rswitch_gwca_attach_ring(struct rswitch_private *priv, int index,
-		dma_addr_t ring_dma, u32 gwdcc_bits)
+		int irq_index, dma_addr_t ring_dma, u32 gwdcc_bits)
 {
 	struct rswitch_desc *desc = &priv->desc_bat[index];
+
+	if (irq_index > 0) {
+		priv->gwca.external_irq[index / 32] |= BIT(index % 32);
+		rswitch_modify(priv, TPEMIMC7(index), TPEMIMC7_GDICM,
+				FIELD_PREP(TPEMIMC7_GDICM, irq_index));
+	}
 
 	desc->dptrl = cpu_to_le32(lower_32_bits(ring_dma));
 	desc->dptrh = cpu_to_le32(upper_32_bits(ring_dma));
@@ -2774,6 +2792,11 @@ static void rswitch_gwca_attach_ring(struct rswitch_private *priv, int index,
 static int rswitch_gwca_detach_ring(struct rswitch_private *priv, int index)
 {
 	struct rswitch_desc *desc = &priv->desc_bat[index];
+
+	if (priv->gwca.external_irq[index / 32] & BIT(index % 32)) {
+		priv->gwca.external_irq[index / 32] &= ~BIT(index % 32);
+		rswitch_modify(priv, TPEMIMC7(index), TPEMIMC7_GDICM, 0);
+	}
 
 	desc->die_dt = DT_EOS;
 
@@ -2799,7 +2822,7 @@ static int rswitch_txdmac_init(struct net_device *ndev,
 	}
 
 	ring_dma = rswitch_tx_ring_dma_addr(rdev->tx_ring);
-	rswitch_gwca_attach_ring(priv, rdev->tx_chain_index, ring_dma,
+	rswitch_gwca_attach_ring(priv, rdev->tx_chain_index, 0, ring_dma,
 			GWDCC_DQT |	/* transmit queue */
 			GWDCC_DCP(GWCA_IPV_NUM) | /* transmit priority */
 			GWDCC_EDE);	/* extended descriptor */
@@ -2842,7 +2865,7 @@ static int rswitch_rxdmac_init(struct net_device *ndev,
 	}
 
 	ring_dma = rswitch_rx_ring_dma_addr(rdev->rx_ring);
-	rswitch_gwca_attach_ring(priv, rdev->rx_chain_index, ring_dma,
+	rswitch_gwca_attach_ring(priv, rdev->rx_chain_index, 0, ring_dma,
 			GWDCC_EDE |	/* extended descriptor */
 			GWDCC_ETS);	/* ... with timestamps */
 
@@ -3009,7 +3032,8 @@ static irqreturn_t rswitch_irq(int irq, void *dev_id)
 	bool tx_irq, rx_irq;
 
 	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
-		irq_status[i] = rswitch_gwca_read(priv, GWDIS(i));
+		irq_status[i] = rswitch_gwca_read(priv, GWDIS(i)) &
+						~priv->gwca.external_irq[i];
 
 	rswitch_for_all_ports(priv, rdev) {
 		tx_irq = rswitch_check_ack_irq(priv, irq_status,
@@ -3025,6 +3049,19 @@ static irqreturn_t rswitch_irq(int irq, void *dev_id)
 	return ret;
 }
 
+static int rswitch_get_irq(struct rswitch_private *priv, unsigned int irq_index)
+{
+	char resource_name[16];
+	int len;
+
+	len = snprintf(resource_name, sizeof(resource_name),
+			"gwca%u_rxtx%u", GWCA_INDEX, irq_index);
+	if (WARN_ON(len >= sizeof(resource_name) - 1))
+		return -EIO;
+
+	return platform_get_irq_byname(priv->pdev, resource_name);
+}
+
 static int rswitch_request_irqs(struct rswitch_private *priv)
 {
 	int irq, err, i;
@@ -3033,10 +3070,11 @@ static int rswitch_request_irqs(struct rswitch_private *priv)
 	for (i = 0; i < RSWITCH_NUM_IRQ_REGS; i++)
 		rswitch_gwca_write(priv, GWDID(i), 0xffffffff);
 
-	/* FIXME: other queues */
-	irq = platform_get_irq_byname(priv->pdev, GWCA_IRQ_RESOURCE_NAME);
-	if (irq < 0)
+	irq = rswitch_get_irq(priv, 0);
+	if (irq < 0) {
+		err = irq;
 		goto out;
+	}
 
 	err = request_irq(irq, rswitch_irq, 0, GWCA_IRQ_NAME, priv);
 	if (err < 0)
