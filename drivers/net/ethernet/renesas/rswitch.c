@@ -1049,6 +1049,8 @@ struct rswitch_gwca {
 	DECLARE_BITMAP(used, RSWITCH_MAX_NUM_CHAINS);
 
 	u32 external_irq[RSWITCH_NUM_IRQ_REGS];
+
+	u8 mac_addr[ETH_ALEN];
 };
 
 struct rswitch_route_monitor {
@@ -2648,6 +2650,16 @@ static int rswitch_gwca_axi_ram_reset(struct rswitch_private *priv)
 	return rswitch_gwca_poll(priv, GWARIRM, GWARIRM_ARR, GWARIRM_ARR);
 }
 
+static void rswitch_gwca_write_mac_address(struct rswitch_private *priv)
+{
+	u8 *mac = &priv->gwca.mac_addr[0];
+	u32 gwmac0 = (mac[0] << 8) | mac[1];
+	u32 gwmac1 = (mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5];
+
+	rswitch_gwca_write(priv, GWMAC0, gwmac0);
+	rswitch_gwca_write(priv, GWMAC1, gwmac1);
+}
+
 static int rswitch_gwca_hw_init(struct rswitch_private *priv)
 {
 	int err;
@@ -2676,6 +2688,8 @@ static int rswitch_gwca_hw_init(struct rswitch_private *priv)
 
 	rswitch_gwca_write(priv, GWMDNC, (0xff << 8) | 0xff);
 	rswitch_gwca_write(priv, GWTPC0, GWTPC_PPPL(GWCA_IPV_NUM));
+
+	rswitch_gwca_write_mac_address(priv);
 
 	err = rswitch_gwca_change_mode(priv, GWMC_OPC_DISABLE);
 	if (err < 0)
@@ -4624,6 +4638,8 @@ static int rswitch_probe(struct platform_device *pdev)
 		if (ret < 0)
 			return ret;
 	}
+
+	eth_random_addr(priv->gwca.mac_addr);
 
 	INIT_LIST_HEAD(&priv->port_list);
 	ports_dn = of_get_child_by_name(priv->pdev->dev.of_node, "ports");
