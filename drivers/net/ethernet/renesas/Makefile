@@ -14,3 +14,5 @@ obj-$(CONFIG_RTSN) += rtsn.o
 obj-$(CONFIG_RENESAS_ETHER_SWITCH_LIB) += rswitch_lib.o
 obj-$(CONFIG_RENESAS_ETHER_SWITCH) += rswitch.o
 obj-$(CONFIG_RENESAS_ETHER_SWITCH_VPORT_LOCAL) += rswitch_vport_local.o
+obj-$(CONFIG_RENESAS_ETHER_SWITCH_XENBACK) += rswitch_vport_xenback.o
+obj-$(CONFIG_RENESAS_ETHER_SWITCH_XENFRONT) += rswitch_vport_xenfront.o

@@ -810,6 +810,8 @@ enum rswitch_gwca_mode {
 #define GWARIRM_ARIOG	BIT(0)
 #define GWARIRM_ARR	BIT(1)
 
+#define GWDCC_OSID_MASK		GENMASK(30, 28)
+#define GWDCC_OSID(osid)	FIELD_PREP(GWDCC_OSID_MASK, (osid))
 #define GWDCC_BALR		BIT(24)
 #define GWDCC_DCP_MASK		GENMASK(18, 16)
 #define GWDCC_DCP(prio)		FIELD_PREP(GWDCC_DCP_MASK, (prio))
@@ -1262,7 +1264,6 @@ static void rswitch_update_l3_offload(struct rswitch_private *priv);
 static void rmon_handle_l3_learning(struct rswitch_route_monitor *rmon,
 		struct sk_buff *skb);
 static void rmon_cleanup_ipv4_offloads_all(struct rswitch_route_monitor *rmon);
-
 
 static int num_etha_ports = 3;
 module_param(num_etha_ports, int, 0644);
@@ -5163,6 +5164,8 @@ int rswitch_vport_register(struct rswitch_vport_desc *rvpd)
 
 	if (rvpd->irq_index < 1 || rvpd->irq_index > 7)
 		return -EINVAL;
+	if (rvpd->osid > 7)
+		return -EINVAL;
 
 	if (rvpd->id == RSWITCH_VPORT_ID_DYNAMIC) {
 		if (priv->vport_ids == ~0UL)
@@ -5298,8 +5301,8 @@ no_ndev_register:
 	if (list_empty(&priv->vport_list))
 		rswitch_vport_cleanup_shared_rx_ring(priv);
 
-no_shared_rx_ring:
 no_fe_irq:
+no_shared_rx_ring:
 	ret2 = rswitch_gwca_detach_ring(priv, rvpb->rx_chain_index);
 	if (ret2)
 		dev_err(&priv->pdev->dev,
@@ -5379,12 +5382,14 @@ int rswitch_vport_attach_frontend_rings(struct rswitch_vport_desc *rvpd)
 
 	rswitch_gwca_attach_ring(priv, rvpd->rvpb->fe_tx_chain_index,
 			rvpd->irq_index, rvpd->fe_tx_ring_dma,
+			GWDCC_OSID(rvpd->osid) |
 			GWDCC_DQT |	/* transmit queue */
 			GWDCC_DCP(GWCA_IPV_NUM) | /* transmit priority */
 			GWDCC_EDE);	/* extended descriptor */
 
 	rswitch_gwca_attach_ring(priv, rvpd->rvpb->fe_rx_chain_index,
 			rvpd->irq_index, rvpd->fe_rx_ring_dma,
+			GWDCC_OSID(rvpd->osid) |
 			GWDCC_EDE |	/* extended descriptor */
 			GWDCC_ETS);	/* ... with timestamps */
 

@@ -66,6 +66,16 @@ config RENESAS_ETHER_SWITCH_VPORT_LOCAL
 	tristate "Local rswitch virtual port"
 	depends on RENESAS_ETHER_SWITCH
 
+config RENESAS_ETHER_SWITCH_XENBACK
+	tristate "Xen backend device for rswitch virtual port"
+	depends on RENESAS_ETHER_SWITCH && XEN_BACKEND
+
+config RENESAS_ETHER_SWITCH_XENFRONT
+	tristate "Xen frontend device for rswitch virtual port"
+	depends on XEN
+	select XEN_XENBUS_FRONTEND
+	select RENESAS_ETHER_SWITCH_LIB
+
 config RTSN
         tristate "Renesas Ethernet-TSN support"
         depends on ARCH_RENESAS || COMPILE_TEST

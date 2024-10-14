@@ -116,6 +116,9 @@ struct rswitch_vport_desc {
 	/* GWCA interrupt index to deliver frontend interrupts */
 	unsigned int irq_index;
 
+	/* OSID for GWCA operation with frontend chains */
+	unsigned int osid;
+
 	/* Rswitch register base, valid at frontend side
 	 * (can be set to NULL if frontend driver and rswitch driver are in the
 	 * same kernel) */
@@ -137,6 +140,9 @@ struct rswitch_vport_desc {
 
 	/* Rswitch lib's private pointer */
 	struct rswitch_vport_frontend *rvpf;
+
+	/* Frontend driver's private pointer */
+	void *fe_drv_priv;
 
 	/* Frontend Tx and Rx DMA addresses, accessible via the above OSID
 	 * - filled by lib, used by rswitch driver */
